@@ -1,13 +1,22 @@
 {
   "name": "XXII Chat",
   "short_name": "xxii",
-  "start_url": "/",
-  "scope": "/",
-  "display": "standalone",
-  "theme_color": "#009933",
-  "background_color": "#552277",
   "description": "XXII Distributed Chat Application",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#552277",
+  "theme_color": "#009933",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["social", "communication"],
   "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "favicon.png",
       "type": "image/png",
