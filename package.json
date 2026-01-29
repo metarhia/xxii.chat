@@ -29,9 +29,11 @@
     "eslint": "^9.39.1",
     "eslint-config-metarhia": "^9.1.5",
     "prettier": "^3.8.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "metarhia-build": "^0.0.0"
   },
   "dependencies": {
-    "impress": "^3.1.2"
+    "impress": "^3.1.2",
+    "metacom": "^3.2.6"
   }
 }
