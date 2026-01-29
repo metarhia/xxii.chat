@@ -8,15 +8,15 @@
 
 ```
 dnf -y install certbot
-certbot certonly --standalone -d www.domain.com -d domain.com -m your.name@domain.com --agree-tos --no-eff-email
-yes | cp /etc/letsencrypt/live/domain.com/fullchain.pem ~/domain.com/application/cert/cert.pem
-yes | cp /etc/letsencrypt/live/domain.com/privkey.pem ~/domain.com/application/cert/key.pem
+certbot certonly --standalone -d www.xxii.chat -d xxii.chat -m timur@metarhia.com --agree-tos --no-eff-email
+yes | cp /etc/letsencrypt/live/xxii.chat/fullchain.pem ~/xxii.chat/application/cert/cert.pem
+yes | cp /etc/letsencrypt/live/xxii.chat/privkey.pem ~/xxii.chat/application/cert/key.pem
 ```
 
 Or use impress web server for challenge exchange:
 
 ```
-certbot certonly --webroot -w ~/domain.com/application/static -d www.domain.com -d domain.com -m your.name@domain.com --agree-tos --no-eff-email
+certbot certonly --webroot -w ~/xxii.chat/application/static -d www.xxii.chat -d xxii.chat -m timur@metarhia.com --agree-tos --no-eff-email
 ```
 
 ## Self-signed (for testing)
