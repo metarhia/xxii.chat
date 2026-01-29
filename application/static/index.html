@@ -1,23 +1,31 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>XXII Chat</title>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="connect-src 'self' wss:; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com">
-  <link rel="stylesheet" href="/default.css">
-  <script src="/application.js" type="module"></script>
-  <meta name="HandheldFriendly" content="true" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="XXII Distributed Chat Application with offline support and real-time communication" />
+  <meta name="theme-color" content="#009933" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="mobile-web-app-status-bar-style" content="black" />
-  <link rel="apple-touch-icon-precomposed" href="/favicon.png" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no" />
-  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="XXII Chat" />
+  <title>XXII Chat</title>
+  <link rel="stylesheet" href="/default.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" type="image/vnd.microsoft.icon" />
-  <link rel="icon" href="/favicon.ico" type="image/vnd.microsoft.icon" />
   <link rel="apple-touch-icon" href="/favicon.png" />
   <link href='https://fonts.googleapis.com/css?family=Share+Tech+Mono' rel='stylesheet' type='text/css'>
 </head>
 <body>
-  <div>Place your app here...</div>
+  <div class="app-container">
+    <header class="app-header">
+      <h1>XXII Chat</h1>
+      <button id="install-btn" class="hidden">Install App</button>
+    </header>
+    <main class="app-main">
+      <div id="template-name">Progressive Web Application</div>
+    </main>
+  </div>
+  <script type="module" src="/domain.js"></script>
 </body>
 </html>

@@ -1,13 +1,87 @@
 * {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
   outline: none;
   cursor: default;
 }
+
 a, a * {
   cursor: pointer;
 }
+
 html, body {
-  font-family: 'Share Tech Mono';
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12pt;
   background: #000;
   color: #FFF;
+  min-height: 100vh;
+}
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background: rgba(0, 153, 51, 0.1);
+  border: 1px solid #009933;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.app-header h1 {
+  color: #009933;
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.app-main {
+  flex: 1;
+  background: rgba(85, 34, 119, 0.1);
+  border: 1px solid #552277;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+button {
+  background: #009933;
+  color: #FFF;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 20px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12pt;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+button:hover {
+  background: #007722;
+}
+
+button:disabled {
+  background: #555;
+  cursor: not-allowed;
+}
+
+button.hidden {
+  display: none;
+}
+
+#template-name {
+  color: #009933;
+  font-size: 1.2rem;
+  text-align: center;
 }
