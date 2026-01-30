@@ -1,3 +1,5 @@
+import { MetacomProxy } from './metacom.js';
+
 const CACHE = 'v1';
 
 const ASSETS = [
@@ -274,6 +276,7 @@ class ConnectionManager {
 }
 
 const connectionManager = new ConnectionManager();
+const metacomProxy = new MetacomProxy();
 
 self.addEventListener('install', (e) => cacheManager.handleInstall(e));
 self.addEventListener('fetch', (e) => cacheManager.handleFetch(e));
@@ -346,6 +349,10 @@ const events = {
 
 self.addEventListener('message', (event) => {
   const { type, data } = event.data;
+  if (type === 'metacom') {
+    metacomProxy.handleMessage(event);
+    return;
+  }
   const handler = events[type];
   if (handler) handler(event.source, data);
 });
