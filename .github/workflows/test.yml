@@ -23,6 +23,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
       - run: npm ci
-      - run: npm run dotest
+      - run: npm t
         env:
           MODE: test
