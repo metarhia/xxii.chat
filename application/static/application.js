@@ -1,4 +1,8 @@
 import { Emitter, generateId } from './metautil.js';
+import { Metacom } from './metacom.js';
+
+window.addEventListener('online', () => Metacom.online());
+window.addEventListener('offline', () => Metacom.offline());
 
 const getClientId = () => {
   let clientId = localStorage.getItem('clientId');
@@ -20,7 +24,11 @@ class Application extends Emitter {
     this.config = { ...CONFIG_DEFAULTS, ...config };
     this.state = new Map();
     this.worker = null;
-    this.clientId = getClientId();
+    const clientId = getClientId();
+    this.clientId = clientId;
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${protocol}//${location.host}`;
+    this.metacom = Metacom.create(url, { clientId });
     this.serviceWorker = this.config.serviceWorker;
     this.online = navigator.onLine;
     this.connected = false;
@@ -46,6 +54,7 @@ class Application extends Emitter {
       this.worker = registration.active;
       const data = { clientId: this.clientId };
       this.post({ type: 'connect', data });
+      this.#setupMetacom();
     });
     worker.addEventListener('message', (event) => {
       const { type, data } = event.data;
@@ -57,6 +66,24 @@ class Application extends Emitter {
     document.addEventListener('visibilitychange', () => {
       this.post({ type: 'ping' });
     });
+  }
+
+  async #setupMetacom() {
+    try {
+      await this.metacom.load('system');
+      const units = await this.metacom.api.system.introspect(['chat']);
+      this.emit('metacom-ready', { units });
+    } catch (err) {
+      this.emit('metacom-error', { error: err });
+      return;
+    }
+    try {
+      await this.metacom.load('chat');
+      const room = await this.metacom.api.chat.getRoom({ name: 'lobby' });
+      this.emit('metacom-room', { room });
+    } catch (err) {
+      this.emit('metacom-error', { error: err });
+    }
   }
 
   #setupNetworkStatus() {
