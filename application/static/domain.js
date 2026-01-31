@@ -16,9 +16,25 @@ class ChatApplication extends Application {
     this.on('network', () => {});
     this.on('install', () => {});
     this.on('installed', () => {});
+    this.on('metacom-ready', () => this.runE2ETest());
     document.addEventListener('visibilitychange', () => {});
     window.addEventListener('beforeunload', () => {});
     window.addEventListener('blur', () => {});
+  }
+
+  async runE2ETest() {
+    try {
+      const units = await this.metacom.api.system.introspect([]);
+      const ok = units && typeof units === 'object';
+      const msg = ok
+        ? 'E2E PASS: Tab -> SW Proxy -> WebSocket -> Server -> OK'
+        : 'E2E FAIL: invalid response';
+      console.log(msg, ok ? units : '');
+      this.emit('e2e-test', { pass: ok, units });
+    } catch (err) {
+      console.error('E2E FAIL: Tab -> SW Proxy -> WebSocket -> Server', err);
+      this.emit('e2e-test', { pass: false, error: err });
+    }
   }
 
   updateInterface() {
