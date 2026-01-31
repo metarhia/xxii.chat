@@ -185,97 +185,6 @@ class SyncManager {
 }
 
 const syncManager = new SyncManager();
-
-class ConnectionManager {
-  constructor() {
-    this.websocket = null;
-    this.connected = false;
-    this.connecting = false;
-    this.reconnectTimer = null;
-  }
-
-  static async broadcast(packet, exclude) {
-    const clients = await self.clients.matchAll({
-      includeUncontrolled: true,
-    });
-    for (const client of clients) {
-      if (client.id !== exclude) {
-        console.log('Broadcasting to:', client.id);
-        client.postMessage(packet);
-      }
-    }
-  }
-
-  send(packet) {
-    this.websocket.send(JSON.stringify(packet));
-  }
-
-  delivery(packet) {
-    if (this.connected) {
-      this.send(packet);
-    } else {
-      syncManager.queue.push(packet);
-      syncManager.saveState();
-    }
-  }
-
-  async connect() {
-    if (this.connected || this.connecting) return;
-    this.connecting = true;
-
-    const protocol = self.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${self.location.host}`;
-    this.websocket = new WebSocket(url);
-
-    this.websocket.onopen = () => {
-      this.connected = true;
-      this.connecting = false;
-      console.log('Service Worker: websocket connected');
-      const message = { type: 'status', data: { connected: true } };
-      ConnectionManager.broadcast(message);
-      this.flushQueue();
-    };
-
-    this.websocket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log('Service Worker: websocket message:', message);
-      const { type, data } = message;
-      if (type === 'delta') {
-        syncManager.lastDeltaId += data.length;
-        syncManager.applyDelta(data);
-      }
-      ConnectionManager.broadcast(message);
-    };
-
-    this.websocket.onclose = () => {
-      console.log('Service Worker: websocket disconnected');
-      if (this.connected) {
-        this.connected = false;
-        const message = { type: 'status', data: { connected: false } };
-        ConnectionManager.broadcast(message);
-      }
-      this.connecting = false;
-      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = setTimeout(() => this.connect(), 3000);
-    };
-  }
-
-  async flushQueue() {
-    if (!this.connected) return;
-    if (!syncManager.queue.length) return;
-    for (const packet of syncManager.queue) {
-      this.send(packet);
-    }
-    syncManager.queue = [];
-    await syncManager.saveState();
-  }
-
-  disconnect() {
-    if (this.connected) this.websocket.close();
-  }
-}
-
-const connectionManager = new ConnectionManager();
 const metacomProxy = new MetacomProxy();
 
 self.addEventListener('install', (e) => cacheManager.handleInstall(e));
@@ -295,6 +204,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       await activate();
+      await metacomProxy.open();
       await syncManager.loadState();
     })(),
   );
@@ -303,24 +213,21 @@ self.addEventListener('activate', (event) => {
 const events = {
   connect: (source, data) => {
     syncManager.clientId = data.clientId;
-    source.postMessage({
-      type: 'status',
-      data: { connected: connectionManager.connected },
-    });
+    const connected = metacomProxy.connection?.connected || false;
+    source.postMessage({ type: 'status', data: { connected } });
     const messages = syncManager.getMessages();
     console.log({ messages });
     source.postMessage({ type: 'state', data: messages });
   },
-  online: () => connectionManager.connect(),
-  offline: () => connectionManager.disconnect(),
+  online: () => metacomProxy.open(),
+  offline: () => metacomProxy.close(),
   delta: (source, data) => {
     syncManager.applyDelta(data);
     syncManager.lastDeltaId += data.length;
-    ConnectionManager.broadcast({ type: 'delta', data }, source.id);
-    connectionManager.delivery({ type: 'delta', data });
+    MetacomProxy.broadcast({ type: 'delta', data });
   },
   username: (source, data) => {
-    ConnectionManager.broadcast({ type: 'username', data }, source.id);
+    MetacomProxy.broadcast({ type: 'username', data });
   },
   ping: (source) => {
     source.postMessage({ type: 'pong' });
@@ -338,7 +245,7 @@ const events = {
     try {
       await syncManager.clearDatabase();
       const messages = syncManager.getMessages();
-      ConnectionManager.broadcast({ type: 'state', data: messages });
+      MetacomProxy.broadcast({ type: 'state', data: messages });
       source.postMessage({ type: 'databaseCleared' });
     } catch (error) {
       const data = { error: error.message };
