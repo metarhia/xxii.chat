@@ -16,6 +16,8 @@ const getClientId = () => {
 const CONFIG_DEFAULTS = {
   serviceWorker: './worker.js',
   pingInterval: 25000,
+  notificationTimeout: 3000,
+  syncTimeout: 2000,
 };
 
 class Application extends Emitter {
@@ -79,8 +81,8 @@ class Application extends Emitter {
     }
     try {
       await this.metacom.load('chat');
-      const room = await this.metacom.api.chat.getRoom({ name: 'lobby' });
-      this.emit('metacom-room', { room });
+      await this.metacom.api.chat.subscribe({ room: 'sync' });
+      this.emit('metacom-ready');
     } catch (err) {
       this.emit('metacom-error', { error: err });
     }
