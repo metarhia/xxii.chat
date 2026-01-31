@@ -1,5 +1,6 @@
 ({
   rooms: new Map(),
+  SYNC_ID: 'xxii-chat',
 
   getRoom(name) {
     let room = domain.chat.rooms.get(name);
@@ -19,5 +20,21 @@
     for (const client of room) {
       client.emit('chat/message', { room: name, message });
     }
+  },
+
+  async getStorage() {
+    const dataPath = node.path.join(process.cwd(), 'data', 'chat');
+    return await npm.globalstorage.open({ path: dataPath });
+  },
+
+  async load() {
+    const storage = await domain.chat.getStorage();
+    const data = await storage.get(domain.chat.SYNC_ID);
+    return data || { messages: {}, deltas: [] };
+  },
+
+  async save(data) {
+    const storage = await domain.chat.getStorage();
+    await storage.set(domain.chat.SYNC_ID, data);
   },
 });
