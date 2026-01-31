@@ -537,26 +537,6 @@ class EventTransport extends Metacom {
   }
 }
 
-class ProxyTransport extends WebsocketTransport {
-  constructor(url, options, proxy) {
-    super(url, options);
-    this.proxy = proxy;
-  }
-
-  async message(data) {
-    await super.message(data);
-    if (!this.proxy) return;
-    this.proxy.constructor.broadcast({ type: 'metacom', data });
-  }
-
-  async binary(input) {
-    await super.binary(input);
-    if (!this.proxy) return;
-    const data = await toByteView(input);
-    this.proxy.constructor.broadcast({ type: 'metacom', data });
-  }
-}
-
 class MetacomProxy extends Emitter {
   constructor(options = {}) {
     super(options);
@@ -583,8 +563,26 @@ class MetacomProxy extends Emitter {
       reconnectTimeout: this.reconnectTimeout,
       generateId: this.generateId,
     };
-    this.connection = new ProxyTransport(this.url, options, this);
+    this.connection = new WebsocketTransport(this.url, options);
+    this.connection.message = async (data) => {
+      MetacomProxy.broadcast({ type: 'metacom', data });
+    };
+    this.connection.binary = async (input) => {
+      const data = await toByteView(input);
+      MetacomProxy.broadcast({ type: 'metacom', data });
+    };
     return this.connection.open();
+  }
+
+  open() {
+    return this.ensureConnection();
+  }
+
+  close() {
+    if (this.connection) {
+      this.connection.close();
+      this.connection = null;
+    }
   }
 
   async handleMessage(event) {
