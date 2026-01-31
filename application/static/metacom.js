@@ -1,4 +1,4 @@
-import metautil from 'metautil.js';
+import * as metautil from './metautil.js';
 
 const { Emitter } = metautil;
 
@@ -492,7 +492,7 @@ class EventTransport extends Metacom {
       if (!serviceWorker) {
         return void reject(new Error('Service Worker not supported'));
       }
-      serviceWorker.ready().then((registration) => {
+      serviceWorker.ready.then((registration) => {
         this.worker = registration.active;
         this.messageHandler = (event) => {
           const { type, data } = event.data;
