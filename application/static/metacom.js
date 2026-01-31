@@ -1,4 +1,6 @@
-import { Emitter } from 'metautil.js';
+import metautil from 'metautil.js';
+
+const { Emitter } = metautil;
 
 const ID_LENGTH_BYTES = 1;
 
@@ -229,7 +231,7 @@ class Metacom extends Emitter {
     this.callTimeout = options.callTimeout || CALL_TIMEOUT;
     this.pingInterval = options.pingInterval || PING_INTERVAL;
     this.reconnectTimeout = options.reconnectTimeout || RECONNECT_TIMEOUT;
-    this.generateId = options.generateId || (() => crypto.randomUUID());
+    this.generateId = options.generateId || metautil.generateId;
     this.ping = null;
     this.open();
   }
@@ -382,10 +384,12 @@ class WebsocketTransport extends Metacom {
     this.active = true;
     this.socket = socket;
     Metacom.connections.add(this);
+
     socket.addEventListener('message', ({ data }) => {
       if (typeof data === 'string') this.message(data);
       else this.binary(data);
     });
+
     socket.addEventListener('close', () => {
       this.opening = null;
       this.connected = false;
@@ -394,10 +398,12 @@ class WebsocketTransport extends Metacom {
         if (this.active) this.open();
       }, this.reconnectTimeout);
     });
+
     socket.addEventListener('error', (err) => {
       this.emit('error', err);
       socket.close();
     });
+
     if (this.pingInterval) {
       this.ping = setInterval(() => {
         if (this.active) {
@@ -406,6 +412,7 @@ class WebsocketTransport extends Metacom {
         }
       }, this.pingInterval);
     }
+
     this.opening = new Promise((resolve) => {
       socket.addEventListener('open', () => {
         this.opening = null;
@@ -468,7 +475,7 @@ class EventTransport extends Metacom {
   constructor(url, options = {}) {
     super(url, options);
     this.worker = null;
-    this.clientId = options.clientId || crypto.randomUUID();
+    this.clientId = options.clientId || metautil.generateId();
     this.messageHandler = null;
   }
 
@@ -478,10 +485,12 @@ class EventTransport extends Metacom {
     this.active = true;
     Metacom.connections.add(this);
     this.opening = new Promise((resolve, reject) => {
-      const { serviceWorker } = navigator.serviceWorker;
+      if (typeof navigator === 'undefined') {
+        return void reject(new Error('Navigator not supported'));
+      }
+      const { serviceWorker } = navigator;
       if (!serviceWorker) {
-        reject(new Error('Service Worker not supported'));
-        return;
+        return void reject(new Error('Service Worker not supported'));
       }
       serviceWorker.ready().then((registration) => {
         this.worker = registration.active;
@@ -515,22 +524,16 @@ class EventTransport extends Metacom {
   write(data) {
     if (!this.worker) return;
     this.lastActivity = Date.now();
-    this.worker.postMessage({
-      type: 'metacom',
-      clientId: this.clientId,
-      data,
-    });
+    const { clientId } = this;
+    this.worker.postMessage({ type: 'metacom', clientId, data });
   }
 
   send(data) {
     if (!this.worker) return;
     this.lastActivity = Date.now();
     const payload = JSON.stringify(data);
-    this.worker.postMessage({
-      type: 'metacom',
-      clientId: this.clientId,
-      data: payload,
-    });
+    const { clientId } = this;
+    this.worker.postMessage({ type: 'metacom', clientId, data: payload });
   }
 }
 
@@ -563,7 +566,7 @@ class MetacomProxy extends Emitter {
     this.callTimeout = options.callTimeout || CALL_TIMEOUT;
     this.pingInterval = options.pingInterval || PING_INTERVAL;
     this.reconnectTimeout = options.reconnectTimeout || RECONNECT_TIMEOUT;
-    this.generateId = options.generateId || (() => crypto.randomUUID());
+    this.generateId = options.generateId || metautil.generateId;
   }
 
   async ensureConnection() {
@@ -596,16 +599,12 @@ class MetacomProxy extends Emitter {
   }
 
   static async broadcast(message) {
-    try {
-      const clients = await self.clients.matchAll({
-        includeUncontrolled: true,
-        type: 'window',
-      });
-      for (const client of clients) {
-        client.postMessage(message);
-      }
-    } catch (error) {
-      console.error('Error broadcasting to clients:', error);
+    const clients = await self.clients.matchAll({
+      includeUncontrolled: true,
+      type: 'window',
+    });
+    for (const client of clients) {
+      client.postMessage(message);
     }
   }
 }
