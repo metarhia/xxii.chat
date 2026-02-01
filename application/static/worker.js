@@ -224,7 +224,7 @@ const events = {
   delta: (source, data) => {
     syncManager.applyDelta(data);
     syncManager.lastDeltaId += data.length;
-    MetacomProxy.broadcast({ type: 'delta', data });
+    MetacomProxy.broadcast({ type: 'delta', data }, source);
   },
   username: (source, data) => {
     MetacomProxy.broadcast({ type: 'username', data });

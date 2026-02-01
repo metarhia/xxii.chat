@@ -501,9 +501,10 @@ class EventTransport extends Metacom {
             else this.binary(data);
           }
         };
+        serviceWorker.addEventListener('message', this.messageHandler);
+        this.connected = true;
+        resolve();
       });
-      serviceWorker.addEventListener('message', this.messageHandler);
-      resolve();
     });
     return this.opening;
   }
@@ -596,12 +597,13 @@ class MetacomProxy extends Emitter {
     this.connection.write(data);
   }
 
-  static async broadcast(message) {
+  static async broadcast(message, excludeClient) {
     const clients = await self.clients.matchAll({
       includeUncontrolled: true,
       type: 'window',
     });
     for (const client of clients) {
+      if (excludeClient && client.id === excludeClient.id) continue;
       client.postMessage(message);
     }
   }

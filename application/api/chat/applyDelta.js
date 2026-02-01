@@ -2,7 +2,8 @@
   access: 'public',
 
   method: async ({ deltas, room }) => {
-    await domain.sync.applyDelta(deltas, room, context.client);
+    const excludeClient = context?.client;
+    await domain.sync.applyDelta(deltas, room, excludeClient);
     return true;
   },
 });
