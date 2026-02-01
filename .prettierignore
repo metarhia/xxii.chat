@@ -1,3 +1,8 @@
-application/tasks/
+/application/tasks
+/application/data
+*.log
+*.done
+*.pem
+.DS_Store
 package-lock.json
 package.json
