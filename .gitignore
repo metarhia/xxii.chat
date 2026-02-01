@@ -1,8 +1,8 @@
 node_modules
 /log/
 /application/tasks
+/application/data
 *.log
 *.done
 *.pem
 .DS_Store
-data/
