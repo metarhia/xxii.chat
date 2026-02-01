@@ -211,7 +211,7 @@ class ChatApplication extends Application {
     this.post({ type: 'delta', data: deltas });
     if (this.connected) {
       try {
-        await this.metacom.api.chat.applyDelta({ deltas });
+        await this.metacom.api.chat.applyDelta({ deltas, room: 'sync' });
       } catch (err) {
         this.logger.log('Server sync failed:', err);
       }
@@ -289,7 +289,9 @@ class ChatApplication extends Application {
         }
         this.post({ type: 'delta', data: [delta] });
         if (this.metacom?.api?.chat && this.connected) {
-          this.metacom.api.chat.applyDelta({ deltas: [delta] }).catch(() => {});
+          this.metacom.api.chat
+            .applyDelta({ deltas: [delta], room: 'sync' })
+            .catch(() => {});
         }
         this.logger.log('Added reaction:', reaction, 'to message:', messageId);
       });
