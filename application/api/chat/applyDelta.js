@@ -1,8 +1,8 @@
 ({
   access: 'public',
 
-  method: async ({ deltas }) => {
-    await domain.sync.applyDelta(deltas);
+  method: async ({ deltas, room }) => {
+    await domain.sync.applyDelta(deltas, room, context.client);
     return true;
   },
 });
