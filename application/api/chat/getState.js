@@ -1,8 +1,8 @@
 ({
   access: 'public',
 
-  method: async () => {
-    const state = await domain.sync.getState();
+  method: async ({ room }) => {
+    const state = await domain.sync.getState(room);
     return { state };
   },
 });

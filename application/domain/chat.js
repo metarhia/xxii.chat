@@ -1,17 +1,17 @@
 ({
   rooms: new Map(),
-  SYNC_ID: 'xxii-chat',
 
-  getRoom(name) {
+  async getRoom(name) {
     let room = domain.chat.rooms.get(name);
     if (room) return room;
+    const id = 'room:' + name;
+    const exists = await db.globalstorage.has(id);
+    if (!exists) {
+      await db.globalstorage.set(id, { name, createdAt: Date.now() });
+    }
     room = new Set();
     domain.chat.rooms.set(name, room);
     return room;
-  },
-
-  dropRoom(name) {
-    domain.chat.rooms.delete(name);
   },
 
   send(name, message) {
@@ -22,19 +22,42 @@
     }
   },
 
-  async getStorage() {
-    const dataPath = node.path.join(process.cwd(), 'data', 'chat');
-    return await npm.globalstorage.open({ path: dataPath });
+  async getMessage(id) {
+    return await db.globalstorage.get(id);
   },
 
-  async load() {
-    const storage = await domain.chat.getStorage();
-    const data = await storage.get(domain.chat.SYNC_ID);
-    return data || { messages: {}, deltas: [] };
+  async setMessage(data) {
+    const exists = await db.globalstorage.has(data.id);
+    if (exists) return;
+    await db.globalstorage.set(data.id, data);
   },
 
-  async save(data) {
-    const storage = await domain.chat.getStorage();
-    await storage.set(domain.chat.SYNC_ID, data);
+  async updateMessage(id, delta) {
+    await db.globalstorage.update(id, delta);
+  },
+
+  async getMessageIds(room) {
+    const key = 'room:' + room + ':messages';
+    const record = await db.globalstorage.get(key);
+    return record?.ids ?? [];
+  },
+
+  async addMessageId(room, id) {
+    const key = 'room:' + room + ':messages';
+    const ids = await domain.chat.getMessageIds(room);
+    if (ids.includes(id)) return;
+    ids.push(id);
+    await db.globalstorage.set(key, { ids });
+  },
+
+  async getDeltas() {
+    const record = await db.globalstorage.get('sync:deltas');
+    return record?.deltas ?? [];
+  },
+
+  async appendDeltas(deltas) {
+    const existing = await domain.chat.getDeltas();
+    const deltasRecord = { deltas: existing.concat(deltas) };
+    await db.globalstorage.set('sync:deltas', deltasRecord);
   },
 });
