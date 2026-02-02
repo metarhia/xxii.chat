@@ -15,7 +15,6 @@ const getClientId = () => {
 
 const CONFIG_DEFAULTS = {
   serviceWorker: './worker.js',
-  pingInterval: 25000,
   notificationTimeout: 3000,
   syncTimeout: 2000,
 };
@@ -26,11 +25,8 @@ class Application extends Emitter {
     this.config = { ...CONFIG_DEFAULTS, ...config };
     this.state = new Map();
     this.worker = null;
-    const clientId = getClientId();
-    this.clientId = clientId;
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${location.host}`;
-    this.metacom = Metacom.create(url, { clientId });
+    this.clientId = getClientId();
+    this.metacom = null;
     this.serviceWorker = this.config.serviceWorker;
     this.online = navigator.onLine;
     this.connected = false;
@@ -48,56 +44,40 @@ class Application extends Emitter {
   }
 
   #setupServiceWorker() {
-    const worker = navigator.serviceWorker;
-    worker.register(this.serviceWorker, { type: 'module' });
-    const ping = () => this.post({ type: 'ping' });
-    worker.ready.then((registration) => {
-      setInterval(ping, this.config.pingInterval);
+    const { serviceWorker } = navigator;
+    serviceWorker.register(this.serviceWorker, { type: 'module' });
+    serviceWorker.ready.then((registration) => {
       this.worker = registration.active;
-      const data = { clientId: this.clientId };
-      this.post({ type: 'connect', data });
       this.#setupMetacom();
     });
-    worker.addEventListener('message', (event) => {
+    serviceWorker.addEventListener('message', (event) => {
       const { type, data } = event.data;
       this.emit(type, data);
-    });
-    this.on('status', (data) => {
-      this.connected = data.connected;
-    });
-    document.addEventListener('visibilitychange', () => {
-      this.post({ type: 'ping' });
     });
   }
 
   async #setupMetacom() {
-    try {
-      await this.metacom.load('system');
-      const units = await this.metacom.api.system.introspect(['chat']);
-      this.emit('metacom-ready', { units });
-    } catch (err) {
-      this.emit('metacom-error', { error: err });
-      return;
-    }
-    try {
-      await this.metacom.load('chat');
-      await this.metacom.api.chat.subscribe({ room: 'sync' });
-      this.emit('metacom-ready');
-    } catch (err) {
-      this.emit('metacom-error', { error: err });
-    }
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${protocol}//${location.host}`;
+    const { clientId, worker } = this;
+    console.log({ clientId, worker });
+    this.metacom = Metacom.create(url, { clientId, worker });
+
+    await this.metacom.load(['system', 'chat']);
+    await this.metacom.api.chat.subscribe({ room: 'sync' });
+    this.connected = true;
+    this.emit('status', { connected: true });
+    this.emit('metacom-ready');
   }
 
   #setupNetworkStatus() {
     window.addEventListener('online', () => {
       this.online = true;
-      this.post({ type: 'online' });
       this.emit('network', { online: true });
     });
 
     window.addEventListener('offline', () => {
       this.online = false;
-      this.post({ type: 'offline' });
       this.emit('network', { online: false });
     });
   }

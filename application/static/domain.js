@@ -73,12 +73,9 @@ class ChatApplication extends Application {
     this.on('install', () => this.showInstallButton(true));
     this.on('installed', () => this.showInstallButton(false));
     this.on('status', (data) => this.onStatus(data));
-    this.on('state', (data) => this.onState(data));
-    this.on('username', (data) => this.onUsername(data));
     this.on('cacheUpdated', () => this.onCacheUpdated());
     this.on('cacheUpdateFailed', (data) => this.onCacheUpdateFailed(data));
     this.on('databaseCleared', () => this.onDatabaseCleared());
-    this.on('delta', (data) => this.onDelta(data));
     this.on('metacom-ready', () => this.setupMetacomEvents());
 
     document.addEventListener('visibilitychange', () => {
@@ -99,11 +96,6 @@ class ChatApplication extends Application {
     const username = this.usernameInput?.value?.trim();
     if (!username || username === this.username) return;
     this.username = username;
-    if (this.syncTimeout) clearTimeout(this.syncTimeout);
-    this.syncTimeout = setTimeout(() => {
-      this.post({ type: 'username', data: this.username });
-      this.logger.log('Username auto-synced:', this.username);
-    }, this.config.syncTimeout);
   }
 
   onStatus(data) {
@@ -115,24 +107,6 @@ class ChatApplication extends Application {
       this.logger.log('Websocket disconnected');
       this.showNotification('Websocket disconnected', 'warning');
     }
-  }
-
-  onState(data) {
-    this.state.clear();
-    if (data && typeof data === 'object') {
-      for (const [key, value] of Object.entries(data)) {
-        this.state.set(key, value);
-      }
-    }
-    this.renderChatMessages();
-    this.logger.log('State updated from worker');
-  }
-
-  onUsername(data) {
-    this.username = data ?? '';
-    if (this.usernameInput) this.usernameInput.value = this.username;
-    this.logger.log('Username updated from other tab:', data);
-    this.showNotification('Username updated from other tab: ' + data);
   }
 
   onCacheUpdated() {
@@ -154,8 +128,6 @@ class ChatApplication extends Application {
   }
 
   onDatabaseCleared() {
-    this.state.clear();
-    this.renderChatMessages();
     this.logger.log('Database cleared successfully');
     this.showNotification('Database cleared successfully!', 'success');
     if (this.clearMessagesBtn) {
@@ -208,20 +180,15 @@ class ChatApplication extends Application {
     }
     const delta = this.addMessage(content);
     const deltas = [delta];
-    this.post({ type: 'delta', data: deltas });
-    if (this.connected) {
-      try {
-        await this.metacom.api.chat.applyDelta({ deltas, room: 'sync' });
-      } catch (err) {
-        this.logger.log('Server sync failed:', err);
-      }
+    this.renderChatMessages();
+    try {
+      await this.metacom.api.chat.applyDelta({ deltas, room: 'sync' });
       this.logger.log('Sent message:', content);
       this.showNotification('Message sent!', 'success');
-    } else {
-      this.logger.log('Message queued (offline):', content);
-      this.showNotification('Message queued - will send when online', 'info');
+    } catch (err) {
+      this.logger.log('Failed to send message:', err.message);
+      this.showNotification('Failed to send message', 'error');
     }
-    this.renderChatMessages();
   }
 
   renderChatMessages() {
@@ -277,7 +244,7 @@ class ChatApplication extends Application {
     if (!reactionBtns) return;
     for (const btn of reactionBtns) {
       const { messageId, reaction } = btn.dataset;
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const record = { messageId, reaction };
         const delta = { strategy: 'counter', entity: 'reaction', record };
         const message = this.state.get(messageId);
@@ -287,25 +254,18 @@ class ChatApplication extends Application {
           message.reactions[reaction] = count + 1;
           this.renderChatMessages();
         }
-        this.post({ type: 'delta', data: [delta] });
-        if (this.metacom?.api?.chat && this.connected) {
-          this.metacom.api.chat
-            .applyDelta({ deltas: [delta], room: 'sync' })
-            .catch(() => {});
+        try {
+          await this.metacom.api.chat.applyDelta({
+            deltas: [delta],
+            room: 'sync',
+          });
+          const msg = `${reaction} to message:${messageId}`;
+          this.logger.log('Added reaction:', msg);
+        } catch (err) {
+          this.logger.log('Failed to add reaction:', err.message);
         }
-        this.logger.log('Added reaction:', reaction, 'to message:', messageId);
       });
     }
-  }
-
-  updateCache() {
-    this.logger.log('Requesting cache update...');
-    if (this.updateCacheBtn) {
-      this.updateCacheBtn.disabled = true;
-      this.updateCacheBtn.textContent = 'Updating...';
-    }
-    this.showNotification('Cache update requested', 'info');
-    this.post({ type: 'updateCache' });
   }
 
   showInstallButton(visible = true) {

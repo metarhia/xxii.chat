@@ -211,27 +211,6 @@ self.addEventListener('activate', (event) => {
 });
 
 const events = {
-  connect: (source, data) => {
-    syncManager.clientId = data.clientId;
-    const connected = metacomProxy.connection?.connected || false;
-    source.postMessage({ type: 'status', data: { connected } });
-    const messages = syncManager.getMessages();
-    console.log({ messages });
-    source.postMessage({ type: 'state', data: messages });
-  },
-  online: () => metacomProxy.open(),
-  offline: () => metacomProxy.close(),
-  delta: (source, data) => {
-    syncManager.applyDelta(data);
-    syncManager.lastDeltaId += data.length;
-    MetacomProxy.broadcast({ type: 'delta', data }, source);
-  },
-  username: (source, data) => {
-    MetacomProxy.broadcast({ type: 'username', data });
-  },
-  ping: (source) => {
-    source.postMessage({ type: 'pong' });
-  },
   updateCache: async (source) => {
     try {
       await cacheManager.update();
@@ -244,8 +223,6 @@ const events = {
   clearDatabase: async (source) => {
     try {
       await syncManager.clearDatabase();
-      const messages = syncManager.getMessages();
-      MetacomProxy.broadcast({ type: 'state', data: messages });
       source.postMessage({ type: 'databaseCleared' });
     } catch (error) {
       const data = { error: error.message };
@@ -255,11 +232,8 @@ const events = {
 };
 
 self.addEventListener('message', (event) => {
+  console.log({ serviceWorkerMessage: event });
   const { type, data } = event.data;
-  if (type === 'metacom') {
-    metacomProxy.handleMessage(event);
-    return;
-  }
   const handler = events[type];
   if (handler) handler(event.source, data);
 });
