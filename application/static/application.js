@@ -1,4 +1,4 @@
-import { Emitter, generateId } from './metautil.js';
+import { Emitter, generateUUID } from './metautil.js';
 import { Metacom } from './metacom.js';
 
 window.addEventListener('online', () => Metacom.online());
@@ -7,7 +7,7 @@ window.addEventListener('offline', () => Metacom.offline());
 const getClientId = () => {
   let clientId = localStorage.getItem('clientId');
   if (!clientId) {
-    clientId = generateId();
+    clientId = generateUUID();
     localStorage.setItem('clientId', clientId);
   }
   return clientId;
@@ -126,4 +126,4 @@ class Application extends Emitter {
   }
 }
 
-export { Application, generateId };
+export { Application };

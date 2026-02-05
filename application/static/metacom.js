@@ -1,6 +1,4 @@
-import * as metautil from './metautil.js';
-
-const { Emitter } = metautil;
+import { Emitter, generateUUID, jsonParse } from './metautil.js';
 
 // chunks-browser.js
 
@@ -29,17 +27,6 @@ const chunkDecode = (chunk) => {
   return { id, payload };
 };
 
-export { chunkEncode, chunkDecode };
-
-const parsePacket = (data) => {
-  if (typeof data !== 'string') return null;
-  try {
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-};
-
 // streams.js
 
 const PUSH_EVENT = Symbol();
@@ -49,23 +36,25 @@ const MAX_LISTENERS = 10;
 const MAX_HIGH_WATER_MARK = 1000;
 
 class MetaReadable extends Emitter {
+  queue = [];
+  streaming = true;
+  status = 'active';
+  bytesRead = 0;
+  highWaterMark = DEFAULT_HIGH_WATER_MARK;
+
   constructor(id, name, size, options = {}) {
-    super(options);
+    super();
     this.id = id;
     this.name = name;
     this.size = size;
-    this.highWaterMark = options.highWaterMark || DEFAULT_HIGH_WATER_MARK;
-    this.queue = [];
-    this.streaming = true;
-    this.status = 'active';
-    this.bytesRead = 0;
+    const { highWaterMark } = options;
+    if (highWaterMark) this.highWaterMark = highWaterMark;
   }
 
   async push(data) {
-    if (this.queue.length > this.highWaterMark) {
+    while (this.queue.length > this.highWaterMark) {
       this.checkStreamLimits();
       await this.waitEvent(PULL_EVENT);
-      return this.push(data);
     }
     this.queue.push(data);
     if (this.queue.length === 1) this.emit(PUSH_EVENT);
@@ -87,7 +76,7 @@ class MetaReadable extends Emitter {
   }
 
   pipe(writable) {
-    this.finalize(writable);
+    this.finalize(writable).catch((error) => this.emit('error', error));
     return writable;
   }
 
@@ -187,8 +176,6 @@ class MetaWritable extends Emitter {
   }
 }
 
-export { MetaReadable, MetaWritable };
-
 // metacom.js
 
 const CALL_TIMEOUT = 7 * 1000;
@@ -209,14 +196,19 @@ class MetacomError extends Error {
   }
 }
 
-class MetacomUnit extends Emitter {
-  emit(...args) {
-    super.emit('*', ...args);
-    super.emit(...args);
+class ClientTransport extends Emitter {
+  active = false;
+  connected = false;
+  opening = null;
+
+  constructor(url) {
+    super();
+    this.url = url;
   }
 
-  post(...args) {
-    super.emit(...args);
+  send(data) {
+    const payload = JSON.stringify(data);
+    this.write(payload);
   }
 }
 
@@ -227,46 +219,136 @@ class Metacom extends Emitter {
   static online() {
     Metacom.isOnline = true;
     for (const connection of Metacom.connections) {
-      if (!connection.connected) connection.open();
+      connection.transport.online?.();
+      if (!connection.connected && connection.active) {
+        connection.open().catch((error) => connection.emit('error', error));
+      }
     }
   }
 
   static offline() {
     Metacom.isOnline = false;
+    for (const connection of Metacom.connections) {
+      connection.transport.offline?.();
+    }
   }
 
   static initialize() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', Metacom.online);
       window.addEventListener('offline', Metacom.offline);
-    } else if (typeof self !== 'undefined') {
+      return;
+    }
+    if (typeof self !== 'undefined') {
       self.addEventListener('online', Metacom.online);
       self.addEventListener('offline', Metacom.offline);
     }
   }
 
-  constructor(url, options = {}) {
-    super();
-    this.url = url;
-    this.socket = null;
-    this.api = {};
-    this.calls = new Map();
-    this.streams = new Map();
-    this.active = false;
-    this.connected = false;
-    this.opening = null;
-    this.lastActivity = Date.now();
-    this.callTimeout = options.callTimeout || CALL_TIMEOUT;
-    this.reconnectTimeout = options.reconnectTimeout || RECONNECT_TIMEOUT;
-    this.generateId = options.generateId || metautil.generateId;
-    this.open(options);
+  transport = null;
+  api = {};
+  calls = new Map();
+  streams = new Map();
+  callTimeout = CALL_TIMEOUT;
+  reconnectTimeout = RECONNECT_TIMEOUT;
+  reconnectTimer = null;
+  openOptions = {};
+
+  get active() {
+    return this.transport.active;
   }
 
-  static create(url, options) {
-    const { transport } = Metacom;
-    if (options.worker) return transport.event.getInstance(url, options);
-    const Transport = url.startsWith('ws') ? transport.ws : transport.http;
-    return new Transport(url, options);
+  get connected() {
+    return this.transport.connected;
+  }
+
+  get opening() {
+    return this.transport.opening;
+  }
+
+  constructor(url, transport, options = {}) {
+    super();
+    const { callTimeout, reconnectTimeout } = options;
+    if (callTimeout) this.callTimeout = callTimeout;
+    if (reconnectTimeout) this.reconnectTimeout = reconnectTimeout;
+    this.url = url;
+    this.transport = transport;
+    this.bindTransport();
+  }
+
+  static create(url, options = {}) {
+    if (options.worker) {
+      const transport = Metacom.transport.event.getInstance(url);
+      const metacom = new Metacom(url, transport, options);
+      metacom.open(options).catch((error) => metacom.emit('error', error));
+      return metacom;
+    }
+
+    const isHttp = url.startsWith('http');
+    const Transport = isHttp ? Metacom.transport.http : Metacom.transport.ws;
+    const transport = new Transport(url);
+    const metacom = new Metacom(url, transport, options);
+    metacom.open(options).catch((error) => metacom.emit('error', error));
+    return metacom;
+  }
+
+  bindTransport() {
+    this.transport.on('open', () => {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.emit('open');
+    });
+
+    this.transport.on('close', () => {
+      this.emit('close');
+      this.scheduleReconnect();
+    });
+
+    this.transport.on('error', (error) => {
+      this.emit('error', error);
+    });
+
+    this.transport.on('message', (data) => {
+      const isBinary = typeof data !== 'string';
+      const processed = isBinary ? this.binary(data) : this.handlePacket(data);
+      processed.catch((error) => this.emit('error', error));
+    });
+  }
+
+  scheduleReconnect() {
+    if (!this.active) return;
+    if (this.connected) return;
+    if (!Metacom.isOnline) return;
+    if (this.reconnectTimer) return;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.active || this.connected) return;
+      this.open().catch((error) => this.emit('error', error));
+    }, this.reconnectTimeout);
+  }
+
+  open(options = this.openOptions) {
+    this.openOptions = { ...this.openOptions, ...options };
+    this.transport.active = true;
+    Metacom.connections.add(this);
+    if (!Metacom.isOnline) return Promise.resolve();
+    return this.transport.open(this.openOptions);
+  }
+
+  close() {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    Metacom.connections.delete(this);
+    this.transport.close();
+  }
+
+  write(data) {
+    this.transport.write(data);
+  }
+
+  send(data) {
+    this.transport.send(data);
   }
 
   getStream(id) {
@@ -276,9 +358,8 @@ class Metacom extends Emitter {
   }
 
   createStream(name, size) {
-    const id = this.generateId();
-    const transport = this;
-    return new MetaWritable(id, name, size, transport);
+    const id = generateUUID();
+    return new MetaWritable(id, name, size, this);
   }
 
   createBlobUploader(blob) {
@@ -288,23 +369,22 @@ class Metacom extends Emitter {
     return {
       id: consumer.id,
       upload: async () => {
-        const reader = blob.stream().getReader();
-        let chunk;
-        while (!(chunk = await reader.read()).done) {
-          consumer.write(chunk.value);
+        for await (const chunk of blob.stream()) {
+          consumer.write(chunk);
         }
         consumer.end();
       },
     };
   }
 
-  async message(data) {
-    this.lastActivity = Date.now();
-    const packet = parsePacket(data);
+  async handlePacket(data) {
+    const packet = jsonParse(data);
     if (!packet) throw new Error('Invalid JSON packet');
     const { type, id, name } = packet;
     if (type === 'event') {
-      const [unit, eventName] = name.split('/');
+      const parts = name.split('/');
+      const unit = parts[0];
+      const eventName = parts[1];
       const metacomUnit = this.api[unit];
       if (metacomUnit) metacomUnit.emit(eventName, packet.data);
       return;
@@ -313,43 +393,61 @@ class Metacom extends Emitter {
     if (type === 'callback') {
       const promised = this.calls.get(id);
       if (!promised) throw new Error(`Callback ${id} not found`);
-      const [resolve, reject, timeout] = promised;
+      const resolve = promised[0];
+      const reject = promised[1];
+      const timeout = promised[2];
       this.calls.delete(id);
       clearTimeout(timeout);
       if (packet.error) {
         return void reject(new MetacomError(packet.error));
       }
       resolve(packet.result);
-    } else if (type === 'stream') {
-      const { name, size, status } = packet;
-      const stream = this.streams.get(id);
-      if (name && typeof name === 'string' && Number.isSafeInteger(size)) {
-        if (stream) {
-          throw new Error(`Stream ${name} is already initialized`);
-        } else {
-          const stream = new MetaReadable(id, name, size);
-          this.streams.set(id, stream);
-        }
-      } else if (!stream) {
-        throw new Error(`Stream ${id} is not initialized`);
-      } else if (status === 'end') {
-        await stream.close();
-        this.streams.delete(id);
-      } else if (status === 'terminate') {
-        await stream.terminate();
-        this.streams.delete(id);
-      } else {
-        throw new Error('Stream packet structure error');
-      }
+      return;
     }
+    if (type !== 'stream') return;
+    const { size, status } = packet;
+    const stream = this.streams.get(id);
+    if (status === undefined) {
+      if (typeof name !== 'string') {
+        throw new Error('Stream name must be string');
+      }
+      if (name.length === 0) {
+        throw new Error('Stream name must be non-empty');
+      }
+      if (!Number.isSafeInteger(size)) {
+        throw new Error('Stream size must be safe integer');
+      }
+      if (stream) {
+        throw new Error(`Stream ${name} is already initialized`);
+      }
+      const readableStream = new MetaReadable(id, name, size);
+      this.streams.set(id, readableStream);
+      return;
+    }
+    if (!stream) {
+      throw new Error(`Stream ${id} is not initialized`);
+    }
+    if (status === 'end') {
+      await stream.close();
+      this.streams.delete(id);
+      return;
+    }
+    if (status === 'terminate') {
+      await stream.terminate();
+      this.streams.delete(id);
+      return;
+    }
+    throw new Error('Stream packet structure error');
   }
 
   async binary(input) {
     const byteView = await toByteView(input);
     const { id, payload } = chunkDecode(byteView);
     const stream = this.streams.get(id);
-    if (stream) await stream.push(payload);
-    else throw new Error(`Stream ${id} is not initialized`);
+    if (!stream) {
+      throw new Error(`Stream ${id} is not initialized`);
+    }
+    await stream.push(payload);
   }
 
   async load(...units) {
@@ -358,7 +456,7 @@ class Metacom extends Emitter {
     const available = Object.keys(introspection);
     for (const unit of units) {
       if (!available.includes(unit)) continue;
-      const methods = new MetacomUnit();
+      const methods = new Emitter();
       const instance = introspection[unit];
       const request = this.scaffold(unit);
       const methodNames = Object.keys(instance);
@@ -372,17 +470,16 @@ class Metacom extends Emitter {
   scaffold(unit, ver) {
     const createMethod = (methodName) => {
       const method = async (args = {}) => {
-        const id = this.generateId();
-        const unitName = unit + (ver ? '.' + ver : '');
-        const target = unitName + '/' + methodName;
+        const id = generateUUID();
+        const unitName = `${unit}${ver ? `.${ver}` : ''}`;
+        const target = `${unitName}/${methodName}`;
         if (this.opening) await this.opening;
         const packet = { type: 'call', id, method: target, args };
         return new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
-            if (this.calls.has(id)) {
-              this.calls.delete(id);
-              reject(new Error('Request timeout'));
-            }
+            if (!this.calls.has(id)) return;
+            this.calls.delete(id);
+            reject(new Error('Request timeout'));
           }, this.callTimeout);
           this.calls.set(id, [resolve, reject, timeout]);
           this.send(packet);
@@ -394,31 +491,28 @@ class Metacom extends Emitter {
   }
 }
 
-class WebsocketTransport extends Metacom {
+class ClientWsTransport extends ClientTransport {
+  socket = null;
+
   async open() {
     if (this.opening) return this.opening;
     if (this.connected) return Promise.resolve();
     const socket = new WebSocket(this.url);
     this.active = true;
     this.socket = socket;
-    Metacom.connections.add(this);
-
     socket.addEventListener('message', ({ data }) => {
-      if (typeof data === 'string') this.message(data);
-      else this.binary(data);
+      this.emit('message', data);
     });
 
     socket.addEventListener('close', () => {
       this.opening = null;
       this.connected = false;
+      this.socket = null;
       this.emit('close');
-      setTimeout(() => {
-        if (this.active) this.open();
-      }, this.reconnectTimeout);
     });
 
-    socket.addEventListener('error', (err) => {
-      this.emit('error', err);
+    socket.addEventListener('error', (error) => {
+      this.emit('error', error);
       socket.close();
     });
 
@@ -430,83 +524,84 @@ class WebsocketTransport extends Metacom {
         resolve();
       });
     });
+
     return this.opening;
   }
 
   close() {
     this.active = false;
-    Metacom.connections.delete(this);
     if (!this.socket) return;
     this.socket.close();
     this.socket = null;
   }
 
   write(data) {
-    if (!this.connected) throw new Error('Not connected');
-    this.lastActivity = Date.now();
+    if (!this.connected || !this.socket) {
+      throw new Error('Not connected');
+    }
     this.socket.send(data);
-  }
-
-  send(data) {
-    const payload = JSON.stringify(data);
-    this.write(payload);
   }
 }
 
-class HttpTransport extends Metacom {
+class ClientHttpTransport extends ClientTransport {
   async open() {
+    if (this.connected) return Promise.resolve();
     this.active = true;
     this.connected = true;
     this.emit('open');
+    return Promise.resolve();
   }
 
   close() {
+    if (!this.active && !this.connected) return;
     this.active = false;
     this.connected = false;
+    this.emit('close');
   }
 
-  send(data) {
-    this.lastActivity = Date.now();
-    const body = JSON.stringify(data);
+  write(data) {
     const headers = { 'Content-Type': 'application/json' };
-    fetch(this.url, { method: 'POST', headers, body }).then((res) =>
-      res.text().then((packet) => {
-        this.message(packet);
-      }),
-    );
+    fetch(this.url, { method: 'POST', headers, body: data })
+      .then((res) => res.text())
+      .then((packet) => this.emit('message', packet))
+      .catch((error) => this.emit('error', error));
   }
 }
 
-class EventTransport extends Metacom {
-  static messagePort = null;
+class ClientEventTransport extends ClientTransport {
   static instance = null;
 
-  static getInstance(url, options = {}) {
-    if (EventTransport.instance) return EventTransport.instance;
-    EventTransport.instance = new EventTransport(url, options);
-    return EventTransport.instance;
+  messagePort = null;
+  worker = null;
+
+  static getInstance(url) {
+    if (ClientEventTransport.instance) {
+      return ClientEventTransport.instance;
+    }
+    const transport = new ClientEventTransport(url);
+    ClientEventTransport.instance = transport;
+    return transport;
   }
 
   async open(options = {}) {
     if (this.opening) return this.opening;
     if (this.connected) return Promise.resolve();
-    this.active = true;
     const worker = options.worker || this.worker;
     if (!worker) throw new Error('Service Worker not provided');
+    this.active = true;
     this.worker = worker;
     this.opening = new Promise((resolve) => {
       const { port1, port2 } = new MessageChannel();
-      EventTransport.messagePort = port1;
-      port1.addEventListener('message', (event) => {
-        const { data } = event;
-        if (data !== undefined) {
-          if (typeof data === 'string') this.message(data);
-          else this.binary(data);
-        }
+      this.messagePort = port1;
+      port1.addEventListener('message', ({ data }) => {
+        if (data === undefined) return;
+        this.emit('message', data);
       });
       port1.start();
       this.worker.postMessage({ type: 'metacom:connect' }, [port2]);
       this.connected = true;
+      this.opening = null;
+      this.emit('open');
       resolve();
     });
     return this.opening;
@@ -514,32 +609,26 @@ class EventTransport extends Metacom {
 
   close() {
     this.active = false;
-    this.opening = null;
-    Metacom.connections.delete(this);
     this.connected = false;
+    this.opening = null;
+    if (this.messagePort) {
+      this.messagePort.close?.();
+      this.messagePort = null;
+    }
+    this.emit('close');
   }
 
   online() {
-    if (this.worker) {
-      this.worker.postMessage({ type: 'metacom:online' });
-    }
+    if (this.worker) this.worker.postMessage({ type: 'metacom:online' });
   }
 
   offline() {
-    if (this.worker) {
-      this.worker.postMessage({ type: 'metacom:offline' });
-    }
+    if (this.worker) this.worker.postMessage({ type: 'metacom:offline' });
   }
 
   write(data) {
-    if (!EventTransport.messagePort) throw new Error('Not connected');
-    this.lastActivity = Date.now();
-    EventTransport.messagePort.postMessage(data);
-  }
-
-  send(data) {
-    const payload = JSON.stringify(data);
-    this.write(payload);
+    if (!this.messagePort) throw new Error('Not connected');
+    this.messagePort.postMessage(data);
   }
 }
 
@@ -547,13 +636,14 @@ class MetacomProxy extends Emitter {
   ports = new Set();
   pending = new Map();
   connection = null;
-  url = null;
+  callTimeout = CALL_TIMEOUT;
+  reconnectTimeout = RECONNECT_TIMEOUT;
 
   constructor(options = {}) {
-    super(options);
-    this.callTimeout = options.callTimeout || CALL_TIMEOUT;
-    this.reconnectTimeout = options.reconnectTimeout || RECONNECT_TIMEOUT;
-    this.generateId = options.generateId || metautil.generateId;
+    super();
+    const { callTimeout, reconnectTimeout } = options;
+    if (callTimeout) this.callTimeout = callTimeout;
+    if (reconnectTimeout) this.reconnectTimeout = reconnectTimeout;
     if (typeof self === 'undefined') {
       throw new Error('MetacomProxy must run in ServiceWorker context');
     }
@@ -569,28 +659,25 @@ class MetacomProxy extends Emitter {
       return this.connection.open(options);
     }
     const protocol = self.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.url = `${protocol}//${self.location.host}`;
-    const opts = {
+    const url = `${protocol}//${self.location.host}`;
+    const transport = new ClientWsTransport(url);
+    const metacomOptions = {
       callTimeout: this.callTimeout,
       reconnectTimeout: this.reconnectTimeout,
-      generateId: this.generateId,
     };
-    this.connection = new WebsocketTransport(this.url, opts);
-    this.connection.message = async (data) => {
-      this.handlePacket(data);
-    };
+    this.connection = new Metacom(url, transport, metacomOptions);
+    this.connection.handlePacket = async (data) => this.handlePacket(data);
     this.connection.binary = async (input) => {
       const data = await toByteView(input);
       this.handlePacket(data);
     };
-    return this.connection.open(opts);
+    return this.connection.open(options);
   }
 
   close() {
-    if (this.connection) {
-      this.connection.close();
-      this.connection = null;
-    }
+    if (!this.connection) return;
+    this.connection.close();
+    this.connection = null;
   }
 
   async handleEvent(event) {
@@ -599,40 +686,57 @@ class MetacomProxy extends Emitter {
       const port = event.ports[0];
       if (!port) throw new Error('MessagePort not provided');
       this.ports.add(port);
-      port.addEventListener('message', (messageEvent) =>
-        this.handlePortMessage(messageEvent, port),
-      );
+      port.addEventListener('message', (messageEvent) => {
+        this.handleMessage(messageEvent, port);
+      });
       port.start();
-    } else if (type === 'metacom:online') {
+      return;
+    }
+    if (type === 'metacom:online') {
       Metacom.online();
-    } else if (type === 'metacom:offline') {
+      return;
+    }
+    if (type === 'metacom:offline') {
       Metacom.offline();
     }
   }
 
-  async handlePortMessage(event, port) {
+  async handleMessage(event, port) {
     const { data } = event;
     if (data === undefined) throw new Error('Message data is undefined');
     await this.open();
     if (!this.connection || !this.connection.connected) {
       throw new Error('Not connected to server');
     }
-    const packet = parsePacket(data);
+    const packet = jsonParse(data);
+    if (!packet || !packet.id) throw new Error('Invalid JSON packet');
     this.pending.set(packet.id, port);
     this.connection.write(data);
   }
 
   handlePacket(data) {
-    const packet = parsePacket(data);
-    if (!packet) return void this.broadcast(data);
-    const { type, id } = packet;
-    if (type === 'event') return void this.broadcast(data);
+    const packet = jsonParse(data);
+    if (!packet) {
+      this.broadcast(data);
+      return;
+    }
+    const { type, id, status } = packet;
+    if (type === 'event') {
+      this.broadcast(data);
+      return;
+    }
     const port = this.pending.get(id);
-    if (!port) return void this.broadcast(data);
+    if (!port) {
+      this.broadcast(data);
+      return;
+    }
     port.postMessage(data);
     const isCallback = type === 'callback';
-    const isStreamEnd = type === 'stream' && packet.status === 'end';
-    if (isCallback || isStreamEnd) this.pending.delete(id);
+    const isStreamEnd = type === 'stream' && status === 'end';
+    const isStreamTerminate = type === 'stream' && status === 'terminate';
+    if (isCallback || isStreamEnd || isStreamTerminate) {
+      this.pending.delete(id);
+    }
   }
 
   broadcast(data, excludePort = null) {
@@ -644,11 +748,18 @@ class MetacomProxy extends Emitter {
 }
 
 Metacom.transport = {
-  ws: WebsocketTransport,
-  http: HttpTransport,
-  event: EventTransport,
+  ws: ClientWsTransport,
+  http: ClientHttpTransport,
+  event: ClientEventTransport,
 };
 
 Metacom.initialize();
 
-export { Metacom, MetacomUnit, MetacomProxy };
+export {
+  chunkEncode,
+  chunkDecode,
+  MetaReadable,
+  MetaWritable,
+  Metacom,
+  MetacomProxy,
+};

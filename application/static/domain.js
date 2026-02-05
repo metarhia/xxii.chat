@@ -1,4 +1,5 @@
-import { Application, generateId } from './application.js';
+import { generateUUID } from './metautil.js';
+import { Application } from './application.js';
 
 class Logger {
   #output;
@@ -157,7 +158,7 @@ class ChatApplication extends Application {
   }
 
   addMessage(content) {
-    const id = generateId();
+    const id = generateUUID();
     const username = this.username;
     const timestamp = Date.now();
     const reactions = { ...REACTIONS };
