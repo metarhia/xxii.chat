@@ -60,7 +60,6 @@ class Application extends Emitter {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${location.host}`;
     const { clientId, worker } = this;
-    console.log({ clientId, worker });
     this.metacom = Metacom.create(url, { clientId, worker });
 
     await this.metacom.load('system', 'chat');
