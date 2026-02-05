@@ -360,9 +360,9 @@ class Metacom extends Emitter {
   }
 
   scaffold(unit, ver) {
-    const id = this.generateId();
     const createMethod = (methodName) => {
       const method = async (args = {}) => {
+        const id = this.generateId();
         const unitName = unit + (ver ? '.' + ver : '');
         const target = unitName + '/' + methodName;
         if (this.opening) await this.opening;
