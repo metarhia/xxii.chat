@@ -193,7 +193,6 @@ self.addEventListener('fetch', (e) => cacheManager.handleFetch(e));
 const activate = async () => {
   try {
     await Promise.all([cacheManager.cleanup(), self.clients.claim()]);
-    console.log('Service Worker: Activated successfully');
   } catch (error) {
     console.error('Service Worker: Activation failed:', error);
   }
@@ -232,7 +231,6 @@ const events = {
 };
 
 self.addEventListener('message', (event) => {
-  console.log({ serviceWorkerMessage: event });
   const { type, data } = event.data;
   const handler = events[type];
   if (handler) handler(event.source, data);
