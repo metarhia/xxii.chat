@@ -31,6 +31,15 @@ const chunkDecode = (chunk) => {
 
 export { chunkEncode, chunkDecode };
 
+const parsePacket = (data) => {
+  if (typeof data !== 'string') return null;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+};
+
 // streams.js
 
 const PUSH_EVENT = Symbol();
@@ -291,7 +300,8 @@ class Metacom extends Emitter {
 
   async message(data) {
     this.lastActivity = Date.now();
-    const packet = JSON.parse(data);
+    const packet = parsePacket(data);
+    if (!packet) throw new Error('Invalid JSON packet');
     const { type, id, name } = packet;
     if (type === 'event') {
       const [unit, eventName] = name.split('/');
@@ -534,20 +544,23 @@ class EventTransport extends Metacom {
 }
 
 class MetacomProxy extends Emitter {
+  ports = new Set();
+  pending = new Map();
+  connection = null;
+  url = null;
+
   constructor(options = {}) {
     super(options);
-    this.ports = new Map();
-    this.connection = null;
-    this.url = null;
     this.callTimeout = options.callTimeout || CALL_TIMEOUT;
     this.reconnectTimeout = options.reconnectTimeout || RECONNECT_TIMEOUT;
     this.generateId = options.generateId || metautil.generateId;
-    if (typeof self !== 'undefined') {
-      self.addEventListener('message', (event) => {
-        const { type } = event.data;
-        if (type?.startsWith('metacom')) this.handleMessage(event);
-      });
+    if (typeof self === 'undefined') {
+      throw new Error('MetacomProxy must run in ServiceWorker context');
     }
+    self.addEventListener('message', (event) => {
+      const { type } = event.data;
+      if (type?.startsWith('metacom')) this.handleEvent(event);
+    });
   }
 
   async open(options = {}) {
@@ -564,11 +577,11 @@ class MetacomProxy extends Emitter {
     };
     this.connection = new WebsocketTransport(this.url, opts);
     this.connection.message = async (data) => {
-      this.broadcast(data);
+      this.handlePacket(data);
     };
     this.connection.binary = async (input) => {
       const data = await toByteView(input);
-      this.broadcast(data);
+      this.handlePacket(data);
     };
     return this.connection.open(opts);
   }
@@ -580,22 +593,15 @@ class MetacomProxy extends Emitter {
     }
   }
 
-  async handleMessage(event) {
+  async handleEvent(event) {
     const { type } = event.data;
     if (type === 'metacom:connect') {
       const port = event.ports[0];
       if (!port) throw new Error('MessagePort not provided');
-      const portId = this.generateId();
-      this.ports.set(portId, port);
-      port.addEventListener('message', async (messageEvent) => {
-        const { data } = messageEvent;
-        if (data === undefined) throw new Error('Message data is undefined');
-        await this.open();
-        if (!this.connection || !this.connection.connected) {
-          throw new Error('Not connected to server');
-        }
-        this.connection.write(data);
-      });
+      this.ports.add(port);
+      port.addEventListener('message', (messageEvent) =>
+        this.handlePortMessage(messageEvent, port),
+      );
       port.start();
     } else if (type === 'metacom:online') {
       Metacom.online();
@@ -604,8 +610,33 @@ class MetacomProxy extends Emitter {
     }
   }
 
+  async handlePortMessage(event, port) {
+    const { data } = event;
+    if (data === undefined) throw new Error('Message data is undefined');
+    await this.open();
+    if (!this.connection || !this.connection.connected) {
+      throw new Error('Not connected to server');
+    }
+    const packet = parsePacket(data);
+    this.pending.set(packet.id, port);
+    this.connection.write(data);
+  }
+
+  handlePacket(data) {
+    const packet = parsePacket(data);
+    if (!packet) return void this.broadcast(data);
+    const { type, id } = packet;
+    if (type === 'event') return void this.broadcast(data);
+    const port = this.pending.get(id);
+    if (!port) return void this.broadcast(data);
+    port.postMessage(data);
+    const isCallback = type === 'callback';
+    const isStreamEnd = type === 'stream' && packet.status === 'end';
+    if (isCallback || isStreamEnd) this.pending.delete(id);
+  }
+
   broadcast(data, excludePort = null) {
-    for (const port of this.ports.values()) {
+    for (const port of this.ports) {
       if (port === excludePort) continue;
       port.postMessage(data);
     }
@@ -619,4 +650,5 @@ Metacom.transport = {
 };
 
 Metacom.initialize();
+
 export { Metacom, MetacomUnit, MetacomProxy };
