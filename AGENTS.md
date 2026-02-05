@@ -35,7 +35,7 @@
 - Tests (`application/**/*.test.js`)
   - Format: Object with `name`, `options`, `async run(t)`. Use `t.test('description', async () => { ... })` and `node.assert` for assertions
 - Style, alignment, tooling
-  - Editor: LF, UTF-8, final newline, trim trailing whitespace, 2 spaces for JS/TS/JSON/YML
+  - Editor: LF, UTF-8, final newline, max 80 chars per line, trim trailing whitespace, 2 spaces for JS/TS/JSON/YML
   - Lint/format: ESLint (`eslint-config-metarhia`) + Prettier. Run `npm run lint` / `npm run fix` before committing
   - Types: `npm run types` (TypeScript check). Use `types/global.d.ts` and project types for editor support.
 
