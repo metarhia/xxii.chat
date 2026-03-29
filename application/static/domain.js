@@ -1,4 +1,5 @@
-import { Application, generateId } from './application.js';
+import { generateUUID } from './metautil.js';
+import { Application } from './application.js';
 import { Logger } from './logger.js';
 import { Notification } from './ui-common.js';
 
