@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XXII Feed</title>
+    <link rel="stylesheet" href="/default.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <header class="app-header">
+        <h1>XXII Feed</h1>
+        <div class="status-indicators">
+          <div id="connection-status" class="status-indicator disconnected">
+            Offline
+          </div>
+        </div>
+      </header>
+
+      <main class="app-main">
+        <!-- USERNAME -->
+        <div class="user-input">
+          <input
+            type="text"
+            id="username-input"
+            placeholder="Enter your username..."
+          />
+        </div>
+
+        <!-- CREATE FEED -->
+        <div class="message-input">
+          <input type="text" id="new-feed-name" placeholder="Feed name..." />
+          <button id="create-feed-btn" class="btn primary">Create Feed</button>
+        </div>
+
+        <!-- FEEDS LIST -->
+        <div class="chat-container">
+          <h3>Available Feeds</h3>
+          <div id="feeds-list"></div>
+        </div>
+
+        <!-- FEED POSTS -->
+        <div class="chat-container">
+          <h3 id="active-feed-title">Posts Feed</h3>
+          <div id="feed-posts"></div>
+        </div>
+
+        <!-- PUBLISH -->
+        <div class="message-input">
+          <select id="feed-select">
+            <option value="">-- select feed --</option>
+          </select>
+          <input type="text" id="post-input" placeholder="Write a post..." />
+          <button id="publish-btn" class="btn primary">Publish</button>
+        </div>
+
+        <!-- DEBUG / WS LOG -->
+        <div class="output-container">
+          <h3>Activity Log</h3>
+          <pre id="output"></pre>
+        </div>
+      </main>
+
+      <div id="notification" class="notification hidden"></div>
+    </div>
+
+    <!-- POST TEMPLATE -->
+    <template id="post-template">
+      <div class="chat-message">
+        <div>
+          <span class="username post-user"></span>
+          <span>posted in </span>
+          <span class="post-feed"></span>
+          <span>at </span>
+          <span class="timestamp post-time"></span>
+        </div>
+        <div class="content post-content"></div>
+      </div>
+    </template>
+
+    <!-- FEED TEMPLATE -->
+    <template id="feed-template">
+      <div class="chat-message">
+        <span class="feed-name"></span>
+        <span class="feed-owner"></span>
+        <span class="feed-members"></span>
+        <button class="subscribe-btn">Subscribe</button>
+        <button class="unsubscribe-btn">Unsubscribe</button>
+      </div>
+    </template>
+
+    <script type="module" src="/feed.js"></script>
+  </body>
+</html>
