@@ -1,4 +1,4 @@
-import { Emitter, generateId } from './metautil.js';
+import { Emitter, generateUUID } from './metautil.js';
 import { Metacom } from './metacom.js';
 
 window.addEventListener('online', () => Metacom.online());
@@ -7,7 +7,7 @@ window.addEventListener('offline', () => Metacom.offline());
 const getClientId = () => {
   let clientId = localStorage.getItem('clientId');
   if (!clientId) {
-    clientId = generateId();
+    clientId = generateUUID();
     localStorage.setItem('clientId', clientId);
   }
   return clientId;
@@ -60,7 +60,6 @@ class Application extends Emitter {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${location.host}`;
     const { clientId, worker } = this;
-    console.log({ clientId, worker });
     this.metacom = Metacom.create(url, { clientId, worker });
 
     await this.metacom.load('system', 'chat', 'feed');
@@ -127,4 +126,4 @@ class Application extends Emitter {
   }
 }
 
-export { Application, generateId };
+export { Application };
