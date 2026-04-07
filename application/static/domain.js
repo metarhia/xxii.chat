@@ -1,30 +1,7 @@
 import { generateUUID } from './metautil.js';
 import { Application } from './application.js';
-
-class Logger {
-  #output;
-
-  constructor(outputId) {
-    this.#output = document.getElementById(outputId);
-  }
-
-  log(...args) {
-    if (!this.#output) return;
-    const lines = args.map(Logger.#serialize);
-    const timestamp = new Date().toISOString();
-    const logEntry = `[${timestamp}] ${lines.join(' ')}\n`;
-    this.#output.textContent += logEntry;
-    this.#output.scrollTop = this.#output.scrollHeight;
-  }
-
-  clear() {
-    if (this.#output) this.#output.textContent = '';
-  }
-
-  static #serialize(x) {
-    return typeof x === 'object' ? JSON.stringify(x, null, 2) : String(x);
-  }
-}
+import { Logger } from './logger.js';
+import { Notification } from './ui-common.js';
 
 const REACTIONS = { like: 0, dislike: 0, love: 0, smile: 0, poo: 0 };
 
@@ -34,6 +11,7 @@ class ChatApplication extends Application {
     this.logger = new Logger('output');
     this.username = '';
     this.syncTimeout = null;
+    this.notification = new Notification();
   }
 
   getElements() {
@@ -46,7 +24,6 @@ class ChatApplication extends Application {
     this.usernameInput = document.getElementById('username-input');
     this.connectionStatus = document.getElementById('connection-status');
     this.installStatus = document.getElementById('install-status');
-    this.notification = document.getElementById('notification');
     this.chatMessages = document.getElementById('chat-messages');
     this.messageTemplate = document.getElementById('chat-message-template');
     this.reactionTemplate = document.getElementById('reaction-button-template');
@@ -281,14 +258,7 @@ class ChatApplication extends Application {
   }
 
   showNotification(message, type = 'info') {
-    if (!this.notification) return;
-    this.notification.textContent = message;
-    this.notification.className = `notification ${type}`;
-    this.notification.classList.remove('hidden');
-    const timeout = this.config.notificationTimeout || 3000;
-    setTimeout(() => {
-      this.notification.classList.add('hidden');
-    }, timeout);
+    this.notification.showNotification(message, type);
   }
 
   clearDatabase() {
@@ -314,4 +284,4 @@ class ChatApplication extends Application {
 
 const app = new ChatApplication();
 
-export { ChatApplication, Logger, app };
+export { ChatApplication, app };

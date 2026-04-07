@@ -62,7 +62,7 @@ class Application extends Emitter {
     const { clientId, worker } = this;
     this.metacom = Metacom.create(url, { clientId, worker });
 
-    await this.metacom.load('system', 'chat');
+    await this.metacom.load('system', 'chat', 'feed');
     await this.metacom.api.chat.subscribe({ room: 'sync' });
     this.connected = true;
     this.emit('status', { connected: true });
