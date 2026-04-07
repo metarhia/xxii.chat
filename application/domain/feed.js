@@ -1,4 +1,14 @@
 ({
+  async getFeedByName(name) {
+    const id = await db.globalstorage.get(`feed:name:${name}`);
+    if (!id) return null;
+    return await this.getFeed(id);
+  },
+
+  async setFeedNameIndex(name, id) {
+    await db.globalstorage.set(`feed:name:${name}`, id);
+  },
+
   async getFeed(id) {
     return await db.globalstorage.get(`feed:${id}`);
   },
@@ -7,25 +17,12 @@
     await db.globalstorage.set(`feed:${feed.id}`, feed);
   },
 
-  async getFeedIds() {
-    const record = await db.globalstorage.get('feeds:list');
-    return record?.ids ?? [];
-  },
-
-  async addFeedId(id) {
-    const ids = await this.getFeedIds();
-    if (!ids.includes(id)) {
-      ids.push(id);
-      await db.globalstorage.set('feeds:list', { ids });
-    }
-  },
-
-  async createFeed({ name, ownerId }) {
-    const existing = await this.getFeed(name);
+  async createFeed({ id, name, ownerId }) {
+    const existing = await this.getFeedByName(name);
     if (existing) throw new Error(`Feed ${name} already exists`);
 
     const feed = {
-      id: name,
+      id,
       name,
       owner: ownerId,
       members: [],
@@ -33,7 +30,7 @@
     };
 
     await this.setFeed(feed);
-    await this.addFeedId(name);
+    await this.setFeedNameIndex(name, id);
 
     return {
       strategy: 'lww',

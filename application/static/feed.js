@@ -1,5 +1,6 @@
 import { Application } from './application.js';
 import { Logger } from './logger.js';
+import { generateUUID } from './metautil.js';
 import { Notification } from './ui-common.js';
 
 class FeedsApplication extends Application {
@@ -66,8 +67,11 @@ class FeedsApplication extends Application {
     }
 
     let createFeedResult;
+    const id = generateUUID();
+
     try {
       createFeedResult = await this.metacom.api.feed.createFeed({
+        id,
         name,
         ownerId: this.username,
       });
@@ -81,7 +85,7 @@ class FeedsApplication extends Application {
       return;
     }
 
-    this.feeds.set(name, createFeedResult.record);
+    this.feeds.set(id, createFeedResult.record);
     this.renderFeeds();
     this.showNotification(`Feed '${name}' created`, 'success');
   }
@@ -99,7 +103,7 @@ class FeedsApplication extends Application {
     }
 
     if (feed.members?.includes(this.username)) {
-      this.showNotification(`Already subscribed to ${feedId}`, 'warning');
+      this.showNotification(`Already subscribed to ${feed.name}`, 'warning');
       return;
     }
 
@@ -122,7 +126,7 @@ class FeedsApplication extends Application {
     this.feeds.set(feedId, updateFeedResult.record);
     this.renderFeeds();
     this.showNotification(
-      `User ${this.username} subscribed to feed ${feedId}`,
+      `User ${this.username} subscribed to feed ${feed.name}`,
       'success',
     );
   }
@@ -140,7 +144,7 @@ class FeedsApplication extends Application {
     }
 
     if (!feed.members?.includes(this.username)) {
-      this.showNotification(`Not subscribed to ${feedId}`, 'warning');
+      this.showNotification(`Not subscribed to ${feed.name}`, 'warning');
       return;
     }
 
@@ -163,7 +167,7 @@ class FeedsApplication extends Application {
     this.feeds.set(feedId, updateFeedResult.record);
     this.renderFeeds();
     this.showNotification(
-      `User ${this.username} unsubscribed from feed ${feedId}`,
+      `User ${this.username} unsubscribed from feed ${feed.name}`,
       'success',
     );
   }
@@ -210,7 +214,7 @@ class FeedsApplication extends Application {
     }
 
     input.value = '';
-    this.showNotification(`Post published to '${feedId}'`, 'success');
+    this.showNotification(`Post published to '${feed.name}'`, 'success');
   }
 
   setupMetacomEvents() {
@@ -304,13 +308,14 @@ class FeedsApplication extends Application {
   showPostInFeed(post) {
     if (!this.feedPosts) return;
 
+    const feed = this.feeds.get(post.feed);
     const el = this.postTemplate.content.cloneNode(true);
     el.querySelector('.post-user').textContent = post.author;
     el.querySelector('.post-time').textContent = new Date(
       post.created,
     ).toLocaleString();
     el.querySelector('.post-content').textContent = post.content;
-    el.querySelector('.post-feed').textContent = post.feed;
+    el.querySelector('.post-feed').textContent = feed.name;
     this.feedPosts.appendChild(el);
   }
 
