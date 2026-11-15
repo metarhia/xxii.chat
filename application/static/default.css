@@ -251,6 +251,49 @@ svg {
   text-align: center;
 }
 
+.remove-btn,
+.folder-actions {
+  visibility: hidden;
+  font-size: 11px;
+}
+
+.nav-item:hover > .remove-btn,
+.folder-row:hover > .folder-actions {
+  visibility: visible;
+}
+
+.folder-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.folder-row .name {
+  color: var(--light);
+}
+
+.chevron {
+  flex: none;
+  color: var(--muted);
+  transition: transform 0.1s;
+}
+
+.folder:not(.open) .chevron {
+  transform: rotate(-90deg);
+}
+
+.folder:not(.open) > .folder-items {
+  display: none;
+}
+
+.folder-items {
+  margin-top: 4px;
+  padding-left: 8px;
+}
+
+.folder-items:empty {
+  display: none;
+}
+
 .inline-form input {
   background: transparent;
   border-style: dashed;
@@ -335,6 +378,24 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--light);
+  font-size: 11px;
+}
+
+.description.editable {
+  cursor: pointer;
+}
+
+.description.editable:hover {
+  color: var(--text);
+}
+
+.topic-form {
+  flex: 1;
+  min-width: 0;
+}
+
+.topic-form input {
+  padding: 0 5px;
   font-size: 11px;
 }
 
@@ -427,7 +488,9 @@ svg {
 }
 
 .message:hover .message-actions,
-.thread-item:hover .message-actions {
+.thread-item:hover .message-actions,
+.post:hover .message-actions,
+.post-article:hover .message-actions {
   display: flex;
 }
 
@@ -461,6 +524,144 @@ svg {
 
 .reaction:hover {
   border-color: var(--text);
+}
+
+.post {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.post:hover {
+  border-color: var(--muted);
+}
+
+.post .title,
+.post-article .title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 21px;
+  word-break: break-word;
+}
+
+.post-article .title {
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.post.pinned .title::before,
+.post-article.pinned .title::before {
+  content: '📌';
+  margin-right: 4px;
+}
+
+.post .meta,
+.post-article .meta {
+  display: flex;
+  gap: 12px;
+  color: var(--light);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.meta .nick {
+  color: var(--text);
+}
+
+.excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--light);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.excerpt:empty {
+  display: none;
+}
+
+.post-footer {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 11px;
+}
+
+.post-footer .replies {
+  align-self: center;
+  padding-left: 0;
+  color: var(--muted);
+}
+
+.post-article {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+}
+
+.post-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.post-text p {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.post-text h4 {
+  font-size: 13px;
+  font-weight: 600;
+  scroll-margin-top: 8px;
+}
+
+.post-info {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+}
+
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.panel-section h3 {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--light);
+  font-size: 12px;
+}
+
+.outline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .replies {
@@ -558,6 +759,7 @@ svg {
 }
 
 .app[data-panel='thread'] .panel-body[data-panel='thread'],
+.app[data-panel='post'] .panel-body[data-panel='thread'],
 .app[data-panel='pins'] .panel-body[data-panel='pins'],
 .app[data-panel='members'] .panel-body[data-panel='members'],
 .app[data-panel='log'] .panel-body[data-panel='log'] {
@@ -715,6 +917,13 @@ svg {
 
 .notification.error {
   border-left-color: var(--offline);
+}
+
+@media (hover: none) {
+  .remove-btn,
+  .folder-actions {
+    visibility: visible;
+  }
 }
 
 @media (max-width: 900px) {

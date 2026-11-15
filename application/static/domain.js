@@ -1,7 +1,12 @@
-import { REACTIONS, GENERAL, validate, seed } from './chat.js';
+import { REACTIONS, ICONS, CHANNELS, TIMELINE, GENERAL } from './chat.js';
+import { MAX_LENGTH, TEXT_LENGTH, validate, seed } from './chat.js';
 import { pairOf, isPair, directUnit } from './chat.js';
-import { saveAuthor, createChat, createMessage, react, pin } from './chat.js';
-import { listChats, listAuthors, threadsOf, activityOf } from './chat.js';
+import { isFeed, isPost, containerOf, labelOf, parseTitle } from './chat.js';
+import { saveAuthor, createChannel, describe } from './chat.js';
+import { createFolder, setVisibility, placeItem } from './chat.js';
+import { createMessage, createPost, react, pin } from './chat.js';
+import { listChannels, listAuthors, folderTree } from './chat.js';
+import { threadsOf, activityOf } from './chat.js';
 import { Replica, Uplink } from './globalstorage.js';
 import { generateUUID } from './metautil.js';
 import { Mesh } from './mesh.js';
@@ -26,6 +31,7 @@ const TASKS = {
 
 const PANELS = {
   thread: 'Thread',
+  post: 'POST DETAILS',
   pins: 'Pinned',
   members: 'Members',
   log: 'Log',
@@ -35,6 +41,14 @@ const SHORTCUTS = {
   f: (app) => app.toggleSearch(),
   p: (app) => app.togglePanel('pins'),
 };
+
+const NAV_ACTIONS = {
+  add: (app, { folder }) => app.addToFolder(folder),
+  visibility: (app, { folder }) => app.toggleVisibility(folder),
+  remove: (app, { folder, item }) => app.removeFromFolder(folder, item),
+};
+
+const NEXT_VISIBILITY = { unlisted: 'public', public: 'unlisted' };
 
 const STATES = {
   linked: 'webrtc',
@@ -46,16 +60,25 @@ const STATES = {
 
 const STATUS_ORDER = ['linked', 'online', 'away', 'offline', 'unknown'];
 const UNITS = ['chat', 'cache', 'presence', 'signal'];
+const THREADS = ['thread', 'post'];
 const PAGE_SIZE = 50;
 const CHAT_KEY = 'xxii:chat';
 const NICK_KEY = 'xxii:nick';
 const PEER_KEY = 'xxii:peer';
+const COLLAPSED_KEY = 'xxii:collapsed';
+const HEADING = /^#{1,3}\s+(.+)$/;
 
 const pad = (value) => `${value}`.padStart(2, '0');
 
 const timeOf = (timestamp) => {
   const date = new Date(timestamp);
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const dateOf = (timestamp) => {
+  const date = new Date(timestamp);
+  const day = `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return `${date.getFullYear()}-${day} ${timeOf(timestamp)}`;
 };
 
 const dayOf = (timestamp) => {
@@ -117,6 +140,41 @@ const fillActions = (element, message) => {
   element.querySelector('.pin-btn').textContent = pinText;
 };
 
+const fillPostHeader = (element, post) => {
+  element.dataset.id = post.id;
+  element.classList.toggle('pinned', post.pinned === true);
+  element.querySelector('.title').textContent = post.title;
+  element.querySelector('.nick').textContent = post.nick;
+  element.querySelector('.date').textContent = dateOf(post.timestamp);
+};
+
+const setBadge = (badge, count) => {
+  badge.textContent = count;
+  badge.classList.toggle('hidden', count === 0);
+};
+
+const parseBlocks = (content = '') => {
+  const blocks = [];
+  for (const line of content.split('\n')) {
+    const heading = line.match(HEADING);
+    const last = blocks.at(-1);
+    if (heading) blocks.push({ isHeading: true, text: heading[1].trim() });
+    else if (last && !last.isHeading) last.text += `\n${line}`;
+    else blocks.push({ isHeading: false, text: line });
+  }
+  return blocks.filter((block) => block.text.trim() !== '');
+};
+
+const excerptOf = (content) => {
+  const blocks = parseBlocks(content);
+  return blocks.map((block) => block.text.trim()).join(' ');
+};
+
+const readCollapsed = () => {
+  const saved = readSetting(COLLAPSED_KEY, '');
+  return new Set(saved.split(',').filter(Boolean));
+};
+
 class Logger {
   #output;
 
@@ -154,6 +212,7 @@ class ChatApplication extends Application {
     this.thread = '';
     this.paletteTarget = '';
     this.unread = new Map();
+    this.collapsed = readCollapsed();
     this.isRenderScheduled = false;
     this.started = new Promise((resolve) => this.on('ready', resolve));
     this.replica = new Replica({ validate });
@@ -176,6 +235,7 @@ class ChatApplication extends Application {
   getElements() {
     const byId = (id) => document.getElementById(id);
     this.app = document.querySelector('.app');
+    this.sidebar = byId('sidebar');
     this.menuBtn = byId('menu-btn');
     this.installBtn = byId('install-btn');
     this.updateCacheBtn = byId('update-cache-btn');
@@ -187,11 +247,19 @@ class ChatApplication extends Application {
     this.usernameInput = byId('username-input');
     this.contactList = byId('contact-list');
     this.contactsEmpty = byId('contacts-empty');
+    this.feedList = byId('feed-list');
+    this.feedForm = byId('feed-form');
+    this.feedNameInput = byId('feed-name-input');
     this.chatList = byId('chat-list');
     this.chatForm = byId('chat-form');
     this.chatNameInput = byId('chat-name-input');
+    this.folderList = byId('folder-list');
+    this.folderForm = byId('folder-form');
+    this.folderNameInput = byId('folder-name-input');
     this.chatTitle = byId('chat-title');
     this.chatInfo = byId('chat-info');
+    this.topicForm = byId('topic-form');
+    this.topicInput = byId('topic-input');
     this.searchBtn = byId('search-btn');
     this.pinsBtn = byId('pins-btn');
     this.membersBtn = byId('members-btn');
@@ -208,6 +276,11 @@ class ChatApplication extends Application {
     this.panelTitle = byId('panel-title');
     this.panelCloseBtn = byId('panel-close-btn');
     this.threadRoot = byId('thread-root');
+    this.postInfo = byId('post-info');
+    this.postReplies = byId('post-replies');
+    this.postReactions = byId('post-reactions');
+    this.outlineSection = byId('outline-section');
+    this.postOutline = byId('post-outline');
     this.threadCount = byId('thread-count');
     this.threadReplies = byId('thread-replies');
     this.replyForm = byId('reply-form');
@@ -218,7 +291,10 @@ class ChatApplication extends Application {
     this.notification = byId('notification');
     this.contactTemplate = byId('contact-item-template');
     this.chatTemplate = byId('chat-item-template');
+    this.folderTemplate = byId('folder-item-template');
     this.messageTemplate = byId('message-template');
+    this.postTemplate = byId('post-template');
+    this.articleTemplate = byId('article-template');
     this.threadTemplate = byId('thread-item-template');
     this.pinTemplate = byId('pin-item-template');
     this.memberTemplate = byId('member-item-template');
@@ -257,19 +333,23 @@ class ChatApplication extends Application {
       this.filter = this.searchInput.value.trim().toLowerCase();
       this.renderMessages();
     });
-    onSubmit(this.chatForm, () => this.createChat());
+    onSubmit(this.feedForm, () => this.addChannel('feed', this.feedNameInput));
+    onSubmit(this.chatForm, () => this.addChannel('chat', this.chatNameInput));
+    onSubmit(this.folderForm, () => this.addFolders());
+    onSubmit(this.topicForm, () => this.saveDescription());
     onSubmit(this.composer, () => this.submit());
     onSubmit(this.replyForm, () => this.submitReply());
-    onEnter(this.messageInput, () => this.submit());
     onEnter(this.replyInput, () => this.submitReply());
-
-    this.chatList.addEventListener('click', (event) => {
-      const item = event.target.closest('.chat-item');
-      if (item) this.selectChat(item.dataset.id);
+    this.messageInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || !this.isSendKey(event)) return;
+      event.preventDefault();
+      this.submit();
     });
-    this.contactList.addEventListener('click', (event) => {
-      const item = event.target.closest('.contact-item');
-      if (item) this.selectDirect(item.dataset.peer);
+    this.chatInfo.onclick = () => this.editDescription();
+    this.topicInput.addEventListener('blur', () => this.closeDescription());
+
+    this.sidebar.addEventListener('click', (event) => {
+      this.handleNavClick(event);
     });
     this.memberList.addEventListener('click', (event) => {
       const item = event.target.closest('.member[data-peer]');
@@ -280,6 +360,10 @@ class ChatApplication extends Application {
     this.threadRoot.addEventListener('click', onMessageClick);
     this.threadReplies.addEventListener('click', onMessageClick);
     this.pinList.addEventListener('click', (event) => this.handlePin(event));
+    this.postOutline.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (button) this.scrollToHeading(button.dataset.heading);
+    });
     this.palette.addEventListener('click', (event) => {
       const button = event.target.closest('button');
       if (button) this.choose(button.dataset.reaction);
@@ -408,15 +492,20 @@ class ChatApplication extends Application {
 
   countUnread(deltas, replica) {
     for (const { entity, target, data } of deltas) {
-      if (entity !== 'message' || !data.content) continue;
-      const message = replica.get(target);
-      const isOld = message.timestamp <= this.openedAt;
-      const isMine = message.author === this.peerId;
-      const isOpen = message.chat === this.chat;
+      const isCreated = TIMELINE.includes(entity) && data.timestamp;
+      if (!isCreated) continue;
+      const record = replica.get(target);
+      const chat = containerOf(record);
+      const isOld = record.timestamp <= this.openedAt;
+      const isMine = record.author === this.peerId;
+      const isOpen = chat === this.chat;
       if (isOld || isMine || isOpen) continue;
-      const count = this.unread.get(message.chat) ?? 0;
-      this.unread.set(message.chat, count + 1);
+      this.unread.set(chat, this.unreadOf(chat) + 1);
     }
+  }
+
+  unreadOf(chat) {
+    return this.unread.get(chat) ?? 0;
   }
 
   resetView() {
@@ -441,7 +530,7 @@ class ChatApplication extends Application {
 
   render() {
     this.renderContacts();
-    this.renderChats();
+    this.renderChannels();
     this.renderMessages();
     this.renderPanel();
   }
@@ -496,35 +585,90 @@ class ChatApplication extends Application {
     item.querySelector('.dot').title = STATES[contact.status];
     item.querySelector('.name').textContent = contact.nick;
     item.querySelector('.time').textContent = dayOf(contact.time);
-    this.setBadge(item.querySelector('.badge'), pair);
+    setBadge(item.querySelector('.badge'), this.unreadOf(pair));
     return item;
   }
 
-  renderChats() {
+  renderChannels() {
     const activity = activityOf(this.replica);
-    const chats = listChats(this.replica);
-    const items = chats.map((chat) => {
-      const time = activity.get(chat.id) ?? chat.created;
-      return this.createChatItem(chat, time);
-    });
-    this.chatList.replaceChildren(...items);
+    const tree = folderTree(this.replica, this.peerId);
+    const channels = new Map();
+    const placed = new Set();
+    for (const items of tree.items.values()) {
+      for (const item of items) placed.add(item);
+    }
+    const lists = { feed: [], chat: [] };
+    for (const entity of CHANNELS) {
+      for (const channel of listChannels(this.replica, entity)) {
+        channels.set(channel.id, channel);
+        if (placed.has(channel.id)) continue;
+        lists[entity].push(this.createChannelItem(channel, activity, null));
+      }
+    }
+    this.feedList.replaceChildren(...lists.feed);
+    this.chatList.replaceChildren(...lists.chat);
+    const nav = { activity, tree, channels };
+    const roots = tree.children.get('') ?? [];
+    const folders = roots.map((folder) => this.createFolderItem(folder, nav));
+    this.folderList.replaceChildren(...folders);
   }
 
-  createChatItem(chat, time) {
+  createChannelItem(channel, activity, folder) {
     const item = cloneTemplate(this.chatTemplate, '.chat-item');
-    item.dataset.id = chat.id;
-    item.classList.toggle('active', chat.id === this.chat);
-    item.querySelector('.icon').textContent = chat.icon ?? '💬';
-    item.querySelector('.name').textContent = `!${chat.name}`;
+    const time = activity.get(channel.id) ?? channel.created;
+    item.dataset.id = channel.id;
+    item.classList.toggle('active', channel.id === this.chat);
+    item.querySelector('.icon').textContent = channel.icon ?? ICONS.chat;
+    item.querySelector('.name').textContent = labelOf(channel);
     item.querySelector('.time').textContent = dayOf(time);
-    this.setBadge(item.querySelector('.badge'), chat.id);
+    setBadge(item.querySelector('.badge'), this.unreadOf(channel.id));
+    const isRemovable = folder?.owner === this.peerId;
+    const remove = item.querySelector('.remove-btn');
+    remove.classList.toggle('hidden', !isRemovable);
+    if (!isRemovable) return item;
+    remove.dataset.folder = folder.id;
+    remove.dataset.item = channel.id;
     return item;
   }
 
-  setBadge(badge, chat) {
-    const count = this.unread.get(chat) ?? 0;
-    badge.textContent = count;
-    badge.classList.toggle('hidden', count === 0);
+  createFolderItem(folder, nav) {
+    const element = cloneTemplate(this.folderTemplate, '.folder');
+    const row = element.querySelector('.folder-row');
+    const visibility = folder.visibility ?? 'unlisted';
+    const isOwn = folder.owner === this.peerId;
+    row.dataset.folder = folder.id;
+    element.classList.toggle('open', !this.collapsed.has(folder.id));
+    row.querySelector('.icon').textContent = folder.icon ?? ICONS.folder;
+    row.querySelector('.name').textContent = folder.name;
+    row.querySelector('.folder-actions').classList.toggle('hidden', !isOwn);
+    for (const button of row.querySelectorAll('[data-action]')) {
+      button.dataset.folder = folder.id;
+    }
+    const toggle = row.querySelector('[data-action="visibility"]');
+    toggle.textContent = `[${visibility}]`;
+    setBadge(row.querySelector('.badge'), this.unreadIn(folder.id, nav));
+    const subfolders = nav.tree.children.get(folder.id) ?? [];
+    const placed = nav.tree.items.get(folder.id) ?? new Set();
+    const children = subfolders.map((child) =>
+      this.createFolderItem(child, nav),
+    );
+    for (const channel of nav.channels.values()) {
+      if (!placed.has(channel.id)) continue;
+      children.push(this.createChannelItem(channel, nav.activity, folder));
+    }
+    element.querySelector('.folder-items').replaceChildren(...children);
+    return element;
+  }
+
+  unreadIn(folder, nav) {
+    let count = 0;
+    for (const item of nav.tree.items.get(folder) ?? []) {
+      count += this.unreadOf(item);
+    }
+    for (const child of nav.tree.children.get(folder) ?? []) {
+      count += this.unreadIn(child.id, nav);
+    }
+    return count;
   }
 
   currentView() {
@@ -542,8 +686,9 @@ class ChatApplication extends Application {
       : roots;
     const visible = matched.slice(-this.limit);
     const elements = visible.map((message) => {
-      const thread = replies.get(message.id) ?? [];
-      return this.createMessage(message, thread.length);
+      const count = replies.get(message.id)?.length ?? 0;
+      if (isPost(message)) return this.createPostCard(message, count);
+      return this.createMessage(message, count);
     });
     this.messageList.replaceChildren(...elements);
     this.loadMoreBtn.classList.toggle('hidden', matched.length <= this.limit);
@@ -552,14 +697,20 @@ class ChatApplication extends Application {
   }
 
   isMatch(message) {
-    const text = `${message.nick} ${message.content}`.toLowerCase();
+    const { nick, title = '', content } = message;
+    const text = `${nick} ${title} ${content}`.toLowerCase();
     return text.includes(this.filter);
+  }
+
+  channelEntity() {
+    return isFeed(this.replica, this.chat) ? 'feed' : 'chat';
   }
 
   chatName() {
     if (!isPair(this.chat)) {
+      const entity = this.channelEntity();
       const name = this.replica.get(this.chat)?.name ?? this.chat;
-      return `!${name}`;
+      return labelOf({ entity, name });
     }
     const peer = this.peerOf(this.chat);
     const contact = this.listContacts().find((item) => item.peer === peer);
@@ -568,8 +719,11 @@ class ChatApplication extends Application {
 
   chatDescription(roots) {
     if (!isPair(this.chat)) {
+      const description = this.replica.get(this.chat)?.description;
+      if (description) return description;
+      const noun = this.channelEntity() === 'feed' ? 'posts' : 'messages';
       const authors = new Set(roots.map((message) => message.author));
-      return `${roots.length} messages, ${authors.size} authors`;
+      return `${roots.length} ${noun}, ${authors.size} authors`;
     }
     const peer = this.peerOf(this.chat);
     const link = this.mesh.links.get(peer);
@@ -580,11 +734,16 @@ class ChatApplication extends Application {
 
   renderHeader(roots) {
     const name = this.chatName();
+    const isFeedOpen = this.channelEntity() === 'feed';
     this.chatTitle.textContent = name;
     this.chatInfo.textContent = this.chatDescription(roots);
-    this.messageInput.placeholder = `> new message to ${name}`;
+    this.chatInfo.classList.toggle('editable', this.canDescribe());
+    const noun = isFeedOpen ? 'post' : 'message';
+    this.messageInput.placeholder = `> new ${noun} to ${name}`;
+    this.messageInput.maxLength = isFeedOpen ? TEXT_LENGTH : MAX_LENGTH;
     const nick = this.username ? `@${this.username}` : 'set your nick first';
-    this.composerInfo.textContent = nick;
+    const hint = isFeedOpen ? ', first line is the title, Ctrl+Enter' : '';
+    this.composerInfo.textContent = `${nick}${hint}`;
   }
 
   createMessage(message, replyCount) {
@@ -600,6 +759,36 @@ class ChatApplication extends Application {
     replies.classList.toggle('hidden', replyCount === 0);
     replies.querySelector('.count').textContent = `${replyCount} replies`;
     fillActions(element, message);
+    return element;
+  }
+
+  createPostCard(post, replyCount) {
+    const element = cloneTemplate(this.postTemplate, '.post');
+    fillPostHeader(element, post);
+    element.querySelector('.excerpt').textContent = excerptOf(post.content);
+    const replies = element.querySelector('.replies');
+    replies.dataset.id = post.id;
+    replies.querySelector('.count').textContent = `${replyCount} replies`;
+    this.fillReactions(element.querySelector('.reactions'), post);
+    fillActions(element, post);
+    return element;
+  }
+
+  createArticle(post) {
+    const element = cloneTemplate(this.articleTemplate, '.post-article');
+    fillPostHeader(element, post);
+    const blocks = parseBlocks(post.content);
+    const nodes = [];
+    for (let i = 0; i < blocks.length; i++) {
+      const { isHeading, text } = blocks[i];
+      const node = document.createElement(isHeading ? 'h4' : 'p');
+      node.textContent = text.trim();
+      if (isHeading) node.dataset.heading = i;
+      nodes.push(node);
+    }
+    element.querySelector('.post-text').replaceChildren(...nodes);
+    this.fillReactions(element.querySelector('.reactions'), post);
+    fillActions(element, post);
     return element;
   }
 
@@ -623,6 +812,8 @@ class ChatApplication extends Application {
 
   handleMessageClick(event) {
     const button = event.target.closest('button');
+    const card = event.target.closest('.post');
+    if (!button && card) return void this.openThread(card.dataset.id);
     if (!button) return;
     const { id } = button.dataset;
     if (button.classList.contains('reaction')) {
@@ -649,7 +840,7 @@ class ChatApplication extends Application {
     this.app.dataset.panel = this.panel;
     if (!this.panel) return;
     this.panelTitle.textContent = PANELS[this.panel];
-    if (this.panel === 'thread') this.renderThread();
+    if (THREADS.includes(this.panel)) this.renderThread();
     else if (this.panel === 'pins') this.renderPins();
     else if (this.panel === 'members') this.renderMembers();
   }
@@ -657,7 +848,10 @@ class ChatApplication extends Application {
   renderThread() {
     const { replica, replies } = this.currentView();
     const root = replica.get(this.thread);
-    if (!root || root.chat !== this.chat) {
+    const isShown = root !== null && containerOf(root) === this.chat;
+    const isPostShown = isShown && isPost(root);
+    this.postInfo.classList.toggle('hidden', !isPostShown);
+    if (!isShown) {
       const empty = document.createElement('p');
       empty.className = 'empty';
       empty.textContent = 'Choose [reply] on a message to open its thread';
@@ -668,10 +862,42 @@ class ChatApplication extends Application {
     }
     const thread = replies.get(this.thread) ?? [];
     const message = { id: this.thread, ...root };
-    this.threadRoot.replaceChildren(this.createThreadItem(message));
+    const head = isPostShown
+      ? this.createArticle(message)
+      : this.createThreadItem(message);
+    this.threadRoot.replaceChildren(head);
+    if (isPostShown) this.renderPostInfo(message, thread.length);
     this.threadCount.textContent = `${thread.length} replies`;
     const items = thread.map((reply) => this.createThreadItem(reply));
     this.threadReplies.replaceChildren(...items);
+  }
+
+  renderPostInfo(post, replyCount) {
+    const reactions = [];
+    for (const reaction in REACTIONS) {
+      const count = post.reactions?.[reaction] ?? 0;
+      if (count > 0) reactions.push(`${REACTIONS[reaction]} ${count}`);
+    }
+    this.postReplies.textContent = replyCount;
+    this.postReactions.textContent = reactions.join('  ') || 'none';
+    const blocks = parseBlocks(post.content);
+    const outline = [];
+    for (let i = 0; i < blocks.length; i++) {
+      if (!blocks[i].isHeading) continue;
+      const button = document.createElement('button');
+      button.className = 'link-btn';
+      button.dataset.heading = i;
+      button.textContent = `→ ${blocks[i].text}`;
+      outline.push(button);
+    }
+    this.postOutline.replaceChildren(...outline);
+    this.outlineSection.classList.toggle('hidden', outline.length === 0);
+  }
+
+  scrollToHeading(index) {
+    const selector = `[data-heading="${index}"]`;
+    const heading = this.threadRoot.querySelector(selector);
+    heading?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
   createThreadItem(message) {
@@ -711,7 +937,8 @@ class ChatApplication extends Application {
     element.dataset.id = message.id;
     element.dataset.root = message.replyTo ?? message.id;
     element.querySelector('.who').textContent = `${message.nick} at ${time}:`;
-    element.querySelector('.text').textContent = message.content;
+    element.querySelector('.text').textContent =
+      message.title ?? message.content;
     return element;
   }
 
@@ -750,10 +977,13 @@ class ChatApplication extends Application {
   }
 
   openThread(id) {
+    const root = this.recordOf(id);
+    const isPostRoot = root !== null && isPost(root);
     this.thread = id;
-    this.panel = 'thread';
+    this.panel = isPostRoot ? 'post' : 'thread';
     this.renderPanel();
-    this.replyInput.focus();
+    if (isPostRoot) this.threadRoot.parentElement.scrollTop = 0;
+    else this.replyInput.focus();
   }
 
   fillPalette() {
@@ -809,6 +1039,8 @@ class ChatApplication extends Application {
   closeTop() {
     const isPaletteOpen = !this.palette.classList.contains('hidden');
     if (isPaletteOpen) return void this.closePalette();
+    const isTopicOpen = !this.topicForm.classList.contains('hidden');
+    if (isTopicOpen) return void this.closeDescription();
     const isSearchOpen = !this.searchBar.classList.contains('hidden');
     if (isSearchOpen) return void this.toggleSearch();
     if (this.panel) return void this.closePanel();
@@ -821,8 +1053,9 @@ class ChatApplication extends Application {
     this.unread.delete(id);
     writeSetting(CHAT_KEY, id);
     this.app.classList.remove('menu-open');
-    if (this.panel === 'thread') this.panel = '';
+    if (THREADS.includes(this.panel)) this.panel = '';
     this.thread = '';
+    this.closeDescription();
     this.render();
     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
     this.messageInput.focus();
@@ -850,15 +1083,123 @@ class ChatApplication extends Application {
     this.renderMessages();
   }
 
-  createChat() {
-    const name = this.chatNameInput.value.trim();
-    if (!name) return;
+  handleNavClick(event) {
+    const action = event.target.closest('[data-action]');
+    if (action) {
+      const { dataset } = action;
+      return void NAV_ACTIONS[dataset.action](this, dataset);
+    }
+    const item = event.target.closest('.nav-item');
+    if (!item) return;
+    const { peer, folder, id } = item.dataset;
+    if (peer) return void this.selectDirect(peer);
+    if (folder) return void this.toggleFolder(folder);
+    if (id) this.selectChat(id);
+  }
+
+  addChannel(entity, input) {
+    if (!input.value.trim()) return;
+    const { icon, name } = parseTitle(input.value, entity);
     const id = generateUUID();
-    const chat = { id, name, icon: '💬', created: Date.now() };
-    createChat(this.replica, chat);
-    this.chatNameInput.value = '';
-    this.logger.log('Created chat:', name);
+    const owner = this.peerId;
+    const created = Date.now();
+    createChannel(this.replica, entity, { id, name, icon, owner, created });
+    input.value = '';
+    this.logger.log(`Created ${entity}:`, name);
     this.selectChat(id);
+  }
+
+  addFolders() {
+    const path = this.folderNameInput.value.split('/');
+    const names = path.map((name) => name.trim()).filter(Boolean);
+    if (names.length === 0) return;
+    const { children } = folderTree(this.replica, this.peerId);
+    let parent = '';
+    for (const text of names) {
+      const { icon, name } = parseTitle(text, 'folder');
+      const siblings = children.get(parent) ?? [];
+      const existing = siblings.find((folder) => folder.name === name);
+      this.collapsed.delete(parent);
+      if (existing) {
+        parent = existing.id;
+        continue;
+      }
+      const id = generateUUID();
+      const owner = this.peerId;
+      const created = Date.now();
+      const folder = { id, name, icon, owner, parent, created };
+      createFolder(this.replica, folder);
+      this.logger.log('Created folder:', name);
+      parent = id;
+    }
+    this.folderNameInput.value = '';
+    this.saveCollapsed();
+  }
+
+  addToFolder(folder) {
+    if (isPair(this.chat)) {
+      const text = 'Direct messages stay in contacts';
+      return void this.showNotification(text, 'warning');
+    }
+    const { items } = folderTree(this.replica, this.peerId);
+    if (items.get(folder)?.has(this.chat)) return;
+    placeItem(this.replica, folder, this.chat, true);
+    this.collapsed.delete(folder);
+    this.saveCollapsed();
+  }
+
+  removeFromFolder(folder, item) {
+    placeItem(this.replica, folder, item, false);
+  }
+
+  toggleVisibility(id) {
+    const folder = this.replica.get(id);
+    if (folder?.owner !== this.peerId) return;
+    const visibility = NEXT_VISIBILITY[folder.visibility ?? 'unlisted'];
+    setVisibility(this.replica, id, visibility);
+    this.logger.log(`Folder ${folder.name} is now ${visibility}`);
+  }
+
+  toggleFolder(id) {
+    if (this.collapsed.has(id)) this.collapsed.delete(id);
+    else this.collapsed.add(id);
+    this.saveCollapsed();
+    this.renderChannels();
+  }
+
+  saveCollapsed() {
+    const ids = Array.from(this.collapsed).join(',');
+    writeSetting(COLLAPSED_KEY, ids);
+  }
+
+  canDescribe() {
+    if (isPair(this.chat)) return false;
+    const channel = this.replica.get(this.chat);
+    if (!channel) return false;
+    return !channel.owner || channel.owner === this.peerId;
+  }
+
+  editDescription() {
+    if (!this.canDescribe()) return;
+    const { description = '' } = this.replica.get(this.chat);
+    this.topicInput.value = description;
+    this.chatInfo.classList.add('hidden');
+    this.topicForm.classList.remove('hidden');
+    this.topicInput.focus();
+  }
+
+  saveDescription() {
+    const description = this.topicInput.value.trim();
+    if (this.canDescribe()) {
+      const entity = this.channelEntity();
+      describe(this.replica, entity, this.chat, description);
+    }
+    this.closeDescription();
+  }
+
+  closeDescription() {
+    this.topicForm.classList.add('hidden');
+    this.chatInfo.classList.remove('hidden');
   }
 
   syncUsername() {
@@ -903,6 +1244,25 @@ class ChatApplication extends Application {
     return false;
   }
 
+  isSendKey(event) {
+    if (this.channelEntity() !== 'feed') return !event.shiftKey;
+    return event.ctrlKey || event.metaKey;
+  }
+
+  writePost(text) {
+    const lines = text.split('\n');
+    const id = generateUUID();
+    const feed = this.chat;
+    const author = this.peerId;
+    const nick = this.username;
+    const title = lines[0].trim();
+    const content = lines.slice(1).join('\n').trim();
+    const timestamp = Date.now();
+    const post = { id, feed, author, nick, title, content, timestamp };
+    createPost(this.replica, post);
+    return id;
+  }
+
   writeMessage(content, replyTo) {
     const { chat } = this;
     const replica = this.replicaOf(chat);
@@ -923,7 +1283,8 @@ class ChatApplication extends Application {
     const content = this.messageInput.value.trim();
     if (!content || !this.hasNick()) return;
     this.messageInput.value = '';
-    this.writeMessage(content, '');
+    if (this.channelEntity() === 'feed') this.writePost(content);
+    else this.writeMessage(content, '');
     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
     await this.reportDelivery(content);
   }
@@ -964,16 +1325,22 @@ class ChatApplication extends Application {
     this.showNotification('Direct message waits until the peer is reachable');
   }
 
+  recordOf(id) {
+    const record = this.replicaOf(this.chat).get(id);
+    return record ? { id, ...record } : null;
+  }
+
   addReaction({ messageId, reaction }) {
-    react(this.replicaOf(this.chat), messageId, reaction);
+    const record = this.recordOf(messageId);
+    if (!record) return;
+    react(this.replicaOf(this.chat), record, reaction);
     this.logger.log('Added reaction:', reaction, 'to message:', messageId);
   }
 
   togglePin(id) {
-    const replica = this.replicaOf(this.chat);
-    const message = replica.get(id);
-    if (!message) return;
-    pin(replica, id, message.pinned !== true);
+    const record = this.recordOf(id);
+    if (!record) return;
+    pin(this.replicaOf(this.chat), record, record.pinned !== true);
   }
 
   showLinks() {
