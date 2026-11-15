@@ -62,6 +62,8 @@ sync. Terminal-like UI follows the
   and a dropped link is renegotiated through another linked peer
 - Offline-first: service worker caches the app and keeps all replicas in
   OPFS, messages written offline reach the server after reconnect
+- Automatic updates: the app version is shown in the sidebar and updates
+  install without user action, see [Releases](#releases)
 - One WebSocket connection for all tabs through `MetacomProxy`, one tab per
   browser (Web Locks) runs the WebRTC mesh for all of them
 - Keyboard: `Ctrl+K` jumps to a chat, feed, or contact, `Alt+↑`/`Alt+↓`
@@ -71,8 +73,27 @@ sync. Terminal-like UI follows the
   leaves a thread, or shows and hides the sidebar
 - Mobile: back button closes the sidebar, panel, viewer, menu, and thread, layout
   respects safe areas and the on-screen keyboard, bigger touch targets
-- Nick shared between tabs, install prompt, cache update, clear database,
-  members list, and activity log
+- Nick shared between tabs, install prompt, clear database, members list,
+  and activity log
+
+## Releases
+
+The app version lives in `application/static/manifest.json` as `"version"`;
+increase it with every release that changes static files, nothing else is
+needed:
+
+- The service worker keeps one cache per version (`xxii-<version>`) and a
+  record of the active one in `xxii-meta`
+- Tabs ask the worker to check on start, on server reconnect (a deploy), when
+  the tab becomes visible, when the network returns, and every 30 minutes;
+  the worker reads `manifest.json` from the network bypassing the HTTP cache
+- A new version is downloaded into a new cache in one `addAll`, becomes
+  active, old caches are removed, and every tab is told over
+  `BroadcastChannel`
+- A tab restarts itself when hidden, or after a minute without input when no
+  unsent files, viewer, or menu are open; drafts survive the restart; the
+  version label shows `v0.1.0 → v0.1.1` meanwhile, a click restarts at once
+  or checks for updates when there is none
 
 ## Sync
 
@@ -146,5 +167,6 @@ server) with `files/have`, `get`, and `put`.
   folders and their visibility between peers, offline writes, OPFS,
   automatic WebRTC links, direct messages, files through the server and
   peer to peer, image previews and viewer, group sync and relayed
-  reconnection without server, and clear database in headless Chrome;
+  reconnection without server, clear database, and an automatic update to
+  a new version and back in headless Chrome;
   ports `8000` and `8001` must be free

@@ -23,13 +23,6 @@ import { Mesh } from './mesh.js';
 import { Application } from './application.js';
 
 const TASKS = {
-  cache: {
-    label: 'update cache',
-    busy: 'updating...',
-    request: 'Cache update requested',
-    done: 'Cache updated successfully',
-    failed: 'Cache update failed',
-  },
   clear: {
     label: 'clear database',
     busy: 'clearing...',
@@ -362,7 +355,7 @@ class ChatApplication extends Application {
     this.sidebar = byId('sidebar');
     this.menuBtn = byId('menu-btn');
     this.installBtn = byId('install-btn');
-    this.updateCacheBtn = byId('update-cache-btn');
+    this.versionBtn = byId('version-btn');
     this.clearMessagesBtn = byId('clear-messages-btn');
     this.clearLogBtn = byId('clear-log-btn');
     this.connectionStatus = byId('connection-status');
@@ -462,7 +455,7 @@ class ChatApplication extends Application {
 
     this.menuBtn.onclick = () => this.toggleSidebar();
     this.installBtn.onclick = () => this.install();
-    this.updateCacheBtn.onclick = () => this.updateCache();
+    this.versionBtn.onclick = () => this.handleVersionClick();
     this.clearMessagesBtn.onclick = () => this.clearDatabase();
     this.clearLogBtn.onclick = () => this.logger.clear();
     this.searchBtn.onclick = () => this.toggleSearch();
@@ -568,6 +561,7 @@ class ChatApplication extends Application {
     this.on('ready', () => this.startSync());
     this.on('status', ({ connected }) => this.showStatus(connected));
     this.on('network', () => this.updateInterface());
+    this.on('version', (versions) => this.showVersion(versions));
     this.on('install', () => this.showInstallButton(true));
     this.on('installed', () => this.showInstallButton(false));
 
@@ -2389,9 +2383,40 @@ class ChatApplication extends Application {
     }
   }
 
-  updateCache() {
-    const update = () => this.api.cache.update();
-    return this.runTask(this.updateCacheBtn, 'cache', update);
+  showVersion({ version, next }) {
+    const button = this.versionBtn;
+    button.textContent = next ? `v${version} → v${next}` : `v${version}`;
+    button.classList.toggle('active', next !== '');
+    button.title = next
+      ? 'Update is ready, restarts when idle; click to restart now'
+      : 'Updates install automatically; click to check now';
+  }
+
+  handleVersionClick() {
+    const action = this.nextVersion ? this.restart() : this.checkNow();
+    action.catch((error) => this.report(error));
+  }
+
+  async checkNow() {
+    this.versionBtn.disabled = true;
+    try {
+      const next = await this.checkUpdate(true);
+      const text = next
+        ? `Version ${next} is ready`
+        : 'This is the latest version';
+      this.showNotification(text);
+    } finally {
+      this.versionBtn.disabled = false;
+    }
+  }
+
+  canRestart() {
+    const hasFiles = Array.from(this.pending.values()).some(
+      (files) => files.length > 0,
+    );
+    const isBusy = this.lightbox.isOpen || this.menu.isOpen;
+    const isFree = !hasFiles && !isBusy && !this.switcher.isOpen;
+    return isFree && super.canRestart();
   }
 
   clearDatabase() {
