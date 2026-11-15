@@ -77,8 +77,9 @@
 
     <main id="chat-view" class="chat-view">
       <header class="topbar">
-        <button id="menu-btn" class="link-btn menu-btn" title="Menu" aria-label="Menu">≡</button>
+        <button id="menu-btn" class="link-btn menu-btn" title="Chats (Esc)" aria-label="Chats">≡</button>
         <div class="context">
+          <button id="back-btn" class="link-btn back-btn hidden" type="button" title="Back to chat (Esc)" aria-label="Back to chat">‹</button>
           <span id="chat-title" class="chat-title">!general</span>
           <span id="chat-info" class="description"></span>
           <form id="topic-form" class="topic-form hidden">
@@ -106,6 +107,13 @@
         </button>
       </div>
       <form id="composer" class="composer">
+        <div id="reply-bar" class="reply-bar hidden">
+          <button id="reply-target" class="reply-target" type="button" title="Show the message">
+            <span class="reply-label">reply to <span class="reply-author"></span></span>
+            <span class="reply-text"></span>
+          </button>
+          <button id="reply-cancel" class="link-btn" type="button" title="Cancel reply (Esc)" aria-label="Cancel reply">×</button>
+        </div>
         <div id="pending-files" class="pending-files hidden"></div>
         <textarea id="message-input" rows="1" enterkeyhint="send" placeholder="> new message to !general"></textarea>
         <div class="composer-bar">
@@ -115,7 +123,7 @@
             <button id="emoji-btn" class="link-btn" type="button">emoji</button>
             <span id="composer-info" class="composer-info"></span>
           </div>
-          <span class="shortcuts"><kbd>Ctrl K</kbd> jump <kbd>Ctrl F</kbd> search <kbd>Esc</kbd> panel</span>
+          <span class="shortcuts"><kbd>Ctrl K</kbd> jump <kbd>↑</kbd> select <kbd>Esc</kbd> sidebar</span>
           <button id="send-btn" class="send" type="submit">send</button>
         </div>
       </form>
@@ -123,29 +131,9 @@
 
     <aside id="panel" class="panel">
       <header class="panel-header">
-        <span id="panel-title" class="panel-title">Thread</span>
+        <span id="panel-title" class="panel-title">Members</span>
         <button id="panel-close-btn" class="link-btn" aria-label="Close panel">close</button>
       </header>
-      <section class="panel-body" data-panel="thread">
-        <div id="thread-root"></div>
-        <div id="post-info" class="post-info hidden">
-          <section class="panel-section">
-            <h3>STATS</h3>
-            <div class="stat"><span>Replies</span><span id="post-replies" class="accent"></span></div>
-            <div class="stat"><span>Reactions</span><span id="post-reactions" class="accent"></span></div>
-          </section>
-          <section id="outline-section" class="panel-section">
-            <h3>OUTLINE</h3>
-            <div id="post-outline" class="outline"></div>
-          </section>
-        </div>
-        <div class="divider"><span id="thread-count">0 replies</span></div>
-        <div id="thread-replies" class="thread-replies"></div>
-        <form id="reply-form" class="reply-form">
-          <textarea id="reply-input" rows="1" enterkeyhint="send" placeholder="> reply in thread"></textarea>
-          <button class="send" type="submit">reply</button>
-        </form>
-      </section>
       <section class="panel-body" data-panel="pins">
         <div id="pin-list" class="pin-list"></div>
       </section>
@@ -161,11 +149,6 @@
     </aside>
   </div>
 
-  <div id="toolbar" class="toolbar hidden" role="toolbar" aria-label="Message actions">
-    <span class="quick-reactions"></span>
-    <button type="button" data-action="thread">reply</button>
-    <button type="button" data-action="pin">pin</button>
-  </div>
   <div id="backdrop" class="backdrop hidden"></div>
   <div id="menu" class="menu hidden" role="menu"></div>
   <div id="switcher" class="switcher hidden" role="dialog" aria-label="Jump to chat">
@@ -228,6 +211,7 @@
     <div class="message">
       <span class="time"></span>
       <div class="body">
+        <button class="quote hidden" type="button" data-action="quote"><span class="quote-author"></span><span class="quote-text"></span></button>
         <div class="line">
           <span class="author"></span><span class="content"></span>
         </div>
@@ -238,6 +222,7 @@
           <span class="count"></span>
         </button>
       </div>
+      <button class="more" type="button" data-action="menu" tabindex="-1" title="Actions" aria-label="Message actions">⋯</button>
     </div>
   </template>
 
@@ -254,6 +239,7 @@
         </button>
         <div class="reactions"></div>
       </div>
+      <button class="more" type="button" data-action="menu" tabindex="-1" title="Actions" aria-label="Message actions">⋯</button>
     </article>
   </template>
 
@@ -261,19 +247,12 @@
     <article class="post-article">
       <h1 class="title"></h1>
       <div class="meta"><span class="nick"></span><span class="bullet">•</span><span class="date"></span></div>
+      <nav class="outline hidden" aria-label="Outline"></nav>
       <div class="post-text"></div>
       <div class="attachments"></div>
       <div class="reactions"></div>
+      <button class="more" type="button" data-action="menu" tabindex="-1" title="Actions" aria-label="Message actions">⋯</button>
     </article>
-  </template>
-
-  <template id="thread-item-template">
-    <div class="thread-item">
-      <div class="who"></div>
-      <div class="text"></div>
-      <div class="attachments"></div>
-      <div class="reactions"></div>
-    </div>
   </template>
 
   <template id="pin-item-template">

@@ -230,14 +230,19 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
   const serverHas = (content) => (deltas) =>
     deltas.some((delta) => delta.data.content?.$lww.value === content);
 
-  const hover = (
-    selector,
-  ) => `const item = document.querySelector('${selector}');
-    const options = { bubbles: true, pointerType: 'mouse', clientX: 200 };
-    item.dispatchEvent(new PointerEvent('pointerover', options));`;
+  const menuClick = (selector, button) => `{
+    const item = document.querySelector('${selector}');
+    const rect = item.getBoundingClientRect();
+    const x = rect.left + 120;
+    const y = rect.top + 4;
+    const init = { bubbles: true, cancelable: true, clientX: x, clientY: y };
+    const line = item.querySelector('.line, .title');
+    line.dispatchEvent(new MouseEvent('contextmenu', init));
+    document.querySelector('#menu ${button}').click();
+  }`;
 
-  const toolbarClick = (selector) =>
-    `document.querySelector('#toolbar ${selector}').click();`;
+  const touch = (type, x, y) => `item.dispatchEvent(new PointerEvent('${type}',
+    { bubbles: true, pointerType: 'touch', clientX: ${x}, clientY: ${y} }));`;
 
   const press = (key, options = {}) => {
     const init = JSON.stringify({ key, bubbles: true, ...options });
@@ -263,8 +268,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await focus(second);
     await run(
       second,
-      `${hover(message)}
-      ${toolbarClick('[data-reaction="like"]')}
+      `${menuClick(message, '[data-reaction="like"]')}
       return true;`,
     );
     const reaction = `[...app.replica.keys('reaction')]
@@ -305,28 +309,50 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(second, badge);
   });
 
-  await t.test('replies open in a thread and pins are listed', async () => {
+  await t.test('replies quote in place and open a thread', async () => {
     await focus(first);
     const id = await run(first, `return ${findText('in dev chat')};`);
     const message = `.message[data-id="${id}"]`;
     await wait(first, `return document.querySelector('${message}') !== null;`);
     await run(
       first,
-      `${hover(message)}
-      ${toolbarClick('[data-action="thread"]')}
-      app.replyInput.value = 'thread reply';
-      await app.sendReply();
-      ${toolbarClick('[data-action="pin"]')}
+      `${menuClick(message, '[data-action="reply"]')}
+      return true;`,
+    );
+    const bar = `return !app.replyBar.classList.contains('hidden')
+      && app.replyText.textContent === 'in dev chat'
+      && app.messageInput.placeholder === '> reply to ada';`;
+    await wait(first, bar);
+    await run(
+      first,
+      `app.messageInput.value = 'thread reply';
+      await app.sendMessage();
+      ${menuClick(message, '[data-action="pin"]')}
       return true;`,
     );
     const replied = `return [...app.replica.keys('message')].some((key) =>
       app.replica.get(key).replyTo === '${id}');`;
     await wait(second, replied);
     await wait(second, `return app.replica.get('${id}').pinned === true;`);
+    const replyId = await run(first, `return ${findText('thread reply')};`);
+    const reply = `.message[data-id="${replyId}"]`;
+    const quoted = `const quote = document.querySelector('${reply} .quote');
+      return app.replyBar.classList.contains('hidden')
+        && quote?.querySelector('.quote-text').textContent === 'in dev chat';`;
+    await wait(first, quoted);
     const count = `return document.querySelector('${message} .replies .count')
-      .textContent === '1 reply';`;
+      ?.textContent === '1 reply';`;
     await wait(first, count);
-    await wait(first, 'return app.threadReplies.children.length === 1;');
+    await run(first, `document.querySelector('${message} .replies').click();`);
+    const opened = `const items = app.messageList.querySelectorAll('.message');
+      return app.thread === '${id}' && items.length === 2
+        && !app.backBtn.classList.contains('hidden')
+        && app.chatInfo.textContent === 'thread · 1 reply'
+        && document.querySelector('${reply} .quote').classList
+          .contains('hidden');`;
+    await wait(first, opened);
+    await run(first, `${press('Escape')} return true;`);
+    await wait(first, `return app.thread === '';`);
     await run(first, `app.togglePanel('pins'); return true;`);
     await wait(
       first,
@@ -337,82 +363,92 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
 
   let feedId = '';
 
-  await t.test('feed posts open details with outline and replies', async () => {
-    await focus(first);
-    const firstChat = await run(first, 'return app.chat;');
-    const secondChat = await run(second, 'return app.chat;');
-    await run(
-      first,
-      `app.feedNameInput.value = '📣 news';
+  await t.test(
+    'feed posts open in place with outline and replies',
+    async () => {
+      await focus(first);
+      const firstChat = await run(first, 'return app.chat;');
+      const secondChat = await run(second, 'return app.chat;');
+      await run(
+        first,
+        `app.feedNameInput.value = '📣 news';
       app.addChannel('feed', app.feedNameInput);
       return true;`,
-    );
-    feedId = await run(first, 'return app.chat;');
-    const text = 'Release notes\n## Intro\nfirst part\n## Next steps\nmore';
-    await send(first, 'ada', text);
-    const card = `app.render();
+      );
+      feedId = await run(first, 'return app.chat;');
+      const text = 'Release notes\n## Intro\nfirst part\n## Next steps\nmore';
+      await send(first, 'ada', text);
+      const card = `app.render();
       const title = document.querySelector('.post .title');
       return title?.textContent === 'Release notes';`;
-    await wait(first, card);
-    await untilServer((deltas) =>
-      deltas.some((delta) => {
-        const title = delta.data.title?.$lww.value;
-        return delta.entity === 'post' && title === 'Release notes';
-      }),
-    );
-    const postId = await run(first, `return [...app.replica.keys('post')][0];`);
-    const listed = `app.render();
+      await wait(first, card);
+      await untilServer((deltas) =>
+        deltas.some((delta) => {
+          const title = delta.data.title?.$lww.value;
+          return delta.entity === 'post' && title === 'Release notes';
+        }),
+      );
+      const postId = await run(
+        first,
+        `return [...app.replica.keys('post')][0];`,
+      );
+      const listed = `app.render();
       const item = app.feedList.querySelector('[data-id="${feedId}"]');
       if (!item || !app.replica.get('${postId}')) return false;
       const name = item.querySelector('.name').textContent;
       const icon = item.querySelector('.icon').textContent;
       return name === '#news' && icon === '📣';`;
-    await wait(second, listed);
-    await run(
-      second,
-      `app.selectChat('${feedId}');
+      await wait(second, listed);
+      await run(
+        second,
+        `app.selectChat('${feedId}');
       document.querySelector('.post[data-id="${postId}"] .title').click();
       return true;`,
-    );
-    const details = `const outline = [...app.postOutline.children]
-        .map((item) => item.textContent).join('|');
-      const title = app.panelTitle.textContent;
-      return title === 'POST DETAILS' && outline === '→ Intro|→ Next steps';`;
-    await wait(second, details);
-    await run(
-      second,
-      `app.usernameInput.value = 'ada';
-      app.replyInput.value = 'nice post';
-      await app.sendReply();
+      );
+      const details = `const links = document.querySelectorAll(
+        '.post-article .outline button');
+      const outline = [...links].map((item) => item.textContent).join('|');
+      return app.thread === '${postId}'
+        && app.chatInfo.textContent === 'post · 0 replies'
+        && outline === '→ Intro|→ Next steps';`;
+      await wait(second, details);
+      await run(
+        second,
+        `app.usernameInput.value = 'ada';
+      app.messageInput.value = 'nice post';
+      await app.sendMessage();
       return true;`,
-    );
-    const replied = `app.render();
+      );
+      await wait(second, `app.render(); ${shown('nice post')}`);
+      const replied = `app.render();
       const post = document.querySelector('.post[data-id="${postId}"]');
       const count = post?.querySelector('.replies .count').textContent;
       return count === '1 reply';`;
-    await wait(first, replied);
-    await run(
-      first,
-      `app.editDescription();
+      await wait(first, replied);
+      await run(
+        first,
+        `app.editDescription();
       app.topicInput.value = 'team news';
       app.saveDescription();
       return true;`,
-    );
-    await wait(
-      second,
-      'app.render(); return app.chatInfo.textContent === "team news";',
-    );
-    const keys = await run(
-      second,
-      `return [
+      );
+      await run(second, 'app.closeThread(); return true;');
+      await wait(
+        second,
+        'app.render(); return app.chatInfo.textContent === "team news";',
+      );
+      const keys = await run(
+        second,
+        `return [
         app.isSendKey(new KeyboardEvent('keydown', { key: 'Enter' })),
         app.isSendKey(new KeyboardEvent('keydown', { ctrlKey: true })),
       ];`,
-    );
-    assert.deepEqual(keys, [false, true]);
-    await run(second, `app.closePanel(); app.selectChat('${secondChat}');`);
-    await run(first, `app.selectChat('${firstChat}'); return true;`);
-  });
+      );
+      assert.deepEqual(keys, [false, true]);
+      await run(second, `app.selectChat('${secondChat}');`);
+      await run(first, `app.selectChat('${firstChat}'); return true;`);
+    },
+  );
 
   await t.test('older messages load on demand', async () => {
     await focus(first);
@@ -422,22 +458,37 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     const button = 'return !app.loadMoreBtn.classList.contains("hidden");';
     await wait(first, button);
     await run(first, 'app.loadOlder(); return true;');
-    await wait(first, `return ${rows} === 56;`);
+    await wait(first, `return ${rows} === 57;`);
   });
 
-  await t.test('Esc toggles panel, Ctrl+K jumps, drafts stay', async () => {
+  await t.test('keyboard: Esc sidebar, select, reply, Ctrl+K', async () => {
     await focus(first);
     const chat = await run(first, 'return app.chat;');
+    const isNarrow = await run(
+      first,
+      'return matchMedia("(max-width: 900px)").matches;',
+    );
+    const toggled = isNarrow ? 'menu-open' : 'sidebar-hidden';
     await run(
       first,
-      `app.closePanel();
-      document.activeElement.blur();
+      `document.activeElement.blur();
       ${press('Escape')}
       return true;`,
     );
-    await wait(first, 'return app.panel !== "";');
+    await wait(first, `return app.app.classList.contains('${toggled}');`);
     await run(first, `${press('Escape')} return true;`);
-    await wait(first, 'return app.panel === "";');
+    await wait(first, `return !app.app.classList.contains('${toggled}');`);
+    await run(first, `app.messageInput.focus(); ${press('ArrowUp')}`);
+    const last = `const items = app.messageList.querySelectorAll('.message');
+      return document.activeElement === items[items.length - 1];`;
+    await wait(first, last);
+    await run(first, `${press('ArrowUp')} ${press('r')} return true;`);
+    const quote = `return !app.replyBar.classList.contains('hidden')
+      && document.activeElement === app.messageInput
+      && app.replyText.textContent === 'bulk 53';`;
+    await wait(first, quote);
+    await run(first, `${press('Escape')} return true;`);
+    await wait(first, `return app.replyBar.classList.contains('hidden');`);
     await run(
       first,
       `app.messageInput.value = 'unsent draft';
@@ -459,6 +510,49 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
       first,
       `app.messageInput.value = '';
       app.messageInput.dispatchEvent(new Event('input'));
+      return true;`,
+    );
+  });
+
+  await t.test('touch: swipe replies, long press lifts the menu', async () => {
+    await focus(first);
+    const lastMessage = `const list = app.messageList;
+      const items = list.querySelectorAll('.message');
+      const item = items[items.length - 1];
+      const rect = item.getBoundingClientRect();
+      const y = rect.top + 4;`;
+    await run(
+      first,
+      `${lastMessage}
+      ${touch('pointerdown', 300, 'y')}
+      ${touch('pointermove', 280, 'y')}
+      ${touch('pointermove', 200, 'y')}
+      ${touch('pointerup', 200, 'y')}
+      return true;`,
+    );
+    const quote = `return !app.replyBar.classList.contains('hidden')
+      && app.replyText.textContent === 'bulk 54';`;
+    await wait(first, quote);
+    await run(
+      first,
+      `app.setQuote(''); ${lastMessage}
+      ${touch('pointerdown', 300, 'y')} return true;`,
+    );
+    const lifted = `return app.menu.isLifted
+      && document.querySelector('#menu .lift .content')
+        ?.textContent === 'bulk 54'
+      && !app.backdrop.classList.contains('hidden');`;
+    await wait(first, lifted);
+    await run(
+      first,
+      `${lastMessage} ${touch('pointerup', 300, 'y')}
+      ${press('Escape')} return true;`,
+    );
+    await wait(first, 'return !app.menu.isOpen;');
+    await run(
+      first,
+      `document.body.dispatchEvent(new PointerEvent('pointerdown',
+        { bubbles: true, pointerType: 'mouse' }));
       return true;`,
     );
   });

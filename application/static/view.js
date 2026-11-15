@@ -4,6 +4,7 @@ const HEADING = /^#{1,3}\s+(.+)$/;
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>"']+/g;
 const URL_TAIL = /[.,;:!?)\]]+$/;
 const DATE_OPTIONS = { weekday: 'long', month: 'long', day: 'numeric' };
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
 const pad = (value) => `${value}`.padStart(2, '0');
 
@@ -141,7 +142,9 @@ const isEditable = (element) => {
   return isField || element.isContentEditable;
 };
 
+const isReducedMotion = () => matchMedia(REDUCED_MOTION).matches;
+
 export { timeOf, dateOf, dayKey, dayOf, dayLabel, plural };
 export { formatSize, fitSize, readSetting, writeSetting, readMap, writeMap };
 export { cloneTemplate, setBadge, fillText, parseBlocks, excerptOf };
-export { isEditable };
+export { isEditable, isReducedMotion };
