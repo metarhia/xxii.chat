@@ -7,6 +7,7 @@ const REACTIONS = {
   laugh: '😂',
 };
 
+const REACTION_NAMES = Object.keys(REACTIONS);
 const ICONS = { chat: '💬', feed: '📢', folder: '📁' };
 const PREFIXES = { chat: '!', feed: '#' };
 const CHANNELS = ['feed', 'chat'];
@@ -70,7 +71,16 @@ const FIELDS = {
     mime: 'string',
     size: 'size',
     checksum: 'checksum',
+    width: 'number',
+    height: 'number',
     created: 'number',
+  },
+  reaction: {
+    chat: 'string',
+    message: 'string',
+    author: 'string',
+    reaction: REACTION_NAMES,
+    active: 'boolean',
   },
 };
 
@@ -181,14 +191,18 @@ const createPost = (replica, post) => {
 
 const attachFile = (replica, file) => {
   const { id, chat, message, author, name, mime, size, checksum } = file;
-  const { created } = file;
+  const { width, height, created } = file;
   const fields = { chat, message, author, name, mime, size, checksum, created };
-  return replica.assign('file', id, fields);
+  const isSized = Number.isFinite(width) && Number.isFinite(height);
+  const sized = isSized ? { ...fields, width, height } : fields;
+  return replica.assign('file', id, sized);
 };
 
-const react = (replica, record, reaction) => {
-  const path = ['reactions', reaction];
-  return replica.increment(entityOf(record), record.id, path);
+const setReaction = (replica, fields) => {
+  const { chat, message, author, reaction, active } = fields;
+  const id = `${message}/${author}/${reaction}`;
+  const record = { chat, message, author, reaction, active };
+  return replica.assign('reaction', id, record);
 };
 
 const pin = (replica, record, pinned) =>
@@ -302,6 +316,35 @@ const attachmentsOf = (replica, chat) => {
   return attachments;
 };
 
+const reactionsOf = (replica, chat) => {
+  const reactions = new Map();
+  for (const id of replica.keys('reaction')) {
+    const record = replica.get(id);
+    if (record.chat !== chat || record.active !== true) continue;
+    const byMessage = reactions.get(record.message) ?? new Map();
+    const authors = byMessage.get(record.reaction) ?? new Set();
+    authors.add(record.author);
+    byMessage.set(record.reaction, authors);
+    reactions.set(record.message, byMessage);
+  }
+  return reactions;
+};
+
+const unreadOf = (replica, reader, readAt) => {
+  const unread = new Map();
+  for (const entity of TIMELINE) {
+    for (const id of replica.keys(entity)) {
+      const record = replica.get(id);
+      const chat = containerOf(record);
+      const isOthers = record.author !== reader;
+      const isNew = record.timestamp > readAt(chat);
+      if (chat === undefined || !isOthers || !isNew) continue;
+      unread.set(chat, (unread.get(chat) ?? 0) + 1);
+    }
+  }
+  return unread;
+};
+
 const filesOf = (replica) => {
   const files = new Map();
   for (const id of replica.keys('file')) {
@@ -332,6 +375,6 @@ export { pairOf, isPair, directUnit };
 export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
 export { createFolder, setVisibility, placeItem };
-export { createMessage, createPost, attachFile, react, pin };
+export { createMessage, createPost, attachFile, setReaction, pin };
 export { listChannels, listAuthors, folderTree, threadsOf, activityOf };
-export { attachmentsOf, filesOf };
+export { attachmentsOf, reactionsOf, unreadOf, filesOf };

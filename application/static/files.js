@@ -3,6 +3,10 @@ import { fsi } from './globalstorage.js';
 const DIRECTORY = 'files';
 const DEFAULT_NAME = 'file';
 const DEFAULT_MIME = 'application/octet-stream';
+const STORED_CHANNEL = 'xxii:files';
+const IMAGE = /^image\/(png|jpeg|gif|webp|avif|bmp|svg\+xml)$/;
+
+const stored = new BroadcastChannel(STORED_CHANNEL);
 
 const toHex = (buffer) => {
   const bytes = Array.from(new Uint8Array(buffer));
@@ -32,18 +36,41 @@ const readFile = async ({ checksum, size }) => {
   return file?.size === size ? file : null;
 };
 
+const isImage = (mime) => IMAGE.test(mime);
+
+const imageSize = async (file) => {
+  if (!isImage(file.type)) return {};
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return {};
+  const { width, height } = bitmap;
+  bitmap.close();
+  return { width, height };
+};
+
+const writeFile = async (checksum, blob) => {
+  await fsi.write(DIRECTORY, checksum, blob);
+  stored.postMessage(checksum);
+};
+
 const saveFile = async ({ checksum, size }, blob) => {
   const actual = blob.size === size ? await checksumOf(blob) : '';
   if (actual !== checksum) throw new Error('File does not match its checksum');
-  await fsi.write(DIRECTORY, checksum, blob);
+  await writeFile(checksum, blob);
+};
+
+const onFileStored = (listener) => {
+  const channel = new BroadcastChannel(STORED_CHANNEL);
+  channel.addEventListener('message', ({ data }) => listener(data));
+  return channel;
 };
 
 const storeFile = async (file) => {
   const checksum = await checksumOf(file);
-  await fsi.write(DIRECTORY, checksum, file);
+  await writeFile(checksum, file);
   const name = file.name || DEFAULT_NAME;
   const mime = file.type || DEFAULT_MIME;
-  return { name, mime, size: file.size, checksum };
+  const dimensions = await imageSize(file);
+  return { name, mime, size: file.size, checksum, ...dimensions };
 };
 
 const localFiles = async (files) => {
@@ -110,5 +137,5 @@ class SerialTask {
   }
 }
 
-export { checksumOf, storeFile, readFile, saveFile };
+export { isImage, checksumOf, storeFile, readFile, saveFile, onFileStored };
 export { localFiles, clearFiles, writeBlob, sendBlob, readBlob, SerialTask };

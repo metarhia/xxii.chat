@@ -32,13 +32,24 @@ sync. Terminal-like UI follows the
   collapsed folders are remembered per browser
 - Channel names may start with an emoji icon (`📣 news`), owners edit the
   description by clicking it in the top bar
-- Messages with reactions, threads (replies), pinned messages, unread
-  badges, last activity, message search, older messages by pages of 50;
-  hovering a message shows every reaction, `reply`, and `pin` for one click,
-  reactions stay visible once added
+- Messages with threads (replies), pinned messages, clickable links,
+  message search, older messages by pages of 50; consecutive messages of one
+  author are grouped, days have sticky labels
+- Message actions: hovering shows every reaction, `reply`, and `pin` right
+  above the message where the pointer entered it, right click opens the same
+  actions as a menu with copy and download, a long press opens them as a
+  bottom sheet on touch screens
+- Reactions toggle: clicking your reaction again removes it, your reactions
+  are highlighted, a reaction shows who reacted on hover
+- Unread: per chat read time kept in the browser, badges, a `new messages`
+  line, a jump-to-latest button with the count, unread total in the tab
+  title and on the installed app icon
 - Files: `attach`, drop, or paste files up to 10 MB into messages and posts,
   each file is stored once by its SHA-256 checksum, the download button saves
-  it from OPFS, the server, or a linked peer
+  it from OPFS, the server, or a linked peer; images show previews sized
+  before loading and open in a viewer with arrows and swipe
+- Composer grows with the text, keeps a draft per chat, typing anywhere
+  focuses it
 - Direct messages go only over WebRTC between the two browsers and are
   kept in OPFS of both, never on the server
 - Automatic mesh: no host or join buttons, browsers connect to every
@@ -48,7 +59,11 @@ sync. Terminal-like UI follows the
   OPFS, messages written offline reach the server after reconnect
 - One WebSocket connection for all tabs through `MetacomProxy`, one tab per
   browser (Web Locks) runs the WebRTC mesh for all of them
-- Keyboard: `Ctrl+F` search, `Ctrl+P` pinned, `Esc` closes panels
+- Keyboard: `Ctrl+K` jumps to a chat, feed, or contact, `Alt+↑`/`Alt+↓`
+  previous or next chat, `Ctrl+F` search, `Ctrl+P` pinned, `Esc` closes the
+  top overlay or shows and hides the right panel
+- Mobile: back button closes the sidebar, panel, viewer, and sheets, layout
+  respects safe areas and the on-screen keyboard, bigger touch targets
 - Nick shared between tabs, install prompt, cache update, clear database,
   members list, and activity log
 
@@ -70,9 +85,10 @@ tab: Replicas in memory; the mesh tab serves them to peers over WebRTC
 ```
 
 Records are CRDT states: fields of `author`, `chat`, `feed`, `post`,
-`message`, `file` (attachment metadata), `folder`, and `entry` (folder to
-channel link) are last-writer-wins registers, reactions are per-replica counters, so a change
-is applied once whichever way it travels. A folder `parent` loop made by
+`message`, `file` (attachment metadata), `reaction` (message, author, and
+emoji switched on or off), `folder`, and `entry` (folder to channel link) are
+last-writer-wins registers, so a change is applied once whichever way it
+travels. A folder `parent` loop made by
 concurrent moves shows the looped folders at the root. `application/static/chat.js`
 validates deltas in browsers and on the server. Only one server thread
 (`ports: [8001]`) owns the server replica files.
@@ -117,8 +133,10 @@ server) with `files/have`, `get`, and `put`.
 
 - `npm test`: lint and types
 - `npm run test:app`: application tests in impress test mode
-- `npm run test:browser`: tabs, chats, threads, pins, feeds and post
-  details, folders and their visibility between peers, offline writes, OPFS,
+- `npm run test:browser`: tabs, chats, toolbar reactions that toggle,
+  threads, pins, feeds and post details, `Esc`, `Ctrl+K`, and drafts,
+  folders and their visibility between peers, offline writes, OPFS,
   automatic WebRTC links, direct messages, files through the server and
-  peer to peer, group sync and relayed reconnection without server, and
-  clear database in headless Chrome; ports `8000` and `8001` must be free
+  peer to peer, image previews and viewer, group sync and relayed
+  reconnection without server, and clear database in headless Chrome;
+  ports `8000` and `8001` must be free

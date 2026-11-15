@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="description" content="XXII local-first chat: globalstorage CRDT, metacom and WebRTC" />
   <meta name="theme-color" content="#090a0c" />
+  <meta name="color-scheme" content="dark" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="XXII Chat" />
@@ -76,10 +77,9 @@
 
     <main id="chat-view" class="chat-view">
       <header class="topbar">
-        <button id="menu-btn" class="link-btn menu-btn" title="Menu">≡</button>
+        <button id="menu-btn" class="link-btn menu-btn" title="Menu" aria-label="Menu">≡</button>
         <div class="context">
-          <span id="chat-title" class="accent">!general</span>
-          <span class="separator">|</span>
+          <span id="chat-title" class="chat-title">!general</span>
           <span id="chat-info" class="description"></span>
           <form id="topic-form" class="topic-form hidden">
             <input id="topic-input" type="text" maxlength="256" placeholder="description, Enter to save" />
@@ -95,13 +95,19 @@
       <div id="search-bar" class="search hidden">
         <input id="search-input" type="search" placeholder="filter messages in this chat" />
       </div>
-      <div id="chat-messages" class="messages">
-        <button id="load-more-btn" class="link-btn load-more hidden">load older messages</button>
-        <div id="message-list" class="message-list"></div>
+      <div class="timeline">
+        <div id="chat-messages" class="messages">
+          <button id="load-more-btn" class="link-btn load-more hidden">load older messages</button>
+          <div id="message-list" class="message-list"></div>
+        </div>
+        <button id="jump-btn" class="jump hidden" type="button" title="Jump to latest" aria-label="Jump to latest">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8l5 5 5-5" /></svg>
+          <span id="jump-count" class="jump-count hidden"></span>
+        </button>
       </div>
       <form id="composer" class="composer">
         <div id="pending-files" class="pending-files hidden"></div>
-        <textarea id="message-input" rows="2" placeholder="> new message to !general"></textarea>
+        <textarea id="message-input" rows="1" enterkeyhint="send" placeholder="> new message to !general"></textarea>
         <div class="composer-bar">
           <div class="composer-tools">
             <button id="attach-btn" class="link-btn" type="button">attach</button>
@@ -109,7 +115,7 @@
             <button id="emoji-btn" class="link-btn" type="button">emoji</button>
             <span id="composer-info" class="composer-info"></span>
           </div>
-          <span class="shortcuts">Ctrl+F: search | Ctrl+P: pinned | Esc: close</span>
+          <span class="shortcuts"><kbd>Ctrl K</kbd> jump <kbd>Ctrl F</kbd> search <kbd>Esc</kbd> panel</span>
           <button id="send-btn" class="send" type="submit">send</button>
         </div>
       </form>
@@ -117,8 +123,8 @@
 
     <aside id="panel" class="panel">
       <header class="panel-header">
-        <span id="panel-title" class="accent">Thread</span>
-        <button id="panel-close-btn" class="link-btn">close</button>
+        <span id="panel-title" class="panel-title">Thread</span>
+        <button id="panel-close-btn" class="link-btn" aria-label="Close panel">close</button>
       </header>
       <section class="panel-body" data-panel="thread">
         <div id="thread-root"></div>
@@ -136,7 +142,7 @@
         <div class="divider"><span id="thread-count">0 replies</span></div>
         <div id="thread-replies" class="thread-replies"></div>
         <form id="reply-form" class="reply-form">
-          <textarea id="reply-input" rows="2" placeholder="> reply in thread"></textarea>
+          <textarea id="reply-input" rows="1" enterkeyhint="send" placeholder="> reply in thread"></textarea>
           <button class="send" type="submit">reply</button>
         </form>
       </section>
@@ -155,8 +161,32 @@
     </aside>
   </div>
 
+  <div id="toolbar" class="toolbar hidden" role="toolbar" aria-label="Message actions">
+    <span class="quick-reactions"></span>
+    <button type="button" data-action="thread">reply</button>
+    <button type="button" data-action="pin">pin</button>
+  </div>
+  <div id="backdrop" class="backdrop hidden"></div>
+  <div id="menu" class="menu hidden" role="menu"></div>
+  <div id="switcher" class="switcher hidden" role="dialog" aria-label="Jump to chat">
+    <input type="text" placeholder="Jump to a chat, feed or contact" autocomplete="off" spellcheck="false" aria-label="Chat name" />
+    <ul class="switcher-list" role="listbox"></ul>
+  </div>
+  <div id="lightbox" class="lightbox hidden" role="dialog" aria-label="Image viewer">
+    <header class="lightbox-bar">
+      <span class="lightbox-name"></span>
+      <span class="lightbox-count"></span>
+      <button class="link-btn" type="button" data-lightbox="download">download</button>
+      <button class="link-btn" type="button" data-lightbox="close" aria-label="Close">×</button>
+    </header>
+    <div class="lightbox-stage" data-lightbox="close">
+      <button class="lightbox-nav" type="button" data-lightbox="prev" aria-label="Previous image">‹</button>
+      <img class="lightbox-image" alt="" />
+      <button class="lightbox-nav" type="button" data-lightbox="next" aria-label="Next image">›</button>
+    </div>
+  </div>
   <div id="palette" class="palette hidden"></div>
-  <div id="notification" class="notification hidden"></div>
+  <div id="notification" class="notification hidden" role="status"></div>
 
   <template id="contact-item-template">
     <li class="nav-item contact-item">
@@ -172,7 +202,7 @@
     <li class="nav-item chat-item">
       <span class="icon"></span>
       <span class="name"></span>
-      <button class="link-btn remove-btn hidden" data-action="remove" title="Remove from folder">×</button>
+      <button class="link-btn remove-btn hidden" data-action="remove" title="Remove from folder" aria-label="Remove from folder">×</button>
       <span class="badge hidden"></span>
       <span class="time"></span>
     </li>
@@ -185,7 +215,7 @@
         <span class="icon"></span>
         <span class="name"></span>
         <span class="folder-actions">
-          <button class="link-btn" data-action="add" title="Add the open chat or feed">+</button>
+          <button class="link-btn" data-action="add" title="Add the open chat or feed" aria-label="Add the open chat or feed">+</button>
           <button class="link-btn" data-action="visibility" title="Who sees this folder"></button>
         </span>
         <span class="badge hidden"></span>
@@ -208,10 +238,6 @@
           <span class="count"></span>
         </button>
       </div>
-      <div class="message-actions">
-        <button class="reply-btn" data-action="thread" title="Reply in thread">reply</button>
-        <button class="pin-btn" data-action="pin"></button>
-      </div>
     </div>
   </template>
 
@@ -228,10 +254,6 @@
         </button>
         <div class="reactions"></div>
       </div>
-      <div class="message-actions">
-        <button class="reply-btn" data-action="thread" title="Open post details">open</button>
-        <button class="pin-btn" data-action="pin"></button>
-      </div>
     </article>
   </template>
 
@@ -242,9 +264,6 @@
       <div class="post-text"></div>
       <div class="attachments"></div>
       <div class="reactions"></div>
-      <div class="message-actions">
-        <button class="pin-btn" data-action="pin"></button>
-      </div>
     </article>
   </template>
 
@@ -254,9 +273,6 @@
       <div class="text"></div>
       <div class="attachments"></div>
       <div class="reactions"></div>
-      <div class="message-actions">
-        <button class="pin-btn" data-action="pin"></button>
-      </div>
     </div>
   </template>
 
@@ -283,12 +299,21 @@
     </button>
   </template>
 
+  <template id="image-template">
+    <figure class="image">
+      <button class="image-open" type="button" data-action="view"><img alt="" decoding="async" /></button>
+      <button class="image-download" type="button" data-action="download" title="Download" aria-label="Download">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /><path d="m7 11 5 5 5-5" /><path d="M12 4v12" /></svg>
+      </button>
+    </figure>
+  </template>
+
   <template id="file-template">
     <div class="file">
       <svg class="file-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" /></svg>
       <span class="file-name"></span>
       <span class="file-size"></span>
-      <button class="download-btn" data-action="download" title="Download">
+      <button class="download-btn" data-action="download" title="Download" aria-label="Download">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /><path d="m7 11 5 5 5-5" /><path d="M12 4v12" /></svg>
       </button>
     </div>
@@ -298,7 +323,7 @@
     <div class="file pending-file">
       <span class="file-name"></span>
       <span class="file-size"></span>
-      <button class="remove-file" type="button" title="Remove">×</button>
+      <button class="remove-file" type="button" title="Remove" aria-label="Remove">×</button>
     </div>
   </template>
 
