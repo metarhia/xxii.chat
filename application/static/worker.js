@@ -3,8 +3,11 @@ import { Replica, SyncService, Uplink, fsi } from './globalstorage.js';
 import { validate, seed, isPair, directUnit, filesOf } from './chat.js';
 import { readFile, localFiles, clearFiles } from './files.js';
 import { sendBlob, SerialTask } from './files.js';
+import { VERSION_URL, UPDATE_CHANNEL } from './application.js';
 
-const CACHE = 'v9';
+const CACHE_PREFIX = 'xxii-';
+const META_CACHE = 'xxii-meta';
+const VERSION_KEY = '/version';
 const DIRECT_PATH = 'dm';
 
 const ASSETS = [
@@ -36,26 +39,79 @@ const report = (error) => {
 const isFileLog = ({ deltas }) =>
   deltas.some((delta) => delta.entity === 'file');
 
+const fetchVersion = async () => {
+  const response = await fetch(VERSION_URL, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Version check: HTTP ${response.status}`);
+  const { version } = await response.json();
+  if (typeof version !== 'string' || version === '') {
+    throw new Error('Version check: no version in the manifest');
+  }
+  return version;
+};
+
+const readVersion = async () => {
+  const meta = await caches.open(META_CACHE);
+  const response = await meta.match(VERSION_KEY);
+  return response ? response.text() : '';
+};
+
+const fresh = (url) => new Request(url, { cache: 'reload' });
+
 class CacheManager {
-  constructor(name = CACHE, assets = ASSETS) {
-    this.name = name;
-    this.assets = assets;
+  #assets = [];
+  #version = null;
+  #checking = null;
+  #channel = new BroadcastChannel(UPDATE_CHANNEL);
+
+  constructor(assets = ASSETS) {
+    this.#assets = assets;
   }
 
-  async update() {
-    const cache = await caches.open(this.name);
-    await cache.addAll(this.assets);
+  get version() {
+    this.#version ??= readVersion();
+    return this.#version;
+  }
+
+  check() {
+    this.#checking ??= this.#check().finally(() => {
+      this.#checking = null;
+    });
+    return this.#checking;
+  }
+
+  async #check() {
+    const current = await this.version;
+    const latest = await fetchVersion();
+    if (latest === current) return { version: current, isUpdated: false };
+    await this.#install(latest);
+    console.log(`Service Worker: updated from ${current} to ${latest}`);
+    this.#channel.postMessage({ version: latest });
+    return { version: latest, isUpdated: true };
+  }
+
+  async #install(version) {
+    const cache = await caches.open(CACHE_PREFIX + version);
+    await cache.addAll(this.#assets.map(fresh));
+    const meta = await caches.open(META_CACHE);
+    await meta.put(VERSION_KEY, new Response(version));
+    this.#version = Promise.resolve(version);
+    await this.cleanup();
+  }
+
+  async open() {
+    const version = await this.version;
+    return caches.open(CACHE_PREFIX + version);
   }
 
   async serve(request) {
-    const cache = await caches.open(this.name);
+    const cache = await this.open();
     return cache.match(request);
   }
 
   async fetchFromNetwork(request) {
     const response = await fetch(request);
     if (response.status === 200) {
-      const cache = await caches.open(this.name);
+      const cache = await this.open();
       await cache.put(request, response.clone());
     }
     return response;
@@ -65,7 +121,7 @@ class CacheManager {
     const cachedResponse = await this.serve(request);
     if (cachedResponse) return cachedResponse;
     if (request.mode === 'navigate') {
-      const cache = await caches.open(this.name);
+      const cache = await this.open();
       const fallbackResponse = await cache.match('/index.html');
       if (fallbackResponse) return fallbackResponse;
     }
@@ -77,14 +133,17 @@ class CacheManager {
   }
 
   async cleanup() {
-    const cacheNames = await caches.keys();
-    const obsolete = cacheNames.filter((cacheName) => cacheName !== this.name);
-    await Promise.all(obsolete.map((cacheName) => caches.delete(cacheName)));
+    const version = await this.version;
+    const active = CACHE_PREFIX + version;
+    const names = await caches.keys();
+    const kept = [active, META_CACHE];
+    const obsolete = names.filter((name) => !kept.includes(name));
+    await Promise.all(obsolete.map((name) => caches.delete(name)));
   }
 
   handleInstall(event) {
     const install = async () => {
-      await this.update();
+      await this.check();
       await self.skipWaiting();
     };
     event.waitUntil(install());
@@ -235,10 +294,7 @@ proxy.register('chat', {
 });
 
 proxy.register('cache', {
-  update: async () => {
-    await cacheManager.update();
-    return true;
-  },
+  check: () => cacheManager.check(),
 });
 
 self.addEventListener('install', (event) => cacheManager.handleInstall(event));
