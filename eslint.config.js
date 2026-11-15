@@ -41,6 +41,7 @@ module.exports = [
         Notification: true,
         requestAnimationFrame: true,
         matchMedia: true,
+        getComputedStyle: true,
         history: true,
         CSS: true,
         IntersectionObserver: true,

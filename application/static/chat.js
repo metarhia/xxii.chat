@@ -278,28 +278,59 @@ const folderTree = (replica, viewer) => {
 };
 
 const threadsOf = (replica, chat) => {
-  const roots = [];
+  const posts = [];
+  const messages = [];
+  const records = new Map();
   const replies = new Map();
   for (const id of replica.keys('post')) {
     const record = replica.get(id);
     const isShown = record.feed === chat && record.timestamp !== undefined;
-    if (isShown) roots.push({ id, ...record });
+    if (!isShown) continue;
+    const post = { id, ...record };
+    posts.push(post);
+    records.set(id, post);
   }
   for (const id of replica.keys('message')) {
     const record = replica.get(id);
     const isShown = record.chat === chat && record.timestamp !== undefined;
     if (!isShown) continue;
     const message = { id, ...record };
-    if (!record.replyTo) {
-      roots.push(message);
-      continue;
-    }
+    messages.push(message);
+    records.set(id, message);
+    if (!record.replyTo) continue;
     const thread = replies.get(record.replyTo) ?? [];
     thread.push(message);
     replies.set(record.replyTo, thread);
   }
   for (const thread of replies.values()) thread.sort(byTime);
-  return { roots: roots.toSorted(byTime), replies };
+  const shown = isFeed(replica, chat) ? posts : messages;
+  return { items: shown.toSorted(byTime), records, replies };
+};
+
+const threadOf = (replies, id) => {
+  const thread = [];
+  const visited = new Set([id]);
+  const parents = [id];
+  while (parents.length > 0) {
+    const parent = parents.pop();
+    for (const reply of replies.get(parent) ?? []) {
+      if (visited.has(reply.id)) continue;
+      visited.add(reply.id);
+      thread.push(reply);
+      parents.push(reply.id);
+    }
+  }
+  return thread.sort(byTime);
+};
+
+const lineageOf = (records, id) => {
+  const lineage = [];
+  let record = records.get(id);
+  while (record && !lineage.includes(record.id)) {
+    lineage.push(record.id);
+    record = records.get(record.replyTo);
+  }
+  return lineage;
 };
 
 const attachmentsOf = (replica, chat) => {
@@ -376,5 +407,6 @@ export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
 export { createFolder, setVisibility, placeItem };
 export { createMessage, createPost, attachFile, setReaction, pin };
-export { listChannels, listAuthors, folderTree, threadsOf, activityOf };
+export { listChannels, listAuthors, folderTree, activityOf };
+export { threadsOf, threadOf, lineageOf };
 export { attachmentsOf, reactionsOf, unreadOf, filesOf };

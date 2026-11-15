@@ -1,7 +1,16 @@
+import { isReducedMotion } from './view.js';
+
 const MARGIN = 8;
-const OVERLAP = 2;
 const SWIPE_PX = 50;
 const SWITCHER_LIMIT = 12;
+const LONG_PRESS_MS = 450;
+const CLICK_MS = 400;
+const MOVE_PX = 10;
+const PULL_PX = 80;
+const REPLY_PX = 56;
+const LIFT_MS = 160;
+
+const MENU_KEYS = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
 
 const LIGHTBOX_ACTIONS = {
   prev: (lightbox) => lightbox.step(-1),
@@ -21,57 +30,113 @@ const markMine = (buttons, mine) => {
   }
 };
 
-class Toolbar {
-  #element = null;
-  #thread = null;
-  #pin = null;
-  target = null;
+const createMenuItem = ({ action, label, file }) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'menu-item';
+  button.textContent = label;
+  button.dataset.action = action;
+  if (file) button.dataset.file = file;
+  return button;
+};
 
-  constructor(element, reactions) {
-    this.#element = element;
-    element.querySelector('.quick-reactions').append(...reactions);
-    this.#thread = element.querySelector('[data-action="thread"]');
-    this.#pin = element.querySelector('[data-action="pin"]');
+const liftOf = (item) => {
+  const lift = item.cloneNode(true);
+  lift.removeAttribute('data-id');
+  lift.removeAttribute('tabindex');
+  lift.removeAttribute('style');
+  lift.classList.remove('swiping', 'swipe-ready', 'targeted');
+  lift.classList.add('lift');
+  lift.inert = true;
+  return lift;
+};
+
+class Press {
+  #press = null;
+  #handlers = null;
+  #isHeld = false;
+  #releasedAt = -Infinity;
+
+  constructor(handlers) {
+    this.#handlers = handlers;
   }
 
-  contains(node) {
-    return this.#element.contains(node);
+  start(event, item, canSwipe) {
+    if (event.pointerType !== 'touch') return;
+    const { clientX: x, clientY: y } = event;
+    const timer = setTimeout(() => this.#hold(), LONG_PRESS_MS);
+    const offset = 0;
+    const isSwiping = false;
+    this.#press = { timer, x, y, item, canSwipe, offset, isSwiping };
   }
 
-  show(target, state) {
-    this.target = target;
-    this.update(state);
-    this.#element.classList.remove('hidden');
-    this.place();
+  move(event) {
+    const press = this.#press;
+    if (!press) return;
+    const dx = event.clientX - press.x;
+    const dy = event.clientY - press.y;
+    if (press.isSwiping) return void this.#pull(dx);
+    if (Math.hypot(dx, dy) <= MOVE_PX) return;
+    const isSideways = dx < 0 && Math.abs(dx) > Math.abs(dy);
+    if (!press.canSwipe || !isSideways) return void this.cancel();
+    clearTimeout(press.timer);
+    press.isSwiping = true;
+    press.item.classList.add('swiping');
+    this.#pull(dx);
   }
 
-  update({ mine, thread, pinned }) {
-    markMine(this.#element.querySelectorAll('[data-reaction]'), mine);
-    this.#thread.textContent = thread;
-    this.#thread.classList.toggle('hidden', thread === '');
-    this.#pin.textContent = pinned ? 'unpin' : 'pin';
+  end() {
+    if (this.#isHeld) {
+      this.#isHeld = false;
+      this.#releasedAt = performance.now();
+      return;
+    }
+    const press = this.#press;
+    if (!press?.isSwiping) return void this.cancel();
+    this.#releasedAt = performance.now();
+    const isReply = press.offset <= -REPLY_PX;
+    this.cancel();
+    if (!isReply) return;
+    navigator.vibrate?.(10);
+    this.#handlers.swipe(press.item);
   }
 
-  place() {
-    const { item, x, area } = this.target;
-    const rect = item.getBoundingClientRect();
-    const bounds = area.getBoundingClientRect();
-    const width = this.#element.offsetWidth;
-    const height = this.#element.offsetHeight;
-    const above = rect.top - height + OVERLAP;
-    const below = rect.bottom - OVERLAP;
-    const isAboveFree = above >= bounds.top;
-    const top = isAboveFree ? above : below;
-    const right = Math.min(rect.right, window.innerWidth - MARGIN) - width;
-    const inside = clamp(x - width / 2, rect.left, right);
-    const left = clamp(inside, MARGIN, window.innerWidth - width - MARGIN);
-    this.#element.style.left = `${Math.round(left)}px`;
-    this.#element.style.top = `${Math.round(top)}px`;
+  cancel() {
+    const press = this.#press;
+    if (!press) return;
+    clearTimeout(press.timer);
+    this.#press = null;
+    if (!press.isSwiping) return;
+    press.item.classList.remove('swiping', 'swipe-ready');
+    press.item.style.removeProperty('transform');
   }
 
-  hide() {
-    this.target = null;
-    this.#element.classList.add('hidden');
+  abort() {
+    this.#isHeld = false;
+    this.cancel();
+  }
+
+  suppress(event) {
+    const isRecent = performance.now() - this.#releasedAt < CLICK_MS;
+    if (!isRecent) return;
+    this.#releasedAt = -Infinity;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  #pull(dx) {
+    const press = this.#press;
+    press.offset = clamp(dx, -PULL_PX, 0);
+    press.item.style.transform = `translateX(${press.offset}px)`;
+    press.item.classList.toggle('swipe-ready', press.offset <= -REPLY_PX);
+  }
+
+  #hold() {
+    const { item, x, y } = this.#press;
+    this.#press = null;
+    this.#isHeld = true;
+    navigator.vibrate?.(15);
+    this.#handlers.hold(item, x, y);
   }
 }
 
@@ -79,53 +144,93 @@ class Menu {
   #element = null;
   #createReactions = null;
   target = '';
-  isSheet = false;
+  isLifted = false;
 
   constructor(element, createReactions) {
     this.#element = element;
     this.#createReactions = createReactions;
+    element.addEventListener('keydown', (event) => this.#handleKey(event));
   }
 
   get isOpen() {
     return this.target !== '';
   }
 
-  open({ id, x, y, isSheet, mine, items }) {
+  open({ id, mine, items, point, item }) {
     this.target = id;
-    this.isSheet = isSheet;
+    this.isLifted = item !== null;
     const row = document.createElement('div');
     row.className = 'menu-reactions';
     row.append(...this.#createReactions());
     markMine(row.children, mine);
-    const entries = items.map((entry) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'menu-item';
-      button.textContent = entry.label;
-      button.dataset.action = entry.action;
-      if (entry.file) button.dataset.file = entry.file;
-      return button;
-    });
-    this.#element.replaceChildren(row, ...entries);
-    this.#element.classList.toggle('sheet', isSheet);
+    const list = document.createElement('div');
+    list.className = 'menu-items';
+    list.append(...items.map(createMenuItem));
+    const parts = item ? [row, liftOf(item), list] : [row, list];
+    this.#element.replaceChildren(...parts);
+    this.#element.classList.toggle('lifted', this.isLifted);
     this.#element.classList.remove('hidden');
-    if (isSheet) {
-      this.#element.style.removeProperty('left');
-      this.#element.style.removeProperty('top');
-      return;
-    }
-    const width = this.#element.offsetWidth;
-    const height = this.#element.offsetHeight;
-    const left = clamp(x, MARGIN, window.innerWidth - width - MARGIN);
-    const fits = y + height + MARGIN <= window.innerHeight;
-    const top = fits ? y : Math.max(MARGIN, y - height);
-    this.#element.style.left = `${Math.round(left)}px`;
-    this.#element.style.top = `${Math.round(top)}px`;
+    if (item) this.#lift(item);
+    else this.#point(point);
+  }
+
+  focus() {
+    this.#element.querySelector('.menu-item')?.focus();
+  }
+
+  contains(node) {
+    return this.#element.contains(node);
   }
 
   close() {
     this.target = '';
+    this.isLifted = false;
     this.#element.classList.add('hidden');
+  }
+
+  #point({ x, y }) {
+    const element = this.#element;
+    element.style.removeProperty('width');
+    const width = element.offsetWidth;
+    const height = element.offsetHeight;
+    const left = clamp(x, MARGIN, window.innerWidth - width - MARGIN);
+    const fits = y + height + MARGIN <= window.innerHeight;
+    const near = fits ? y : y - height;
+    const top = clamp(near, MARGIN, window.innerHeight - height - MARGIN);
+    element.style.left = `${Math.round(left)}px`;
+    element.style.top = `${Math.round(top)}px`;
+  }
+
+  #lift(item) {
+    const element = this.#element;
+    const rect = item.getBoundingClientRect();
+    const width = Math.min(rect.width, window.innerWidth - MARGIN * 2);
+    const left = clamp(rect.left, MARGIN, window.innerWidth - width - MARGIN);
+    element.style.width = `${Math.round(width)}px`;
+    element.style.left = `${Math.round(left)}px`;
+    const style = getComputedStyle(element);
+    const min = MARGIN + parseFloat(style.scrollPaddingTop);
+    const bottom = MARGIN + parseFloat(style.scrollPaddingBottom);
+    const max = window.innerHeight - element.offsetHeight - bottom;
+    const lift = element.querySelector('.lift');
+    const desired = rect.top - lift.offsetTop;
+    const top = clamp(desired, min, max);
+    element.style.top = `${Math.round(top)}px`;
+    if (isReducedMotion()) return;
+    const shift = Math.round(desired - top);
+    const from = { transform: `translateY(${shift}px)`, opacity: 0.6 };
+    const to = { transform: 'none', opacity: 1 };
+    element.animate([from, to], { duration: LIFT_MS, easing: 'ease-out' });
+  }
+
+  #handleKey(event) {
+    const step = MENU_KEYS[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const buttons = Array.from(this.#element.querySelectorAll('button'));
+    const index = buttons.indexOf(document.activeElement);
+    const count = buttons.length;
+    buttons[(index + step + count) % count].focus();
   }
 }
 
@@ -314,4 +419,4 @@ class Switcher {
   }
 }
 
-export { Toolbar, Menu, Lightbox, Switcher };
+export { Press, Menu, Lightbox, Switcher };

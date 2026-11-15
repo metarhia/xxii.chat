@@ -24,21 +24,26 @@ sync. Terminal-like UI follows the
 - Chats: `!general` exists everywhere, new chats sync to all clients
 - Feeds: `#feed` timelines of posts, the first line of a post is its title
   (`Ctrl+Enter` publishes), cards show author, date, excerpt, replies, and
-  reactions, `POST DETAILS` panel shows the full post, stats, outline from
-  `#`, `##`, `###` headings, and threaded replies
+  reactions, a card opens the full post in place with an outline from
+  `#`, `##`, `###` headings and its replies under it
 - Folders: organize chats, feeds, and nested folders (`a/b` creates a path),
   `unlisted` folders are listed only for the owner, `public` folders for
   everyone; a channel in a listed folder leaves the `FEEDS` or `CHATS` list,
   collapsed folders are remembered per browser
 - Channel names may start with an emoji icon (`📣 news`), owners edit the
   description by clicking it in the top bar
-- Messages with threads (replies), pinned messages, clickable links,
-  message search, older messages by pages of 50; consecutive messages of one
-  author are grouped, days have sticky labels
-- Message actions: hovering shows every reaction, `reply`, and `pin` right
-  above the message where the pointer entered it, right click opens the same
-  actions as a menu with copy and download, a long press opens them as a
-  bottom sheet on touch screens
+- One composer for everything: `Reply` puts a `reply to` bar above it, the
+  reply stays in the chat with a quote that jumps to the original; a message
+  with replies shows `N replies`, which opens the thread in place (the
+  message and all its replies) with the same composer, `‹` or `Esc` returns
+  to the chat at the same position
+- Pinned messages, clickable links, message search, older messages by pages
+  of 50; consecutive messages of one author are grouped, days have sticky
+  labels
+- Message actions live in one menu: right click or the `⋯` handle on hover
+  opens reactions, reply, thread, pin, copy, and downloads; on touch screens
+  a long press lifts the message with reactions above and actions below,
+  and a swipe to the left replies
 - Reactions toggle: clicking your reaction again removes it, your reactions
   are highlighted, a reaction shows who reacted on hover
 - Unread: per chat read time kept in the browser, badges, a `new messages`
@@ -60,9 +65,11 @@ sync. Terminal-like UI follows the
 - One WebSocket connection for all tabs through `MetacomProxy`, one tab per
   browser (Web Locks) runs the WebRTC mesh for all of them
 - Keyboard: `Ctrl+K` jumps to a chat, feed, or contact, `Alt+↑`/`Alt+↓`
-  previous or next chat, `Ctrl+F` search, `Ctrl+P` pinned, `Esc` closes the
-  top overlay or shows and hides the right panel
-- Mobile: back button closes the sidebar, panel, viewer, and sheets, layout
+  previous or next chat, `Ctrl+F` search, `Ctrl+P` pinned; `↑` in an empty
+  composer selects the last message, `↑`/`↓` move, `Enter` or `Shift+F10`
+  opens the menu, `R` replies; `Esc` closes the top overlay, cancels a reply,
+  leaves a thread, or shows and hides the sidebar
+- Mobile: back button closes the sidebar, panel, viewer, menu, and thread, layout
   respects safe areas and the on-screen keyboard, bigger touch targets
 - Nick shared between tabs, install prompt, cache update, clear database,
   members list, and activity log
@@ -133,8 +140,9 @@ server) with `files/have`, `get`, and `put`.
 
 - `npm test`: lint and types
 - `npm run test:app`: application tests in impress test mode
-- `npm run test:browser`: tabs, chats, toolbar reactions that toggle,
-  threads, pins, feeds and post details, `Esc`, `Ctrl+K`, and drafts,
+- `npm run test:browser`: tabs, chats, menu reactions that toggle, quoted
+  replies, threads, pins, feeds opened in place, keyboard selection, `Esc`,
+  `Ctrl+K`, drafts, swipe and long press,
   folders and their visibility between peers, offline writes, OPFS,
   automatic WebRTC links, direct messages, files through the server and
   peer to peer, image previews and viewer, group sync and relayed

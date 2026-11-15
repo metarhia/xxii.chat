@@ -4,7 +4,7 @@ import { validate, seed, isPair, directUnit, filesOf } from './chat.js';
 import { readFile, localFiles, clearFiles } from './files.js';
 import { sendBlob, SerialTask } from './files.js';
 
-const CACHE = 'v8';
+const CACHE = 'v9';
 const DIRECT_PATH = 'dm';
 
 const ASSETS = [
