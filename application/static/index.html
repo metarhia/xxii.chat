@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="XXII Distributed Chat Application with offline support and real-time communication" />
+  <meta name="description" content="XXII local-first chat: globalstorage CRDT, metacom and WebRTC" />
   <meta name="theme-color" content="#090a0c" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
@@ -14,64 +14,62 @@
   <link rel="icon" type="image/svg+xml" href="/icon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" type="image/vnd.microsoft.icon" />
   <link rel="apple-touch-icon" href="/favicon.png" />
-  <link href="https://fonts.googleapis.com/css?family=Share+Tech+Mono" rel="stylesheet" type="text/css">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap" rel="stylesheet" />
 </head>
 <body>
   <div class="app">
     <aside class="sidebar" id="sidebar">
       <header class="brand">
-        <span class="logo">≡</span>
-        <h1>XXII Chat</h1>
-        <span id="connection-status" class="status offline">offline</span>
+        <span class="prompt">$</span>
+        <h1>xxii.chat</h1>
+        <span class="peers"><span class="muted">peers:</span> <span id="peer-count">0</span></span>
       </header>
 
-      <label class="nick">
-        <span class="accent">@</span>
-        <input id="username-input" type="text" maxlength="32" placeholder="your nick" />
-      </label>
+      <section class="section">
+        <h3>CONTACTS</h3>
+        <ul id="contact-list" class="list"></ul>
+        <p id="contacts-empty" class="hint">Peers appear here when they come online</p>
+      </section>
 
       <section class="section">
-        <h2>Chats</h2>
+        <h3 class="small">CHATS</h3>
         <ul id="chat-list" class="list"></ul>
         <form id="chat-form" class="inline-form">
           <input id="chat-name-input" type="text" maxlength="64" placeholder="+ new chat" />
         </form>
       </section>
 
-      <section class="section">
-        <h2>Peers</h2>
-        <div class="peer">
-          <input id="peer-room" type="text" value="xxii" placeholder="room" />
-          <div class="row">
-            <button id="peer-host-btn" class="link-btn">[host]</button>
-            <button id="peer-join-btn" class="link-btn">[join]</button>
-            <button id="peer-leave-btn" class="link-btn" disabled>[leave]</button>
-          </div>
-          <p id="peer-status" class="hint">
-            Host in one browser, join in another while the server is up,
-            then chat keeps going over WebRTC and reaches the server later.
-          </p>
+      <section class="section session">
+        <h3 class="small">SESSION</h3>
+        <label class="nick">
+          <span class="accent">@</span>
+          <input id="username-input" type="text" maxlength="32" placeholder="your nick" />
+        </label>
+        <div class="status-line">
+          <span id="connection-status" class="status offline">offline</span>
+          <span id="mesh-status" class="muted"></span>
+        </div>
+        <div class="tools">
+          <button id="install-btn" class="link-btn hidden">[install]</button>
+          <button id="update-cache-btn" class="link-btn">[update cache]</button>
+          <button id="clear-messages-btn" class="link-btn">[clear database]</button>
         </div>
       </section>
-
-      <footer class="tools">
-        <button id="install-btn" class="link-btn hidden">[install]</button>
-        <span id="install-status" class="hint hidden">install available</span>
-        <button id="update-cache-btn" class="link-btn">[update cache]</button>
-        <button id="clear-messages-btn" class="link-btn">[clear database]</button>
-      </footer>
     </aside>
 
-    <main class="timeline">
+    <main class="chat-view">
       <header class="topbar">
-        <button id="menu-btn" class="icon-btn menu-btn" title="Menu">≡</button>
+        <button id="menu-btn" class="link-btn menu-btn" title="Menu">[≡]</button>
         <div class="context">
           <span id="chat-title" class="accent">!general</span>
           <span class="separator">|</span>
-          <span id="chat-info" class="muted"></span>
+          <span id="chat-info" class="description"></span>
         </div>
         <nav class="actions">
           <button id="search-btn" class="link-btn">[Search]</button>
+          <button id="pins-btn" class="link-btn">[Pin list]</button>
+          <button id="members-btn" class="link-btn">[Members]</button>
           <button id="log-btn" class="link-btn">[Log]</button>
         </nav>
       </header>
@@ -80,39 +78,73 @@
       </div>
       <div id="chat-messages" class="messages">
         <button id="load-more-btn" class="link-btn load-more hidden">[load older messages]</button>
-        <div id="message-list"></div>
+        <div id="message-list" class="message-list"></div>
       </div>
-      <div class="hint-bar">Enter send | Shift+Enter new line</div>
       <form id="composer" class="composer">
-        <textarea id="message-input" rows="2" placeholder="> message to !general"></textarea>
+        <div class="shortcuts">Ctrl+F: search <span>|</span> Ctrl+P: pinned <span>|</span> Esc: close</div>
+        <textarea id="message-input" rows="2" placeholder="> new message to !general"></textarea>
         <div class="composer-bar">
-          <span id="composer-info" class="muted"></span>
-          <button id="send-btn" class="send" type="submit">Send</button>
+          <div class="composer-tools">
+            <button id="emoji-btn" class="link-btn" type="button">[emoji]</button>
+            <span id="composer-info" class="muted"></span>
+          </div>
+          <button id="send-btn" class="send" type="submit">[send]</button>
         </div>
       </form>
     </main>
 
-    <aside id="details" class="details">
-      <header class="panel-title">
-        <span>ACTIVITY LOG</span>
-        <button id="clear-btn" class="link-btn">[clear]</button>
+    <aside id="panel" class="panel">
+      <header class="panel-header">
+        <span id="panel-title" class="accent">Thread</span>
+        <button id="panel-close-btn" class="link-btn">[close]</button>
       </header>
-      <pre id="output" class="log"></pre>
+      <section class="panel-body" data-panel="thread">
+        <div id="thread-root"></div>
+        <div class="divider"><span id="thread-count">0 replies</span></div>
+        <div id="thread-replies" class="thread-replies"></div>
+        <form id="reply-form" class="reply-form">
+          <textarea id="reply-input" rows="2" placeholder="> reply in thread"></textarea>
+          <button class="send" type="submit">[reply]</button>
+        </form>
+      </section>
+      <section class="panel-body" data-panel="pins">
+        <div id="pin-list" class="pin-list"></div>
+      </section>
+      <section class="panel-body" data-panel="members">
+        <ul id="member-list" class="member-list"></ul>
+      </section>
+      <section class="panel-body" data-panel="log">
+        <div class="panel-tools">
+          <button id="clear-log-btn" class="link-btn">[clear]</button>
+        </div>
+        <pre id="output" class="log"></pre>
+      </section>
     </aside>
   </div>
 
+  <div id="palette" class="palette hidden"></div>
   <div id="notification" class="notification hidden"></div>
 
-  <template id="chat-item-template">
-    <li class="chat-item">
-      <span class="icon">!</span>
+  <template id="contact-item-template">
+    <li class="nav-item contact-item">
+      <span class="icon">👤</span>
+      <span class="dot"></span>
       <span class="name"></span>
       <span class="badge hidden"></span>
       <span class="time"></span>
     </li>
   </template>
 
-  <template id="chat-message-template">
+  <template id="chat-item-template">
+    <li class="nav-item chat-item">
+      <span class="icon"></span>
+      <span class="name"></span>
+      <span class="badge hidden"></span>
+      <span class="time"></span>
+    </li>
+  </template>
+
+  <template id="message-template">
     <div class="message">
       <span class="time"></span>
       <div class="body">
@@ -120,8 +152,45 @@
           <span class="author"></span><span class="content"></span>
         </div>
         <div class="reactions"></div>
+        <button class="replies hidden">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" /></svg>
+          <span class="count"></span>
+        </button>
+      </div>
+      <div class="message-actions">
+        <button class="react-btn" title="React">[+]</button>
+        <button class="reply-btn" title="Reply in thread">[reply]</button>
+        <button class="pin-btn" title="Pin"></button>
       </div>
     </div>
+  </template>
+
+  <template id="thread-item-template">
+    <div class="thread-item">
+      <div class="who"></div>
+      <div class="text"></div>
+      <div class="reactions"></div>
+      <div class="message-actions">
+        <button class="react-btn" title="React">[+]</button>
+        <button class="pin-btn" title="Pin"></button>
+      </div>
+    </div>
+  </template>
+
+  <template id="pin-item-template">
+    <div class="pin-item">
+      <div class="who"></div>
+      <div class="text"></div>
+      <button class="link-btn unpin-btn">[unpin]</button>
+    </div>
+  </template>
+
+  <template id="member-item-template">
+    <li class="member">
+      <span class="dot"></span>
+      <span class="name"></span>
+      <span class="state"></span>
+    </li>
   </template>
 
   <template id="reaction-button-template">

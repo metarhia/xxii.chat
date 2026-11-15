@@ -18,16 +18,24 @@ sync. Terminal-like UI follows the
 
 ## Features
 
+- Contacts: every browser is a peer with a stable id, peers announce
+  themselves to the server and show up with presence (online, offline,
+  linked over WebRTC) and unread direct messages
 - Chats: `!general` exists everywhere, new chats sync to all clients
-- Messages and reactions, unread badges, last activity, message search,
-  older messages loaded by pages of 50
-- Offline-first: service worker caches the app and keeps the chat in OPFS,
-  messages written offline reach the server after reconnect
-- One WebSocket connection for all tabs through `MetacomProxy`
-- WebRTC peers: host in one browser, join in another, chat keeps going
-  over the data channel while the server is down
+- Messages with reactions, threads (replies), pinned messages, unread
+  badges, last activity, message search, older messages by pages of 50
+- Direct messages go only over WebRTC between the two browsers and are
+  kept in OPFS of both, never on the server
+- Automatic mesh: no host or join buttons, browsers connect to every
+  online peer, group chats sync between peers while the server is down,
+  and a dropped link is renegotiated through another linked peer
+- Offline-first: service worker caches the app and keeps all replicas in
+  OPFS, messages written offline reach the server after reconnect
+- One WebSocket connection for all tabs through `MetacomProxy`, one tab per
+  browser (Web Locks) runs the WebRTC mesh for all of them
+- Keyboard: `Ctrl+F` search, `Ctrl+P` pinned, `Esc` closes panels
 - Nick shared between tabs, install prompt, cache update, clear database,
-  and activity log
+  members list, and activity log
 
 ## Sync
 
@@ -38,31 +46,49 @@ replica with a served one):
 ```text
 server: Replica in application/data/chat, unit `sync`
   ^ worker Uplink over WebSocket, one connection for all tabs
-worker: Replica in OPFS, unit `chat`
-  ^ tab Uplink over MessagePort, follows a clear of the worker
-tab: Replica in memory, host tab serves it to a peer over WebRTC
-  ^ guest Uplink over RTCDataChannel
+worker: Replica in OPFS, unit `chat`; Replica per direct pair in OPFS
+        `dm/<pair>`, unit `dm_<pair>`
+  ^ tab Uplinks over MessagePort, follow a clear of the worker
+tab: Replicas in memory; the mesh tab serves them to peers over WebRTC
+  ^ peer Uplinks over RTCDataChannel: direct pair always, group chats
+    while either side has no server
 ```
 
-Records are CRDT states: chat and message fields are last-writer-wins
-registers, reactions are per-replica counters, so a reaction is counted once
-whichever way it travels. `application/static/chat.js` validates deltas in
-browsers and on the server. Only one server thread (`ports: [8001]`) owns
-the server replica files.
+Records are CRDT states: chat, author, and message fields are
+last-writer-wins registers, reactions are per-replica counters, so a change
+is applied once whichever way it travels. `application/static/chat.js`
+validates deltas in browsers and on the server. Only one server thread
+(`ports: [8001]`) owns the server replica files.
 
-| Call                             | Handled by | Description                       |
-| -------------------------------- | ---------- | --------------------------------- |
-| `sync/subscribe`, `pull`, `push` | server     | Worker replica syncs with server  |
-| `signal/join`, `signal/publish`  | server     | WebRTC signaling between browsers |
-| `chat/subscribe`, `pull`, `push` | worker     | Tab replica syncs with worker     |
-| `chat/username`                  | worker     | Pass nick to other tabs           |
-| `chat/clear`                     | worker     | Clear worker replica, tabs follow |
-| `cache/update`                   | worker     | Reload static cache               |
-| `chat/subscribe`, `pull`, `push` | host tab   | Guest tab syncs over WebRTC       |
+## Mesh
+
+`application/static/mesh.js` runs in the tab that holds the `xxii:mesh`
+lock. It announces `{ peer, nick }` with `presence/announce`, gets
+`presence/update` events, and opens a link to every online peer. The peer
+with the smaller id answers (serves `chat`, `direct`, and `mesh` units with
+`MetacomPeer`), the other one offers (metacom client over WebRTC with
+uplinks). Signaling goes through `signal/send` while the server is up, and
+through `mesh/relay` of linked peers otherwise.
+
+| Call                             | Handled by  | Description                        |
+| -------------------------------- | ----------- | ---------------------------------- |
+| `sync/subscribe`, `pull`, `push` | server      | Worker replica syncs with server   |
+| `presence/announce`, `list`      | server      | Peer coordinates and presence      |
+| `signal/send`                    | server      | WebRTC signaling to a peer by id   |
+| `chat/subscribe`, `pull`, `push` | worker      | Tab replica syncs with worker      |
+| `chat/directs`, `openDirect`     | worker      | Direct chat replicas in OPFS       |
+| `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs           |
+| `chat/username`                  | worker      | Pass nick to other tabs            |
+| `chat/clear`                     | worker      | Clear worker replicas, tabs follow |
+| `cache/update`                   | worker      | Reload static cache                |
+| `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC       |
+| `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state      |
 
 ## Testing
 
 - `npm test`: lint and types
 - `npm run test:app`: application tests in impress test mode
-- `npm run test:browser`: tabs, chats, offline writes, OPFS, WebRTC peers,
-  and clear database in headless Chrome; ports `8000` and `8001` must be free
+- `npm run test:browser`: tabs, chats, threads, pins, offline writes, OPFS,
+  automatic WebRTC links, direct messages, group sync and relayed
+  reconnection without server, and clear database in headless Chrome;
+  ports `8000` and `8001` must be free
