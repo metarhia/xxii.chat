@@ -152,7 +152,7 @@ server) with `files/have`, `get`, and `put`.
 | `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs           |
 | `chat/username`                  | worker      | Pass nick to other tabs            |
 | `chat/clear`                     | worker      | Clear worker replicas, tabs follow |
-| `cache/update`                   | worker      | Reload static cache                |
+| `cache/check`                    | worker      | Check and install a new version    |
 | `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC       |
 | `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state      |
 | `files/have`, `get`, `put`       | answer peer | File exchange between peers        |
