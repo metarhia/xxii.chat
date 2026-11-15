@@ -230,6 +230,21 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
   const serverHas = (content) => (deltas) =>
     deltas.some((delta) => delta.data.content?.$lww.value === content);
 
+  const hover = (
+    selector,
+  ) => `const item = document.querySelector('${selector}');
+    const options = { bubbles: true, pointerType: 'mouse', clientX: 200 };
+    item.dispatchEvent(new PointerEvent('pointerover', options));`;
+
+  const toolbarClick = (selector) =>
+    `document.querySelector('#toolbar ${selector}').click();`;
+
+  const press = (key, options = {}) => {
+    const init = JSON.stringify({ key, bubbles: true, ...options });
+    return `document.activeElement.dispatchEvent(
+      new KeyboardEvent('keydown', ${init}));`;
+  };
+
   const first = await open();
   const second = await open();
 
@@ -245,22 +260,28 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await untilServer(serverHas('hello from tab one'));
     const id = await run(first, `return ${findText('hello from tab one')};`);
     const message = `.message[data-id="${id}"]`;
-    const like = `${message} .quick-reactions [data-reaction="like"]`;
+    await focus(second);
     await run(
       second,
-      `document.querySelector('${like}').click();
+      `${hover(message)}
+      ${toolbarClick('[data-reaction="like"]')}
       return true;`,
     );
-    const liked = `return app.replica.get('${id}').reactions?.like === 1;`;
-    await wait(first, liked);
+    const reaction = `[...app.replica.keys('reaction')]
+      .map((key) => app.replica.get(key))
+      .find((record) => record.message === '${id}')`;
+    await wait(first, `return ${reaction}?.active === true;`);
     await focus(first);
-    await wait(first, shown('hello from tab one'));
-    const count = await run(
-      first,
-      `return document.querySelector(
-        '${message} .reactions [data-reaction="like"]').dataset.count;`,
-    );
-    assert.equal(count, '1');
+    const chip = `document.querySelector(
+      '${message} .reactions [data-reaction="like"]')`;
+    const mine = `app.render(); const chip = ${chip};
+      return chip?.dataset.count === '1' && chip.classList.contains('mine');`;
+    await wait(first, mine);
+    const title = await run(first, `return ${chip}.title;`);
+    assert.equal(title, 'you reacted with 👍');
+    await run(first, `${chip}.click(); return true;`);
+    await wait(second, `return ${reaction}?.active === false;`);
+    await wait(second, `app.render(); return ${chip} === null;`);
   });
 
   await t.test('new chat appears in other tab', async () => {
@@ -291,10 +312,11 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(first, `return document.querySelector('${message}') !== null;`);
     await run(
       first,
-      `document.querySelector('${message} .reply-btn').click();
+      `${hover(message)}
+      ${toolbarClick('[data-action="thread"]')}
       app.replyInput.value = 'thread reply';
       await app.sendReply();
-      document.querySelector('${message} .pin-btn').click();
+      ${toolbarClick('[data-action="pin"]')}
       return true;`,
     );
     const replied = `return [...app.replica.keys('message')].some((key) =>
@@ -302,7 +324,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(second, replied);
     await wait(second, `return app.replica.get('${id}').pinned === true;`);
     const count = `return document.querySelector('${message} .replies .count')
-      .textContent === '1 replies';`;
+      .textContent === '1 reply';`;
     await wait(first, count);
     await wait(first, 'return app.threadReplies.children.length === 1;');
     await run(first, `app.togglePanel('pins'); return true;`);
@@ -367,7 +389,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     const replied = `app.render();
       const post = document.querySelector('.post[data-id="${postId}"]');
       const count = post?.querySelector('.replies .count').textContent;
-      return count === '1 replies';`;
+      return count === '1 reply';`;
     await wait(first, replied);
     await run(
       first,
@@ -395,11 +417,50 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
   await t.test('older messages load on demand', async () => {
     await focus(first);
     for (let i = 0; i < 55; i++) await send(first, 'ada', `bulk ${i}`);
-    await wait(first, 'return app.messageList.children.length === 50;');
+    const rows = 'app.messageList.querySelectorAll(".message").length';
+    await wait(first, `return ${rows} === 50;`);
     const button = 'return !app.loadMoreBtn.classList.contains("hidden");';
     await wait(first, button);
     await run(first, 'app.loadOlder(); return true;');
-    await wait(first, 'return app.messageList.children.length === 56;');
+    await wait(first, `return ${rows} === 56;`);
+  });
+
+  await t.test('Esc toggles panel, Ctrl+K jumps, drafts stay', async () => {
+    await focus(first);
+    const chat = await run(first, 'return app.chat;');
+    await run(
+      first,
+      `app.closePanel();
+      document.activeElement.blur();
+      ${press('Escape')}
+      return true;`,
+    );
+    await wait(first, 'return app.panel !== "";');
+    await run(first, `${press('Escape')} return true;`);
+    await wait(first, 'return app.panel === "";');
+    await run(
+      first,
+      `app.messageInput.value = 'unsent draft';
+      app.messageInput.dispatchEvent(new Event('input'));
+      ${press('k', { ctrlKey: true })}
+      const input = document.querySelector('#switcher input');
+      input.value = 'gene';
+      input.dispatchEvent(new Event('input'));
+      ${press('Enter')}
+      return true;`,
+    );
+    const switched = `return app.chat === 'general' && !app.switcher.isOpen
+      && app.messageInput.value === '';`;
+    await wait(first, switched);
+    await run(first, `app.selectChat('${chat}'); return true;`);
+    const draft = await run(first, 'return app.messageInput.value;');
+    assert.equal(draft, 'unsent draft');
+    await run(
+      first,
+      `app.messageInput.value = '';
+      app.messageInput.dispatchEvent(new Event('input'));
+      return true;`,
+    );
   });
 
   await t.test('restarted worker loads its replica from OPFS', async () => {
@@ -622,6 +683,43 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
       await wait(grace, saved);
     },
   );
+
+  await t.test('images show previews and open in the viewer', async () => {
+    await focus(first);
+    await run(
+      first,
+      `const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 48;
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#10b981';
+      context.fillRect(0, 0, 64, 48);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve));
+      const type = 'image/png';
+      app.addFiles([new File([blob], 'pixel.png', { type })]);
+      await app.sendMessage();
+      return true;`,
+    );
+    await focus(grace);
+    const sized = `${fileOf('app.replica', 'pixel.png')}
+      return file?.width === 64 && file.height === 48;`;
+    await wait(grace, sized);
+    const preview = `app.render();
+      const image = app.messageList.querySelector('.image img');
+      app.chatMessages.scrollTop = app.chatMessages.scrollHeight;
+      return image?.src.startsWith('blob:') === true;`;
+    await wait(grace, preview, 20000);
+    await run(
+      grace,
+      `app.messageList.querySelector('.image .image-open').click();
+      return true;`,
+    );
+    const opened = `const image = document.querySelector('.lightbox-image');
+      return app.lightbox.isOpen && image.src.startsWith('blob:');`;
+    await wait(grace, opened);
+    await run(grace, `${press('Escape')} return true;`);
+    await wait(grace, 'return !app.lightbox.isOpen;');
+  });
 
   await t.test('direct message files go peer to peer only', async () => {
     const text = 'private bytes';

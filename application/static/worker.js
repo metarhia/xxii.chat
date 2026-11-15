@@ -4,7 +4,7 @@ import { validate, seed, isPair, directUnit, filesOf } from './chat.js';
 import { readFile, localFiles, clearFiles } from './files.js';
 import { sendBlob, SerialTask } from './files.js';
 
-const CACHE = 'v7';
+const CACHE = 'v8';
 const DIRECT_PATH = 'dm';
 
 const ASSETS = [
@@ -16,6 +16,8 @@ const ASSETS = [
   '/chat.js',
   '/mesh.js',
   '/files.js',
+  '/view.js',
+  '/overlays.js',
   '/metautil.js',
   '/metacom.js',
   '/globalstorage.js',
