@@ -13,11 +13,13 @@ const { setTimeout: delay } = require('node:timers/promises');
 const CHROME = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const ROOT = path.join(__dirname, '..');
 const ORIGIN = 'http://127.0.0.1:8001';
+const MANIFEST = path.join(ROOT, 'application/static/manifest.json');
 
 class BrowserProtocol {
   #socket = null;
   #id = 0;
   #pending = new Map();
+  #listeners = new Map();
   errors = [];
 
   constructor(socket) {
@@ -29,6 +31,8 @@ class BrowserProtocol {
         const description = exceptionDetails.exception?.description;
         this.errors.push(description ?? exceptionDetails.text);
       }
+      const listener = this.#listeners.get(message.method);
+      if (listener) listener(message.params, message.sessionId);
       const request = this.#pending.get(message.id);
       if (!request) return;
       this.#pending.delete(message.id);
@@ -36,6 +40,10 @@ class BrowserProtocol {
       if (message.error) request.reject(new Error(message.error.message));
       else request.resolve(message.result);
     });
+  }
+
+  on(method, listener) {
+    this.#listeners.set(method, listener);
   }
 
   request(method, params = {}, sessionId = undefined) {
@@ -194,6 +202,8 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     throw new Error('Server condition timed out');
   };
 
+  const targets = new Map();
+
   const open = async (browserContextId = undefined) => {
     const url = `${ORIGIN}/`;
     const params = { url, browserContextId };
@@ -201,6 +211,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     const attach = { targetId, flatten: true };
     const target = await browser.request('Target.attachToTarget', attach);
     const { sessionId } = target;
+    targets.set(sessionId, targetId);
     await browser.request('Runtime.enable', {}, sessionId);
     await browser.request('Page.enable', {}, sessionId);
     await wait(sessionId, 'return app.uplink?.link.source !== "";');
@@ -888,6 +899,56 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await send(second, 'ada', 'after clear');
     await wait(first, hasText('after clear'));
     await wait(first, hasText('hello from tab one'));
+  });
+
+  await t.test('new version installs by itself and applies', async () => {
+    await focus(first);
+    const { version } = JSON.parse(await fs.readFile(MANIFEST, 'utf8'));
+    const shown = await run(first, 'return app.versionBtn.textContent;');
+    assert.equal(shown, `v${version}`);
+    const { targetInfos } = await browser.request('Target.getTargets');
+    const page = targetInfos.find(
+      (info) => info.targetId === targets.get(first),
+    );
+    const worker = targetInfos.find((info) => {
+      const isWorker = info.type === 'service_worker';
+      const isOwn = info.browserContextId === page.browserContextId;
+      return isWorker && isOwn && info.url === `${ORIGIN}/worker.js`;
+    });
+    const attach = { targetId: worker.targetId, flatten: true };
+    const { sessionId } = await browser.request(
+      'Target.attachToTarget',
+      attach,
+    );
+    const next = '9.9.9';
+    const manifest = JSON.stringify({ name: 'XXII Chat', version: next });
+    const body = Buffer.from(manifest).toString('base64');
+    const headers = [{ name: 'Content-Type', value: 'application/json' }];
+    browser.on('Fetch.requestPaused', ({ requestId }, session) => {
+      const reply = { requestId, responseCode: 200, body };
+      const params = { ...reply, responseHeaders: headers };
+      browser.request('Fetch.fulfillRequest', params, session).catch(() => {});
+    });
+    const patterns = [{ urlPattern: '*/manifest.json' }];
+    await browser.request('Fetch.enable', { patterns }, sessionId);
+    const ready = await run(first, 'return app.checkUpdate(true);');
+    assert.equal(ready, next);
+    const label = await run(first, 'return app.versionBtn.textContent;');
+    assert.equal(label, `v${version} → v${next}`);
+    const keys = await run(first, 'return caches.keys();');
+    assert.deepEqual(keys.toSorted(), [`xxii-${next}`, 'xxii-meta']);
+    await run(first, 'setTimeout(() => app.restart(), 0); return true;');
+    const restarted = (value) => `return app.version === '${value}'
+      && app.uplink?.link.source !== ''
+      && app.versionBtn.textContent === 'v${value}';`;
+    await wait(first, restarted(next), 30000);
+    await wait(second, restarted(next), 30000);
+    await browser.request('Fetch.disable', {}, sessionId);
+    const back = await run(first, 'return app.checkUpdate(true);');
+    assert.equal(back, version);
+    await run(first, 'setTimeout(() => app.restart(), 0); return true;');
+    await wait(first, restarted(version), 30000);
+    await wait(second, restarted(version), 30000);
   });
 
   assert.deepEqual(browser.errors, []);

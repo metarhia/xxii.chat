@@ -1,6 +1,7 @@
 {
   "name": "XXII Chat",
   "short_name": "xxii",
+  "version": "0.1.0",
   "description": "XXII Distributed Chat Application",
   "start_url": "/",
   "display": "standalone",
