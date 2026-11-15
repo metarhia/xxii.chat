@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { setTimeout: delay } = require('node:timers/promises');
@@ -243,10 +244,11 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(second, shown('hello from tab one'));
     await untilServer(serverHas('hello from tab one'));
     const id = await run(first, `return ${findText('hello from tab one')};`);
+    const message = `.message[data-id="${id}"]`;
+    const like = `${message} .quick-reactions [data-reaction="like"]`;
     await run(
       second,
-      `document.querySelector('.message[data-id="${id}"] .react-btn').click();
-      document.querySelector('#palette [data-reaction="like"]').click();
+      `document.querySelector('${like}').click();
       return true;`,
     );
     const liked = `return app.replica.get('${id}').reactions?.like === 1;`;
@@ -255,8 +257,8 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(first, shown('hello from tab one'));
     const count = await run(
       first,
-      `return document.querySelector('.reaction[data-message-id="${id}"]' +
-        '[data-reaction="like"]').dataset.count;`,
+      `return document.querySelector(
+        '${message} .reactions [data-reaction="like"]').dataset.count;`,
     );
     assert.equal(count, '1');
   });
@@ -558,6 +560,92 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
       return true;`,
     );
     await wait(linus, `app.render(); return ${feedItem} !== null;`);
+    await run(grace, `app.selectChat('general'); return true;`);
+  });
+
+  const attach = (session, name, text) =>
+    run(
+      session,
+      `const file = new File([${JSON.stringify(text)}], '${name}');
+      app.addFiles([file]);
+      await app.sendMessage();
+      return true;`,
+    );
+
+  const fileOf = (replica, name) => `const replica = ${replica};
+    const id = [...replica.keys('file')]
+      .find((key) => replica.get(key).name === '${name}');
+    const file = id ? { id, ...replica.get(id) } : null;`;
+
+  const checksumOf = (text) =>
+    crypto.createHash('sha256').update(text).digest('hex');
+
+  const serverFile = (checksum) => path.join(dataPath, 'files', checksum);
+
+  await t.test(
+    'attached files reach other browsers through server',
+    async () => {
+      const text = 'notes for the team';
+      const checksum = checksumOf(text);
+      await run(first, `app.selectChat('general'); return true;`);
+      await attach(first, 'notes.txt', text);
+      const uploaded = async () => {
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline) {
+          const content = await fs
+            .readFile(serverFile(checksum), 'utf8')
+            .catch(() => '');
+          if (content === text) return;
+          await delay(200);
+        }
+        throw new Error('File is not uploaded');
+      };
+      await uploaded();
+      const chip = `app.render();
+      const file = app.messageList.querySelector('.file');
+      return file?.querySelector('.file-name').textContent === 'notes.txt';`;
+      await wait(grace, chip);
+      const loaded = await run(
+        grace,
+        `${fileOf('app.replica', 'notes.txt')}
+      const blob = await app.loadFile(file);
+      return blob.text();`,
+      );
+      assert.equal(loaded, text);
+      await run(
+        grace,
+        `app.messageList.querySelector('.file .download-btn').click();
+      return true;`,
+      );
+      const log = 'document.getElementById("output").textContent';
+      const saved = `return ${log}.includes('Saved file: notes.txt');`;
+      await wait(grace, saved);
+    },
+  );
+
+  await t.test('direct message files go peer to peer only', async () => {
+    const text = 'private bytes';
+    const checksum = checksumOf(text);
+    await run(grace, `app.selectDirect('${linusId}'); return true;`);
+    await attach(grace, 'secret.txt', text);
+    const pair = await run(grace, 'return app.chat;');
+    const direct = `app.directs.get('${pair}')?.replica`;
+    const received = `${fileOf(direct, 'secret.txt')}
+      if (!file) return false;
+      const { readFile } = await import('/files.js');
+      const blob = await readFile(file);
+      return blob !== null && (await blob.text()) === '${text}';`;
+    await wait(linus, received, 30000);
+    const isOnServer = await fs.access(serverFile(checksum)).then(
+      () => true,
+      () => false,
+    );
+    assert.equal(isOnServer, false);
+    const deltas = await readServer();
+    const leaked = deltas.some(
+      (delta) => delta.data.checksum?.$lww.value === checksum,
+    );
+    assert.equal(leaked, false);
     await run(grace, `app.selectChat('general'); return true;`);
   });
 

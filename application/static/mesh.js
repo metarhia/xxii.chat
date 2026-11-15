@@ -1,16 +1,22 @@
 import { Metacom, MetacomPeer } from './metacom.js';
 import { SyncService, Uplink } from './globalstorage.js';
 import { Emitter } from './metautil.js';
+import { filesOf } from './chat.js';
+import { readFile, saveFile, localFiles } from './files.js';
+import { writeBlob, sendBlob, readBlob, SerialTask } from './files.js';
 
 const ICE = { iceServers: [] };
 const LOCK = 'xxii:mesh';
 const PROTOCOL = 'metacom:rtc';
-const LINK_UNITS = ['chat', 'direct', 'mesh'];
+const LINK_UNITS = ['chat', 'direct', 'mesh', 'files'];
 const HANDSHAKE_MS = { answerer: 15000, offerer: 10000 };
 const HOLD_MS = 5000;
 const HOLD_LIMIT = 64;
 
 const isOnline = (entry) => entry.status !== 'offline';
+
+const isFileLog = ({ deltas }) =>
+  deltas.some((delta) => delta.entity === 'file');
 
 const addListener = (emitter, name, listener) => {
   if (!emitter || emitter.listeners(name).includes(listener)) return;
@@ -19,17 +25,22 @@ const addListener = (emitter, name, listener) => {
 
 class PeerLink extends Emitter {
   #mesh = null;
+  #direct = null;
   #host = null;
   #client = null;
   #services = [];
   #groupUplink = null;
   #directUplink = null;
+  #exchange = null;
+  #exchanged = new Set();
   #onRelay = null;
   #onState = null;
+  #onFiles = null;
 
   constructor(mesh, remote, direct) {
     super();
     this.#mesh = mesh;
+    this.#direct = direct;
     this.remote = remote;
     this.role = mesh.peerId < remote ? 'answerer' : 'offerer';
     this.connected = false;
@@ -62,6 +73,13 @@ class PeerLink extends Emitter {
       relay: async ({ message }) => this.#mesh.receive(message),
       state: async () => ({ server: this.#mesh.connected }),
     });
+    host.register('files', {
+      have: async ({ checksums }) => this.#have(checksums),
+      get: async ({ id, checksum }, { client }) =>
+        this.#sendFile(client, checksum, id),
+      put: async ({ id, checksum }, { client }) =>
+        this.#receiveFile(client.getStream(id), checksum),
+    });
     host.on('connect', () => this.#setConnected(true));
     host.on('disconnect', () => this.#setConnected(false));
     host.on('error', (error) => this.emit('error', error));
@@ -81,6 +99,15 @@ class PeerLink extends Emitter {
     this.#groupUplink.on('error', (error) => this.emit('error', error));
     this.#onRelay = (message) => this.#mesh.receive(message);
     this.#onState = ({ server }) => this.#setRemoteServer(server);
+    this.#exchange = new SerialTask(
+      () => this.#exchangeFiles(),
+      (error) => this.emit('error', error),
+    );
+    this.#onFiles = (event) => {
+      if (isFileLog(event)) this.#exchange.schedule();
+    };
+    direct.on('log', this.#onFiles);
+    replica.on('log', this.#onFiles);
     client.on('open', () => {
       this.#joined().catch((error) => this.emit('error', error));
     });
@@ -119,6 +146,84 @@ class PeerLink extends Emitter {
     if (!this.#groupUplink) return;
     if (this.syncsGroup) this.#groupUplink.start();
     else this.#groupUplink.stop();
+    if (this.connected) this.#exchange.schedule();
+  }
+
+  #attached(withGroup) {
+    const files = filesOf(this.#direct);
+    if (!withGroup) return files;
+    for (const file of filesOf(this.#mesh.replica).values()) {
+      files.set(file.checksum, file);
+    }
+    return files;
+  }
+
+  async #have(checksums) {
+    if (!Array.isArray(checksums)) return [];
+    const attached = this.#attached(true);
+    const files = checksums.map((checksum) => attached.get(checksum));
+    const local = await localFiles(files.filter(Boolean));
+    return local.map((file) => file.checksum);
+  }
+
+  async #sendFile(client, checksum, id) {
+    const file = this.#attached(true).get(checksum);
+    const blob = file ? await readFile(file) : null;
+    if (!blob) throw new Error('File is not available');
+    const stream = client.createStream(checksum, blob.size, id);
+    writeBlob(stream, blob).catch(() => stream.terminate());
+    return { id, size: blob.size };
+  }
+
+  async #receiveFile(stream, checksum) {
+    const file = this.#attached(true).get(checksum);
+    if (file?.size !== stream.size) {
+      await stream.terminate();
+      throw new Error('File is not attached to any message');
+    }
+    const blob = await stream.toBlob();
+    await saveFile(file, blob);
+    this.emit('file', file);
+    return true;
+  }
+
+  async #exchangeFiles() {
+    const files = this.#client.api.files;
+    if (!this.connected || !files) return;
+    const attached = this.#attached(this.syncsGroup);
+    const pending = [];
+    for (const file of attached.values()) {
+      if (!this.#exchanged.has(file.checksum)) pending.push(file);
+    }
+    if (pending.length === 0) return;
+    const checksums = pending.map((file) => file.checksum);
+    const remote = new Set(await files.have({ checksums }));
+    const local = await localFiles(pending);
+    const stored = new Set(local.map((file) => file.checksum));
+    for (const file of pending) {
+      const isLocal = stored.has(file.checksum);
+      const isRemote = remote.has(file.checksum);
+      if (isLocal && !isRemote) await this.#putFile(file);
+      if (!isLocal && isRemote) await this.#getFile(file);
+      if (isLocal || isRemote) this.#exchanged.add(file.checksum);
+    }
+  }
+
+  async #putFile(file) {
+    const blob = await readFile(file);
+    if (!blob) return;
+    const { checksum } = file;
+    const { put } = this.#client.api.files;
+    await sendBlob(this.#client, blob, (id) => put({ id, checksum }));
+  }
+
+  async #getFile(file) {
+    const { checksum } = file;
+    const { get } = this.#client.api.files;
+    const call = (id) => get({ id, checksum });
+    const blob = await readBlob(this.#client, call);
+    await saveFile(file, blob);
+    this.emit('file', file);
   }
 
   announce() {
@@ -140,6 +245,10 @@ class PeerLink extends Emitter {
   }
 
   close() {
+    if (this.#onFiles) {
+      this.#direct.off('log', this.#onFiles);
+      this.#mesh.replica.off('log', this.#onFiles);
+    }
     this.#groupUplink?.stop();
     this.#directUplink?.stop();
     for (const service of this.#services) service.close();
@@ -258,6 +367,7 @@ class Mesh extends Emitter {
       if (!this.isLeader || this.#links.has(remote)) return;
       const link = new PeerLink(this, remote, direct.replica);
       link.on('state', () => this.emit('links'));
+      link.on('file', (file) => this.emit('file', file));
       link.on('error', (error) => this.emit('error', error));
       this.#links.set(remote, link);
       this.emit('links');

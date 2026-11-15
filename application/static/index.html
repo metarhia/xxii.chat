@@ -21,7 +21,7 @@
   <div class="app">
     <aside class="sidebar" id="sidebar">
       <header class="brand">
-        <span class="prompt">$</span>
+        <img class="logo" src="/icon.svg" alt="Metarhia" />
         <h1>xxii.chat</h1>
         <span class="peers"><span class="muted">peers:</span> <span id="peer-count">0</span></span>
       </header>
@@ -67,16 +67,16 @@
           <span id="mesh-status" class="muted"></span>
         </div>
         <div class="tools">
-          <button id="install-btn" class="link-btn hidden">[install]</button>
-          <button id="update-cache-btn" class="link-btn">[update cache]</button>
-          <button id="clear-messages-btn" class="link-btn">[clear database]</button>
+          <button id="install-btn" class="link-btn hidden">install</button>
+          <button id="update-cache-btn" class="link-btn">update cache</button>
+          <button id="clear-messages-btn" class="link-btn">clear database</button>
         </div>
       </section>
     </aside>
 
-    <main class="chat-view">
+    <main id="chat-view" class="chat-view">
       <header class="topbar">
-        <button id="menu-btn" class="link-btn menu-btn" title="Menu">[≡]</button>
+        <button id="menu-btn" class="link-btn menu-btn" title="Menu">≡</button>
         <div class="context">
           <span id="chat-title" class="accent">!general</span>
           <span class="separator">|</span>
@@ -86,28 +86,31 @@
           </form>
         </div>
         <nav class="actions">
-          <button id="search-btn" class="link-btn">[Search]</button>
-          <button id="pins-btn" class="link-btn">[Pin list]</button>
-          <button id="members-btn" class="link-btn">[Members]</button>
-          <button id="log-btn" class="link-btn">[Log]</button>
+          <button id="search-btn" class="link-btn">Search</button>
+          <button id="pins-btn" class="link-btn">Pin list</button>
+          <button id="members-btn" class="link-btn">Members</button>
+          <button id="log-btn" class="link-btn">Log</button>
         </nav>
       </header>
       <div id="search-bar" class="search hidden">
         <input id="search-input" type="search" placeholder="filter messages in this chat" />
       </div>
       <div id="chat-messages" class="messages">
-        <button id="load-more-btn" class="link-btn load-more hidden">[load older messages]</button>
+        <button id="load-more-btn" class="link-btn load-more hidden">load older messages</button>
         <div id="message-list" class="message-list"></div>
       </div>
       <form id="composer" class="composer">
-        <div class="shortcuts">Ctrl+F: search <span>|</span> Ctrl+P: pinned <span>|</span> Esc: close</div>
+        <div id="pending-files" class="pending-files hidden"></div>
         <textarea id="message-input" rows="2" placeholder="> new message to !general"></textarea>
         <div class="composer-bar">
           <div class="composer-tools">
-            <button id="emoji-btn" class="link-btn" type="button">[emoji]</button>
-            <span id="composer-info" class="muted"></span>
+            <button id="attach-btn" class="link-btn" type="button">attach</button>
+            <input id="file-input" type="file" multiple hidden />
+            <button id="emoji-btn" class="link-btn" type="button">emoji</button>
+            <span id="composer-info" class="composer-info"></span>
           </div>
-          <button id="send-btn" class="send" type="submit">[send]</button>
+          <span class="shortcuts">Ctrl+F: search | Ctrl+P: pinned | Esc: close</span>
+          <button id="send-btn" class="send" type="submit">send</button>
         </div>
       </form>
     </main>
@@ -115,7 +118,7 @@
     <aside id="panel" class="panel">
       <header class="panel-header">
         <span id="panel-title" class="accent">Thread</span>
-        <button id="panel-close-btn" class="link-btn">[close]</button>
+        <button id="panel-close-btn" class="link-btn">close</button>
       </header>
       <section class="panel-body" data-panel="thread">
         <div id="thread-root"></div>
@@ -134,7 +137,7 @@
         <div id="thread-replies" class="thread-replies"></div>
         <form id="reply-form" class="reply-form">
           <textarea id="reply-input" rows="2" placeholder="> reply in thread"></textarea>
-          <button class="send" type="submit">[reply]</button>
+          <button class="send" type="submit">reply</button>
         </form>
       </section>
       <section class="panel-body" data-panel="pins">
@@ -145,7 +148,7 @@
       </section>
       <section class="panel-body" data-panel="log">
         <div class="panel-tools">
-          <button id="clear-log-btn" class="link-btn">[clear]</button>
+          <button id="clear-log-btn" class="link-btn">clear</button>
         </div>
         <pre id="output" class="log"></pre>
       </section>
@@ -169,7 +172,7 @@
     <li class="nav-item chat-item">
       <span class="icon"></span>
       <span class="name"></span>
-      <button class="link-btn remove-btn hidden" data-action="remove" title="Remove from folder">[x]</button>
+      <button class="link-btn remove-btn hidden" data-action="remove" title="Remove from folder">×</button>
       <span class="badge hidden"></span>
       <span class="time"></span>
     </li>
@@ -182,7 +185,7 @@
         <span class="icon"></span>
         <span class="name"></span>
         <span class="folder-actions">
-          <button class="link-btn" data-action="add" title="Add the open chat or feed">[+]</button>
+          <button class="link-btn" data-action="add" title="Add the open chat or feed">+</button>
           <button class="link-btn" data-action="visibility" title="Who sees this folder"></button>
         </span>
         <span class="badge hidden"></span>
@@ -198,16 +201,16 @@
         <div class="line">
           <span class="author"></span><span class="content"></span>
         </div>
+        <div class="attachments"></div>
         <div class="reactions"></div>
-        <button class="replies hidden">
+        <button class="replies hidden" data-action="thread">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" /></svg>
           <span class="count"></span>
         </button>
       </div>
       <div class="message-actions">
-        <button class="react-btn" title="React">[+]</button>
-        <button class="reply-btn" title="Reply in thread">[reply]</button>
-        <button class="pin-btn" title="Pin"></button>
+        <button class="reply-btn" data-action="thread" title="Reply in thread">reply</button>
+        <button class="pin-btn" data-action="pin"></button>
       </div>
     </div>
   </template>
@@ -217,17 +220,17 @@
       <h2 class="title"></h2>
       <div class="meta"><span class="nick"></span><span class="bullet">•</span><span class="date"></span></div>
       <p class="excerpt"></p>
+      <div class="attachments"></div>
       <div class="post-footer">
-        <button class="replies">
+        <button class="replies" data-action="thread">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" /></svg>
           <span class="count"></span>
         </button>
         <div class="reactions"></div>
       </div>
       <div class="message-actions">
-        <button class="react-btn" title="React">[+]</button>
-        <button class="reply-btn" title="Open post details">[open]</button>
-        <button class="pin-btn" title="Pin"></button>
+        <button class="reply-btn" data-action="thread" title="Open post details">open</button>
+        <button class="pin-btn" data-action="pin"></button>
       </div>
     </article>
   </template>
@@ -237,10 +240,10 @@
       <h1 class="title"></h1>
       <div class="meta"><span class="nick"></span><span class="bullet">•</span><span class="date"></span></div>
       <div class="post-text"></div>
+      <div class="attachments"></div>
       <div class="reactions"></div>
       <div class="message-actions">
-        <button class="react-btn" title="React">[+]</button>
-        <button class="pin-btn" title="Pin"></button>
+        <button class="pin-btn" data-action="pin"></button>
       </div>
     </article>
   </template>
@@ -249,10 +252,10 @@
     <div class="thread-item">
       <div class="who"></div>
       <div class="text"></div>
+      <div class="attachments"></div>
       <div class="reactions"></div>
       <div class="message-actions">
-        <button class="react-btn" title="React">[+]</button>
-        <button class="pin-btn" title="Pin"></button>
+        <button class="pin-btn" data-action="pin"></button>
       </div>
     </div>
   </template>
@@ -261,7 +264,7 @@
     <div class="pin-item">
       <div class="who"></div>
       <div class="text"></div>
-      <button class="link-btn unpin-btn">[unpin]</button>
+      <button class="link-btn unpin-btn">unpin</button>
     </div>
   </template>
 
@@ -274,10 +277,29 @@
   </template>
 
   <template id="reaction-button-template">
-    <button class="reaction">
+    <button class="reaction" data-action="react">
       <span class="emoji"></span>
       <span class="count"></span>
     </button>
+  </template>
+
+  <template id="file-template">
+    <div class="file">
+      <svg class="file-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" /></svg>
+      <span class="file-name"></span>
+      <span class="file-size"></span>
+      <button class="download-btn" data-action="download" title="Download">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /><path d="m7 11 5 5 5-5" /><path d="M12 4v12" /></svg>
+      </button>
+    </div>
+  </template>
+
+  <template id="pending-file-template">
+    <div class="file pending-file">
+      <span class="file-name"></span>
+      <span class="file-size"></span>
+      <button class="remove-file" type="button" title="Remove">×</button>
+    </div>
   </template>
 
   <script type="module" src="/domain.js"></script>

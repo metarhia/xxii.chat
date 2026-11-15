@@ -5,8 +5,10 @@ import { isFeed, isPost, containerOf, labelOf, parseTitle } from './chat.js';
 import { saveAuthor, createChannel, describe } from './chat.js';
 import { createFolder, setVisibility, placeItem } from './chat.js';
 import { createMessage, createPost, react, pin } from './chat.js';
+import { MAX_FILE_SIZE, attachFile, attachmentsOf } from './chat.js';
 import { listChannels, listAuthors, folderTree } from './chat.js';
 import { threadsOf, activityOf } from './chat.js';
+import { storeFile, readFile, saveFile, readBlob } from './files.js';
 import { Replica, Uplink } from './globalstorage.js';
 import { generateUUID } from './metautil.js';
 import { Mesh } from './mesh.js';
@@ -14,15 +16,15 @@ import { Application } from './application.js';
 
 const TASKS = {
   cache: {
-    label: '[update cache]',
-    busy: '[updating...]',
+    label: 'update cache',
+    busy: 'updating...',
     request: 'Cache update requested',
     done: 'Cache updated successfully',
     failed: 'Cache update failed',
   },
   clear: {
-    label: '[clear database]',
-    busy: '[clearing...]',
+    label: 'clear database',
+    busy: 'clearing...',
     request: 'Database clear requested',
     done: 'Database cleared successfully',
     failed: 'Database clear failed',
@@ -48,6 +50,13 @@ const NAV_ACTIONS = {
   remove: (app, { folder, item }) => app.removeFromFolder(folder, item),
 };
 
+const MESSAGE_ACTIONS = {
+  react: (app, id, { reaction }) => app.addReaction(id, reaction),
+  thread: (app, id) => app.openThread(id),
+  pin: (app, id) => app.togglePin(id),
+  download: (app, id, { file }) => app.downloadFile(file),
+};
+
 const NEXT_VISIBILITY = { unlisted: 'public', public: 'unlisted' };
 
 const STATES = {
@@ -59,7 +68,10 @@ const STATES = {
 };
 
 const STATUS_ORDER = ['linked', 'online', 'away', 'offline', 'unknown'];
-const UNITS = ['chat', 'cache', 'presence', 'signal'];
+const UNITS = ['chat', 'cache', 'presence', 'signal', 'files'];
+const SIZE_UNITS = ['B', 'KB', 'MB'];
+const MAX_FILE_MB = MAX_FILE_SIZE / 1024 / 1024;
+const REVOKE_MS = 10000;
 const THREADS = ['thread', 'post'];
 const PAGE_SIZE = 50;
 const CHAT_KEY = 'xxii:chat';
@@ -133,11 +145,36 @@ const cloneTemplate = (template, selector) => {
   return fragment.querySelector(selector);
 };
 
-const fillActions = (element, message) => {
-  const buttons = element.querySelectorAll('.message-actions button');
-  for (const button of buttons) button.dataset.id = message.id;
-  const pinText = message.pinned ? '[unpin]' : '[pin]';
-  element.querySelector('.pin-btn').textContent = pinText;
+const formatSize = (bytes) => {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < SIZE_UNITS.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const digits = unit === 0 ? 0 : 1;
+  return `(${value.toFixed(digits)}${SIZE_UNITS[unit]})`;
+};
+
+const createReactionButtons = () => {
+  const buttons = [];
+  for (const reaction in REACTIONS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.title = reaction;
+    button.dataset.action = 'react';
+    button.dataset.reaction = reaction;
+    button.textContent = REACTIONS[reaction];
+    buttons.push(button);
+  }
+  return buttons;
+};
+
+const createQuickReactions = () => {
+  const container = document.createElement('span');
+  container.className = 'quick-reactions';
+  container.append(...createReactionButtons());
+  return container;
 };
 
 const fillPostHeader = (element, post) => {
@@ -210,7 +247,8 @@ class ChatApplication extends Application {
     this.filter = '';
     this.panel = '';
     this.thread = '';
-    this.paletteTarget = '';
+    this.attachments = [];
+    this.quickReactions = createQuickReactions();
     this.unread = new Map();
     this.collapsed = readCollapsed();
     this.isRenderScheduled = false;
@@ -225,6 +263,9 @@ class ChatApplication extends Application {
     this.mesh.on('links', () => this.showLinks());
     this.mesh.on('leader', () => this.logger.log('This tab runs the mesh'));
     this.mesh.on('error', (error) => this.logger.log('Mesh:', error.message));
+    this.mesh.on('file', (file) => {
+      this.logger.log('File received over WebRTC:', file.checksum);
+    });
     seed(this.replica);
     this.usernameInput.value = this.username;
     this.fillPalette();
@@ -266,12 +307,16 @@ class ChatApplication extends Application {
     this.logBtn = byId('log-btn');
     this.searchBar = byId('search-bar');
     this.searchInput = byId('search-input');
+    this.chatView = byId('chat-view');
     this.chatMessages = byId('chat-messages');
     this.messageList = byId('message-list');
     this.loadMoreBtn = byId('load-more-btn');
     this.composer = byId('composer');
     this.messageInput = byId('message-input');
     this.composerInfo = byId('composer-info');
+    this.pendingList = byId('pending-files');
+    this.attachBtn = byId('attach-btn');
+    this.fileInput = byId('file-input');
     this.emojiBtn = byId('emoji-btn');
     this.panelTitle = byId('panel-title');
     this.panelCloseBtn = byId('panel-close-btn');
@@ -299,6 +344,8 @@ class ChatApplication extends Application {
     this.pinTemplate = byId('pin-item-template');
     this.memberTemplate = byId('member-item-template');
     this.reactionTemplate = byId('reaction-button-template');
+    this.fileTemplate = byId('file-template');
+    this.pendingFileTemplate = byId('pending-file-template');
   }
 
   setupEvents() {
@@ -327,8 +374,28 @@ class ChatApplication extends Application {
     this.logBtn.onclick = () => this.togglePanel('log');
     this.panelCloseBtn.onclick = () => this.closePanel();
     this.loadMoreBtn.onclick = () => this.loadOlder();
-    this.emojiBtn.onclick = () => this.openPalette(this.emojiBtn, '');
+    this.emojiBtn.onclick = () => this.openPalette(this.emojiBtn);
+    this.attachBtn.onclick = () => this.fileInput.click();
 
+    this.fileInput.addEventListener('change', () => {
+      this.addFiles(this.fileInput.files);
+      this.fileInput.value = '';
+    });
+    this.pendingList.addEventListener('click', (event) => {
+      const button = event.target.closest('.remove-file');
+      if (button) this.removeFile(Number(button.dataset.index));
+    });
+    this.chatView.addEventListener('dragover', (event) => {
+      event.preventDefault();
+    });
+    this.chatView.addEventListener('drop', (event) => {
+      event.preventDefault();
+      this.addFiles(event.dataTransfer.files);
+    });
+    this.messageInput.addEventListener('paste', (event) => {
+      const { files } = event.clipboardData;
+      if (files.length > 0) this.addFiles(files);
+    });
     this.searchInput.addEventListener('input', () => {
       this.filter = this.searchInput.value.trim().toLowerCase();
       this.renderMessages();
@@ -366,7 +433,7 @@ class ChatApplication extends Application {
     });
     this.palette.addEventListener('click', (event) => {
       const button = event.target.closest('button');
-      if (button) this.choose(button.dataset.reaction);
+      if (button) this.insertEmoji(button.textContent);
     });
     this.usernameInput.addEventListener('blur', () => this.syncUsername());
     this.usernameInput.addEventListener('keydown', (event) => {
@@ -374,9 +441,7 @@ class ChatApplication extends Application {
     });
     document.addEventListener('keydown', (event) => this.handleKey(event));
     document.addEventListener('click', (event) => {
-      const isPalette = event.target.closest(
-        '#palette, .react-btn, #emoji-btn',
-      );
+      const isPalette = event.target.closest('#palette, #emoji-btn');
       if (!isPalette) this.closePalette();
     });
 
@@ -645,7 +710,7 @@ class ChatApplication extends Application {
       button.dataset.folder = folder.id;
     }
     const toggle = row.querySelector('[data-action="visibility"]');
-    toggle.textContent = `[${visibility}]`;
+    toggle.textContent = visibility;
     setBadge(row.querySelector('.badge'), this.unreadIn(folder.id, nav));
     const subfolders = nav.tree.children.get(folder.id) ?? [];
     const placed = nav.tree.items.get(folder.id) ?? new Set();
@@ -673,22 +738,25 @@ class ChatApplication extends Application {
 
   currentView() {
     const replica = this.replicaOf(this.chat);
-    return { replica, ...threadsOf(replica, this.chat) };
+    const attachments = attachmentsOf(replica, this.chat);
+    return { replica, attachments, ...threadsOf(replica, this.chat) };
   }
 
   renderMessages() {
     const box = this.chatMessages;
     const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
     const isAtBottom = distance < 40;
-    const { roots, replies } = this.currentView();
+    const { roots, replies, attachments } = this.currentView();
+    const filesOf = (message) => attachments.get(message.id) ?? [];
     const matched = this.filter
-      ? roots.filter((message) => this.isMatch(message))
+      ? roots.filter((message) => this.isMatch(message, filesOf(message)))
       : roots;
     const visible = matched.slice(-this.limit);
     const elements = visible.map((message) => {
       const count = replies.get(message.id)?.length ?? 0;
-      if (isPost(message)) return this.createPostCard(message, count);
-      return this.createMessage(message, count);
+      const files = filesOf(message);
+      if (isPost(message)) return this.createPostCard(message, count, files);
+      return this.createMessage(message, count, files);
     });
     this.messageList.replaceChildren(...elements);
     this.loadMoreBtn.classList.toggle('hidden', matched.length <= this.limit);
@@ -696,9 +764,10 @@ class ChatApplication extends Application {
     if (isAtBottom) box.scrollTop = box.scrollHeight;
   }
 
-  isMatch(message) {
+  isMatch(message, files) {
     const { nick, title = '', content } = message;
-    const text = `${nick} ${title} ${content}`.toLowerCase();
+    const names = files.map((file) => file.name).join(' ');
+    const text = `${nick} ${title} ${content} ${names}`.toLowerCase();
     return text.includes(this.filter);
   }
 
@@ -746,35 +815,56 @@ class ChatApplication extends Application {
     this.composerInfo.textContent = `${nick}${hint}`;
   }
 
-  createMessage(message, replyCount) {
+  createMessage(message, replyCount, files) {
     const element = cloneTemplate(this.messageTemplate, '.message');
     element.dataset.id = message.id;
     element.classList.toggle('pinned', message.pinned === true);
     element.querySelector('.time').textContent = timeOf(message.timestamp);
     element.querySelector('.author').textContent = message.nick;
     element.querySelector('.content').textContent = message.content;
+    this.fillFiles(element.querySelector('.attachments'), files);
     this.fillReactions(element.querySelector('.reactions'), message);
     const replies = element.querySelector('.replies');
-    replies.dataset.id = message.id;
     replies.classList.toggle('hidden', replyCount === 0);
     replies.querySelector('.count').textContent = `${replyCount} replies`;
-    fillActions(element, message);
+    this.fillActions(element, message);
     return element;
   }
 
-  createPostCard(post, replyCount) {
+  createPostCard(post, replyCount, files) {
     const element = cloneTemplate(this.postTemplate, '.post');
     fillPostHeader(element, post);
     element.querySelector('.excerpt').textContent = excerptOf(post.content);
+    this.fillFiles(element.querySelector('.attachments'), files);
     const replies = element.querySelector('.replies');
-    replies.dataset.id = post.id;
     replies.querySelector('.count').textContent = `${replyCount} replies`;
     this.fillReactions(element.querySelector('.reactions'), post);
-    fillActions(element, post);
+    this.fillActions(element, post);
     return element;
   }
 
-  createArticle(post) {
+  fillActions(element, message) {
+    const actions = element.querySelector('.message-actions');
+    actions.prepend(this.quickReactions.cloneNode(true));
+    const pinText = message.pinned ? 'unpin' : 'pin';
+    element.querySelector('.pin-btn').textContent = pinText;
+  }
+
+  fillFiles(container, files) {
+    const items = files.map((file) => this.createFile(file));
+    container.replaceChildren(...items);
+  }
+
+  createFile(file) {
+    const element = cloneTemplate(this.fileTemplate, '.file');
+    element.title = file.name;
+    element.querySelector('.file-name').textContent = file.name;
+    element.querySelector('.file-size').textContent = formatSize(file.size);
+    element.querySelector('.download-btn').dataset.file = file.id;
+    return element;
+  }
+
+  createArticle(post, files) {
     const element = cloneTemplate(this.articleTemplate, '.post-article');
     fillPostHeader(element, post);
     const blocks = parseBlocks(post.content);
@@ -787,8 +877,9 @@ class ChatApplication extends Application {
       nodes.push(node);
     }
     element.querySelector('.post-text').replaceChildren(...nodes);
+    this.fillFiles(element.querySelector('.attachments'), files);
     this.fillReactions(element.querySelector('.reactions'), post);
-    fillActions(element, post);
+    this.fillActions(element, post);
     return element;
   }
 
@@ -796,13 +887,12 @@ class ChatApplication extends Application {
     for (const reaction in REACTIONS) {
       const count = message.reactions?.[reaction] ?? 0;
       if (count === 0) continue;
-      container.append(this.createReaction(message.id, reaction, count));
+      container.append(this.createReaction(reaction, count));
     }
   }
 
-  createReaction(messageId, reaction, count) {
+  createReaction(reaction, count) {
     const button = cloneTemplate(this.reactionTemplate, '.reaction');
-    button.dataset.messageId = messageId;
     button.dataset.reaction = reaction;
     button.dataset.count = count;
     button.querySelector('.emoji').textContent = REACTIONS[reaction];
@@ -811,20 +901,14 @@ class ChatApplication extends Application {
   }
 
   handleMessageClick(event) {
+    const item = event.target.closest('[data-id]');
+    if (!item) return;
+    const { id } = item.dataset;
     const button = event.target.closest('button');
-    const card = event.target.closest('.post');
-    if (!button && card) return void this.openThread(card.dataset.id);
-    if (!button) return;
-    const { id } = button.dataset;
-    if (button.classList.contains('reaction')) {
-      return void this.addReaction(button.dataset);
-    }
-    if (button.classList.contains('react-btn')) {
-      return void this.openPalette(button, id);
-    }
-    if (button.classList.contains('pin-btn')) return void this.togglePin(id);
-    const isThread = button.matches('.reply-btn, .replies');
-    if (isThread) this.openThread(id);
+    const isCard = !button && item.classList.contains('post');
+    if (isCard) return void this.openThread(id);
+    const action = MESSAGE_ACTIONS[button?.dataset.action];
+    if (action) action(this, id, button.dataset);
   }
 
   handlePin(event) {
@@ -838,6 +922,9 @@ class ChatApplication extends Application {
 
   renderPanel() {
     this.app.dataset.panel = this.panel;
+    this.pinsBtn.classList.toggle('active', this.panel === 'pins');
+    this.membersBtn.classList.toggle('active', this.panel === 'members');
+    this.logBtn.classList.toggle('active', this.panel === 'log');
     if (!this.panel) return;
     this.panelTitle.textContent = PANELS[this.panel];
     if (THREADS.includes(this.panel)) this.renderThread();
@@ -846,7 +933,7 @@ class ChatApplication extends Application {
   }
 
   renderThread() {
-    const { replica, replies } = this.currentView();
+    const { replica, replies, attachments } = this.currentView();
     const root = replica.get(this.thread);
     const isShown = root !== null && containerOf(root) === this.chat;
     const isPostShown = isShown && isPost(root);
@@ -854,7 +941,7 @@ class ChatApplication extends Application {
     if (!isShown) {
       const empty = document.createElement('p');
       empty.className = 'empty';
-      empty.textContent = 'Choose [reply] on a message to open its thread';
+      empty.textContent = 'Choose reply on a message to open its thread';
       this.threadRoot.replaceChildren(empty);
       this.threadReplies.replaceChildren();
       this.threadCount.textContent = '0 replies';
@@ -862,13 +949,17 @@ class ChatApplication extends Application {
     }
     const thread = replies.get(this.thread) ?? [];
     const message = { id: this.thread, ...root };
+    const files = attachments.get(this.thread) ?? [];
     const head = isPostShown
-      ? this.createArticle(message)
-      : this.createThreadItem(message);
+      ? this.createArticle(message, files)
+      : this.createThreadItem(message, files);
     this.threadRoot.replaceChildren(head);
     if (isPostShown) this.renderPostInfo(message, thread.length);
     this.threadCount.textContent = `${thread.length} replies`;
-    const items = thread.map((reply) => this.createThreadItem(reply));
+    const items = thread.map((reply) => {
+      const replyFiles = attachments.get(reply.id) ?? [];
+      return this.createThreadItem(reply, replyFiles);
+    });
     this.threadReplies.replaceChildren(...items);
   }
 
@@ -900,15 +991,16 @@ class ChatApplication extends Application {
     heading?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
-  createThreadItem(message) {
+  createThreadItem(message, files) {
     const element = cloneTemplate(this.threadTemplate, '.thread-item');
     const time = timeOf(message.timestamp);
     element.dataset.id = message.id;
     element.classList.toggle('pinned', message.pinned === true);
     element.querySelector('.who').textContent = `${message.nick} at ${time}:`;
     element.querySelector('.text').textContent = message.content;
+    this.fillFiles(element.querySelector('.attachments'), files);
     this.fillReactions(element.querySelector('.reactions'), message);
-    fillActions(element, message);
+    this.fillActions(element, message);
     return element;
   }
 
@@ -937,8 +1029,8 @@ class ChatApplication extends Application {
     element.dataset.id = message.id;
     element.dataset.root = message.replyTo ?? message.id;
     element.querySelector('.who').textContent = `${message.nick} at ${time}:`;
-    element.querySelector('.text').textContent =
-      message.title ?? message.content;
+    const text = message.title ?? message.content;
+    element.querySelector('.text').textContent = text || '📎 files';
     return element;
   }
 
@@ -987,19 +1079,10 @@ class ChatApplication extends Application {
   }
 
   fillPalette() {
-    const buttons = [];
-    for (const reaction in REACTIONS) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.dataset.reaction = reaction;
-      button.textContent = REACTIONS[reaction];
-      buttons.push(button);
-    }
-    this.palette.replaceChildren(...buttons);
+    this.palette.replaceChildren(...createReactionButtons());
   }
 
-  openPalette(anchor, messageId) {
-    this.paletteTarget = messageId;
+  openPalette(anchor) {
     const rect = anchor.getBoundingClientRect();
     this.palette.classList.remove('hidden');
     const width = this.palette.offsetWidth;
@@ -1011,18 +1094,15 @@ class ChatApplication extends Application {
 
   closePalette() {
     this.palette.classList.add('hidden');
-    this.paletteTarget = '';
   }
 
-  choose(reaction) {
-    const messageId = this.paletteTarget;
+  insertEmoji(emoji) {
     this.closePalette();
-    if (messageId) return void this.addReaction({ messageId, reaction });
     const input = this.messageInput;
     const position = input.selectionStart ?? input.value.length;
     const before = input.value.slice(0, position);
     const after = input.value.slice(position);
-    input.value = `${before}${REACTIONS[reaction]}${after}`;
+    input.value = `${before}${emoji}${after}`;
     input.focus();
   }
 
@@ -1077,6 +1157,7 @@ class ChatApplication extends Application {
 
   toggleSearch() {
     const isHidden = this.searchBar.classList.toggle('hidden');
+    this.searchBtn.classList.toggle('active', !isHidden);
     if (!isHidden) return void this.searchInput.focus();
     this.searchInput.value = '';
     this.filter = '';
@@ -1249,13 +1330,13 @@ class ChatApplication extends Application {
     return event.ctrlKey || event.metaKey;
   }
 
-  writePost(text) {
+  writePost(feed, text, files) {
     const lines = text.split('\n');
     const id = generateUUID();
-    const feed = this.chat;
+    this.attachFiles(this.replica, feed, id, files);
     const author = this.peerId;
     const nick = this.username;
-    const title = lines[0].trim();
+    const title = lines[0].trim() || files[0].name;
     const content = lines.slice(1).join('\n').trim();
     const timestamp = Date.now();
     const post = { id, feed, author, nick, title, content, timestamp };
@@ -1263,10 +1344,10 @@ class ChatApplication extends Application {
     return id;
   }
 
-  writeMessage(content, replyTo) {
-    const { chat } = this;
+  writeMessage(chat, content, replyTo, files) {
     const replica = this.replicaOf(chat);
     const id = generateUUID();
+    this.attachFiles(replica, chat, id, files);
     const author = this.peerId;
     const nick = this.username;
     const timestamp = Date.now();
@@ -1275,18 +1356,68 @@ class ChatApplication extends Application {
     return id;
   }
 
+  attachFiles(replica, chat, message, files) {
+    const author = this.peerId;
+    const created = Date.now();
+    for (const file of files) {
+      const id = generateUUID();
+      attachFile(replica, { ...file, id, chat, message, author, created });
+    }
+  }
+
+  addFiles(files) {
+    for (const file of files) {
+      const isAllowed = file.size > 0 && file.size <= MAX_FILE_SIZE;
+      if (isAllowed) {
+        this.attachments.push(file);
+        continue;
+      }
+      const text = `${file.name}: files from 1 byte to ${MAX_FILE_MB} MB`;
+      this.showNotification(text, 'warning');
+    }
+    this.renderPending();
+    this.messageInput.focus();
+  }
+
+  removeFile(index) {
+    this.attachments.splice(index, 1);
+    this.renderPending();
+  }
+
+  renderPending() {
+    const items = this.attachments.map((file, index) => {
+      const template = this.pendingFileTemplate;
+      const element = cloneTemplate(template, '.pending-file');
+      element.title = file.name;
+      element.querySelector('.file-name').textContent = file.name;
+      element.querySelector('.file-size').textContent = formatSize(file.size);
+      element.querySelector('.remove-file').dataset.index = index;
+      return element;
+    });
+    this.pendingList.replaceChildren(...items);
+    this.pendingList.classList.toggle('hidden', items.length === 0);
+  }
+
   submit() {
     this.sendMessage().catch((error) => this.report(error));
   }
 
   async sendMessage() {
     const content = this.messageInput.value.trim();
-    if (!content || !this.hasNick()) return;
+    const pending = this.attachments;
+    const isEmpty = content === '' && pending.length === 0;
+    if (isEmpty || !this.hasNick()) return;
+    const { chat } = this;
+    const isFeedOpen = this.channelEntity() === 'feed';
     this.messageInput.value = '';
-    if (this.channelEntity() === 'feed') this.writePost(content);
-    else this.writeMessage(content, '');
+    this.attachments = [];
+    this.renderPending();
+    const files = await Promise.all(pending.map(storeFile));
+    if (isFeedOpen) this.writePost(chat, content, files);
+    else this.writeMessage(chat, content, '', files);
     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
-    await this.reportDelivery(content);
+    const names = files.map((file) => file.name).join(', ');
+    await this.reportDelivery(content || names);
   }
 
   submitReply() {
@@ -1297,7 +1428,7 @@ class ChatApplication extends Application {
     const content = this.replyInput.value.trim();
     if (!content || !this.thread || !this.hasNick()) return;
     this.replyInput.value = '';
-    this.writeMessage(content, this.thread);
+    this.writeMessage(this.chat, content, this.thread, []);
     await this.reportDelivery(content);
   }
 
@@ -1330,11 +1461,47 @@ class ChatApplication extends Application {
     return record ? { id, ...record } : null;
   }
 
-  addReaction({ messageId, reaction }) {
-    const record = this.recordOf(messageId);
+  addReaction(id, reaction) {
+    const record = this.recordOf(id);
     if (!record) return;
     react(this.replicaOf(this.chat), record, reaction);
-    this.logger.log('Added reaction:', reaction, 'to message:', messageId);
+    this.logger.log('Added reaction:', reaction, 'to message:', id);
+  }
+
+  downloadFile(id) {
+    this.exportFile(id).catch((error) => this.report(error));
+  }
+
+  async exportFile(id) {
+    const file = this.recordOf(id);
+    if (!file) return;
+    const blob = await this.loadFile(file);
+    if (!blob) {
+      const source = isPair(file.chat) ? 'peer' : 'server';
+      const text = `File is not available yet, waiting for the ${source}`;
+      return void this.showNotification(text, 'warning');
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_MS);
+    this.logger.log('Saved file:', file.name);
+  }
+
+  async loadFile(file) {
+    const local = await readFile(file);
+    if (local) return local;
+    const isServed = !isPair(file.chat) && this.connected;
+    if (!isServed) return null;
+    const { checksum } = file;
+    const { download } = this.api.files;
+    const call = (id) => download({ id, checksum });
+    const blob = await readBlob(this.metacom, call).catch(() => null);
+    if (!blob) return null;
+    await saveFile(file, blob);
+    return blob;
   }
 
   togglePin(id) {
