@@ -1,33 +1,21 @@
-import { Emitter, generateUUID } from './metautil.js';
+import { Emitter } from './metautil.js';
 import { Metacom } from './metacom.js';
 
-window.addEventListener('online', () => Metacom.online());
-window.addEventListener('offline', () => Metacom.offline());
-
-const getClientId = () => {
-  let clientId = localStorage.getItem('clientId');
-  if (!clientId) {
-    clientId = generateUUID();
-    localStorage.setItem('clientId', clientId);
-  }
-  return clientId;
-};
-
 const CONFIG_DEFAULTS = {
-  serviceWorker: './worker.js',
   notificationTimeout: 3000,
-  syncTimeout: 2000,
+  serviceWorker: './worker.js',
+  units: [],
 };
 
 class Application extends Emitter {
   constructor(config = {}) {
     super();
     this.config = { ...CONFIG_DEFAULTS, ...config };
-    this.state = new Map();
-    this.worker = null;
-    this.clientId = getClientId();
     this.metacom = null;
+    this.api = null;
+    this.prompt = null;
     this.serviceWorker = this.config.serviceWorker;
+    this.logger = this.config.logger;
     this.online = navigator.onLine;
     this.connected = false;
     this.#init();
@@ -35,7 +23,9 @@ class Application extends Emitter {
 
   #init() {
     this.getElements();
-    this.#setupServiceWorker();
+    this.#setupServiceWorker().catch((error) => {
+      this.logger.log('Service worker setup failed:', error.message);
+    });
     this.#setupNetworkStatus();
     this.#setupInstallPrompt();
     this.#setupNotifications();
@@ -43,41 +33,39 @@ class Application extends Emitter {
     this.updateInterface();
   }
 
-  #setupServiceWorker() {
+  async #setupServiceWorker() {
     const { serviceWorker } = navigator;
-    serviceWorker.register(this.serviceWorker, { type: 'module' });
-    serviceWorker.ready.then((registration) => {
-      this.worker = registration.active;
-      this.#setupMetacom();
-    });
-    serviceWorker.addEventListener('message', (event) => {
-      const { type, data } = event.data;
-      this.emit(type, data);
-    });
-  }
-
-  async #setupMetacom() {
+    await serviceWorker.register(this.serviceWorker, { type: 'module' });
+    const registration = await serviceWorker.ready;
+    const worker = registration.active;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${location.host}`;
-    const { clientId, worker } = this;
-    this.metacom = Metacom.create(url, { clientId, worker });
-
-    await this.metacom.load('system', 'chat');
-    await this.metacom.api.chat.subscribe({ room: 'sync' });
-    this.connected = true;
-    this.emit('status', { connected: true });
-    this.emit('metacom-ready');
+    const metacom = Metacom.create(url, { worker });
+    metacom.on('status', ({ connected }) => {
+      this.connected = connected;
+      this.emit('status', { connected });
+    });
+    metacom.on('error', (error) => {
+      this.logger.log('Metacom error:', error.message);
+    });
+    await metacom.open();
+    await metacom.load(...this.config.units);
+    this.metacom = metacom;
+    this.api = metacom.api;
+    this.emit('ready');
   }
 
   #setupNetworkStatus() {
     window.addEventListener('online', () => {
       this.online = true;
       this.emit('network', { online: true });
+      this.logger.log('Network: Online');
     });
 
     window.addEventListener('offline', () => {
       this.online = false;
       this.emit('network', { online: false });
+      this.logger.log('Network: Offline');
     });
   }
 
@@ -86,43 +74,33 @@ class Application extends Emitter {
       event.preventDefault();
       this.prompt = event;
       this.emit('install', { prompt: event });
+      this.logger.log('Install prompt available');
     });
 
     window.addEventListener('appinstalled', () => {
       this.emit('installed');
+      this.logger.log('App installed successfully');
     });
   }
 
   async #setupNotifications() {
     if (typeof Notification === 'undefined') return false;
     const permission = await Notification.requestPermission();
-    this.notificationPermission = permission === 'granted';
-    return this.notificationPermission;
-  }
-
-  post(data) {
-    this.worker.postMessage(data);
+    this.logger.log('Notification permission:', permission);
+    return permission === 'granted';
   }
 
   async install() {
-    if (!this.prompt) return;
+    if (!this.prompt) {
+      this.logger.log('Install prompt not available');
+      return;
+    }
     this.prompt.prompt();
     const { outcome } = await this.prompt.userChoice;
+    const message = outcome === 'accepted' ? 'accepted' : 'dismissed';
+    this.logger.log(`Install prompt ${message}`);
     this.prompt = null;
     this.emit('installed', { accepted: outcome === 'accepted' });
-  }
-
-  async notify(title, text) {
-    if (typeof Notification === 'undefined') return;
-    if (!this.notificationPermission) return;
-    const caption = title || 'XXII Chat';
-    const body = text || 'This is a test notification from the PWA!';
-    const options = { body, icon: '/icon.svg', badge: '/icon.svg' };
-    const notification = new Notification(caption, options);
-    notification.onclick = () => {
-      window.focus();
-      notification.close();
-    };
   }
 }
 

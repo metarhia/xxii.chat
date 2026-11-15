@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="XXII Distributed Chat Application with offline support and real-time communication" />
-  <meta name="theme-color" content="#009933" />
+  <meta name="theme-color" content="#090a0c" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="XXII Chat" />
   <title>XXII Chat</title>
   <link rel="stylesheet" href="/default.css" />
@@ -17,53 +17,115 @@
   <link href="https://fonts.googleapis.com/css?family=Share+Tech+Mono" rel="stylesheet" type="text/css">
 </head>
 <body>
-  <div class="app-container">
-    <header class="app-header">
-      <h1>XXII Chat</h1>
-      <div class="status-indicators">
-        <div id="connection-status" class="status-indicator disconnected">Offline</div>
-        <div id="install-status" class="status-indicator hidden">Install Available</div>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <header class="brand">
+        <span class="logo">≡</span>
+        <h1>XXII Chat</h1>
+        <span id="connection-status" class="status offline">offline</span>
+      </header>
+
+      <label class="nick">
+        <span class="accent">@</span>
+        <input id="username-input" type="text" maxlength="32" placeholder="your nick" />
+      </label>
+
+      <section class="section">
+        <h2>Chats</h2>
+        <ul id="chat-list" class="list"></ul>
+        <form id="chat-form" class="inline-form">
+          <input id="chat-name-input" type="text" maxlength="64" placeholder="+ new chat" />
+        </form>
+      </section>
+
+      <section class="section">
+        <h2>Peers</h2>
+        <div class="peer">
+          <input id="peer-room" type="text" value="xxii" placeholder="room" />
+          <div class="row">
+            <button id="peer-host-btn" class="link-btn">[host]</button>
+            <button id="peer-join-btn" class="link-btn">[join]</button>
+            <button id="peer-leave-btn" class="link-btn" disabled>[leave]</button>
+          </div>
+          <p id="peer-status" class="hint">
+            Host in one browser, join in another while the server is up,
+            then chat keeps going over WebRTC and reaches the server later.
+          </p>
+        </div>
+      </section>
+
+      <footer class="tools">
+        <button id="install-btn" class="link-btn hidden">[install]</button>
+        <span id="install-status" class="hint hidden">install available</span>
+        <button id="update-cache-btn" class="link-btn">[update cache]</button>
+        <button id="clear-messages-btn" class="link-btn">[clear database]</button>
+      </footer>
+    </aside>
+
+    <main class="timeline">
+      <header class="topbar">
+        <button id="menu-btn" class="icon-btn menu-btn" title="Menu">≡</button>
+        <div class="context">
+          <span id="chat-title" class="accent">!general</span>
+          <span class="separator">|</span>
+          <span id="chat-info" class="muted"></span>
+        </div>
+        <nav class="actions">
+          <button id="search-btn" class="link-btn">[Search]</button>
+          <button id="log-btn" class="link-btn">[Log]</button>
+        </nav>
+      </header>
+      <div id="search-bar" class="search hidden">
+        <input id="search-input" type="search" placeholder="filter messages in this chat" />
       </div>
-    </header>
-    <main class="app-main">
-      <div class="controls">
-        <button id="install-btn" class="btn primary hidden">Install App</button>
-        <button id="update-cache-btn" class="btn secondary">Update Cache</button>
-        <button id="clear-btn" class="btn secondary">Clear Log</button>
-        <button id="clear-messages-btn" class="btn secondary">Clear Database</button>
+      <div id="chat-messages" class="messages">
+        <button id="load-more-btn" class="link-btn load-more hidden">[load older messages]</button>
+        <div id="message-list"></div>
       </div>
-      <div class="user-input">
-        <input type="text" id="username-input" placeholder="Enter your username..." />
-      </div>
-      <div class="message-input">
-        <input type="text" id="message-input" placeholder="Enter your message..." />
-        <button id="send-btn" class="btn primary">Send</button>
-      </div>
-      <div class="chat-container">
-        <h3>Chat Messages</h3>
-        <div id="chat-messages"></div>
-      </div>
-      <div class="output-container">
-        <h3>Activity Log</h3>
-        <pre id="output"></pre>
-      </div>
+      <div class="hint-bar">Enter send | Shift+Enter new line</div>
+      <form id="composer" class="composer">
+        <textarea id="message-input" rows="2" placeholder="> message to !general"></textarea>
+        <div class="composer-bar">
+          <span id="composer-info" class="muted"></span>
+          <button id="send-btn" class="send" type="submit">Send</button>
+        </div>
+      </form>
     </main>
-    <div id="notification" class="notification hidden"></div>
+
+    <aside id="details" class="details">
+      <header class="panel-title">
+        <span>ACTIVITY LOG</span>
+        <button id="clear-btn" class="link-btn">[clear]</button>
+      </header>
+      <pre id="output" class="log"></pre>
+    </aside>
   </div>
 
+  <div id="notification" class="notification hidden"></div>
+
+  <template id="chat-item-template">
+    <li class="chat-item">
+      <span class="icon">!</span>
+      <span class="name"></span>
+      <span class="badge hidden"></span>
+      <span class="time"></span>
+    </li>
+  </template>
+
   <template id="chat-message-template">
-    <div class="chat-message">
-      <div class="message-header">
-        <span class="username"></span>
-        <span class="timestamp"></span>
+    <div class="message">
+      <span class="time"></span>
+      <div class="body">
+        <div class="line">
+          <span class="author"></span><span class="content"></span>
+        </div>
+        <div class="reactions"></div>
       </div>
-      <div class="content"></div>
-      <div class="reactions"></div>
     </div>
   </template>
 
   <template id="reaction-button-template">
-    <button class="reaction-btn">
+    <button class="reaction">
       <span class="emoji"></span>
       <span class="count"></span>
     </button>

@@ -1,6 +1,8 @@
 import { MetacomProxy } from './metacom.js';
+import { Replica, SyncService, Uplink } from './globalstorage.js';
+import { validate, seed } from './chat.js';
 
-const CACHE = 'v1';
+const CACHE = 'v4';
 
 const ASSETS = [
   '/',
@@ -8,8 +10,11 @@ const ASSETS = [
   '/default.css',
   '/application.js',
   '/domain.js',
+  '/chat.js',
+  '/peer.js',
   '/metautil.js',
   '/metacom.js',
+  '/globalstorage.js',
   '/worker.js',
   '/manifest.json',
   '/icon.svg',
@@ -31,8 +36,7 @@ class CacheManager {
 
   async serve(request) {
     const cache = await caches.open(this.name);
-    const response = await cache.match(request);
-    return response;
+    return cache.match(request);
   }
 
   async fetchFromNetwork(request) {
@@ -50,9 +54,7 @@ class CacheManager {
     if (request.mode === 'navigate') {
       const cache = await caches.open(this.name);
       const fallbackResponse = await cache.match('/index.html');
-      if (fallbackResponse) {
-        return fallbackResponse;
-      }
+      if (fallbackResponse) return fallbackResponse;
     }
     return new Response('Offline - Content not available', {
       status: 503,
@@ -63,12 +65,8 @@ class CacheManager {
 
   async cleanup() {
     const cacheNames = await caches.keys();
-    const deletePromises = cacheNames
-      .filter((cacheName) => cacheName !== this.name)
-      .map(async (cacheName) => {
-        await caches.delete(cacheName);
-      });
-    await Promise.all(deletePromises);
+    const obsolete = cacheNames.filter((cacheName) => cacheName !== this.name);
+    await Promise.all(obsolete.map((cacheName) => caches.delete(cacheName)));
   }
 
   handleInstall(event) {
@@ -97,102 +95,54 @@ class CacheManager {
 }
 
 const cacheManager = new CacheManager();
+const proxy = new MetacomProxy();
 
-class SyncManager {
-  constructor() {
-    this.clientId = '';
-    this.lastDeltaId = 0;
-    this.state = new Map();
-    this.queue = [];
-    this.root = null;
-    this.init();
-  }
+const replica = new Replica({ path: 'chat', validate });
+const service = new SyncService(replica, { unit: 'chat', name: 'tab' });
+const server = { unit: 'sync', name: 'server' };
+const uplink = new Uplink(replica, proxy.server, server);
 
-  async init() {
-    this.root = await navigator.storage.getDirectory();
-    await this.loadState();
-  }
+const report = (error) => {
+  console.log('Service Worker:', error.message);
+};
 
-  async loadState() {
-    if (!this.root) return;
-    const file = await this.root.getFileHandle('state.json', { create: true });
-    const reader = await file.getFile();
-    const data = await reader.text();
-    if (!data) return;
-    const parsed = JSON.parse(data);
-    this.lastDeltaId = parsed.lastDeltaId || 0;
-    this.queue = parsed.queue || [];
-    this.clientId = parsed.clientId;
-    const messages = parsed.messages || {};
-    for (const [id, message] of Object.entries(messages)) {
-      this.state.set(id, message);
-    }
-  }
+replica.on('error', report);
+uplink.on('error', report);
+uplink.start();
 
-  async saveState() {
-    if (!this.root) return;
-    const messages = {};
-    for (const [key, value] of this.state.entries()) {
-      messages[key] = value;
-    }
-    const state = {
-      clientId: this.clientId,
-      lastDeltaId: this.lastDeltaId,
-      queue: this.queue,
-      messages,
-    };
-    const file = await this.root.getFileHandle('state.json', { create: true });
-    const writable = await file.createWritable();
-    await writable.write(JSON.stringify(state));
-    await writable.close();
-  }
+proxy.on('error', (error) => {
+  console.log('Service Worker: metacom error:', error.message);
+});
 
-  applyDelta(records) {
-    for (const record of records) {
-      this.applyCRDT(record);
-    }
-    this.saveState();
-  }
+proxy.register('chat', {
+  ...service.api,
 
-  applyCRDT(delta) {
-    const { strategy, entity, record } = delta;
-    if (entity === 'message' && strategy === 'lww') {
-      this.state.set(record.id, record);
-    } else if (entity === 'reaction' && strategy === 'counter') {
-      const { messageId, reaction } = record;
-      const message = this.state.get(messageId);
-      if (!message) return;
-      if (!message.reactions) message.reactions = {};
-      const count = message.reactions[reaction] || 0;
-      message.reactions[reaction] = count + 1;
-    }
-  }
+  username: async ({ username }, context) => {
+    context.broadcast('chat/username', username);
+    return true;
+  },
 
-  async clearDatabase() {
-    this.state.clear();
-    this.lastDeltaId = 0;
-    this.queue = [];
-    await this.saveState();
-  }
+  clear: async () => {
+    await replica.clear();
+    seed(replica);
+    return true;
+  },
+});
 
-  getMessages() {
-    const messages = {};
-    for (const [key, value] of this.state.entries()) {
-      messages[key] = value;
-    }
-    return messages;
-  }
-}
+proxy.register('cache', {
+  update: async () => {
+    await cacheManager.update();
+    return true;
+  },
+});
 
-const syncManager = new SyncManager();
-const metacomProxy = new MetacomProxy();
-
-self.addEventListener('install', (e) => cacheManager.handleInstall(e));
-self.addEventListener('fetch', (e) => cacheManager.handleFetch(e));
+self.addEventListener('install', (event) => cacheManager.handleInstall(event));
+self.addEventListener('fetch', (event) => cacheManager.handleFetch(event));
 
 const activate = async () => {
   try {
     await Promise.all([cacheManager.cleanup(), self.clients.claim()]);
+    console.log('Service Worker: Activated successfully');
   } catch (error) {
     console.error('Service Worker: Activation failed:', error);
   }
@@ -200,38 +150,12 @@ const activate = async () => {
 
 self.addEventListener('activate', (event) => {
   console.log('Service Worker: Activating...');
-  event.waitUntil(
-    (async () => {
-      await activate();
-      await metacomProxy.open();
-      await syncManager.loadState();
-    })(),
-  );
+  event.waitUntil(activate());
 });
 
-const events = {
-  updateCache: async (source) => {
-    try {
-      await cacheManager.update();
-      source.postMessage({ type: 'cacheUpdated' });
-    } catch (error) {
-      const data = { error: error.message };
-      source.postMessage({ type: 'cacheUpdateFailed', data });
-    }
-  },
-  clearDatabase: async (source) => {
-    try {
-      await syncManager.clearDatabase();
-      source.postMessage({ type: 'databaseCleared' });
-    } catch (error) {
-      const data = { error: error.message };
-      source.postMessage({ type: 'databaseClearFailed', data });
-    }
-  },
-};
+const opening = replica.open();
+opening.then(() => seed(replica)).catch(report);
 
-self.addEventListener('message', (event) => {
-  const { type, data } = event.data;
-  const handler = events[type];
-  if (handler) handler(event.source, data);
+proxy.open().catch((error) => {
+  console.log('Service Worker: server is unreachable:', error.message);
 });
