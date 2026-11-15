@@ -1,8 +1,9 @@
 import { MetacomProxy } from './metacom.js';
-import { Replica, SyncService, Uplink } from './globalstorage.js';
-import { validate, seed } from './chat.js';
+import { Replica, SyncService, Uplink, fsi } from './globalstorage.js';
+import { validate, seed, isPair, directUnit } from './chat.js';
 
-const CACHE = 'v4';
+const CACHE = 'v5';
+const DIRECT_PATH = 'dm';
 
 const ASSETS = [
   '/',
@@ -11,7 +12,7 @@ const ASSETS = [
   '/application.js',
   '/domain.js',
   '/chat.js',
-  '/peer.js',
+  '/mesh.js',
   '/metautil.js',
   '/metacom.js',
   '/globalstorage.js',
@@ -114,6 +115,38 @@ proxy.on('error', (error) => {
   console.log('Service Worker: metacom error:', error.message);
 });
 
+const directs = new Map();
+
+const openDirect = async (pair) => {
+  if (!isPair(pair)) throw new Error('Invalid direct chat');
+  const existing = directs.get(pair);
+  if (existing) return existing.open();
+  const path = `${DIRECT_PATH}/${pair}`;
+  const direct = new Replica({ path, validate });
+  const unit = directUnit(pair);
+  const directService = new SyncService(direct, { unit, name: 'tab' });
+  direct.on('error', report);
+  directs.set(pair, direct);
+  proxy.register(unit, directService.api);
+  proxy.broadcast('chat/direct', { pair });
+  return direct.open();
+};
+
+const restoreDirects = async () => {
+  const names = await fsi.list(DIRECT_PATH);
+  const pairs = names.filter(isPair);
+  await Promise.all(pairs.map(openDirect));
+};
+
+const restoring = restoreDirects().catch(report);
+
+const clearAll = async () => {
+  const clearing = [replica.clear()];
+  for (const direct of directs.values()) clearing.push(direct.clear());
+  await Promise.all(clearing);
+  seed(replica);
+};
+
 proxy.register('chat', {
   ...service.api,
 
@@ -122,9 +155,18 @@ proxy.register('chat', {
     return true;
   },
 
+  directs: async () => {
+    await restoring;
+    return Array.from(directs.keys());
+  },
+
+  openDirect: async ({ pair }) => {
+    await openDirect(pair);
+    return true;
+  },
+
   clear: async () => {
-    await replica.clear();
-    seed(replica);
+    await clearAll();
     return true;
   },
 });

@@ -245,8 +245,9 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     const id = await run(first, `return ${findText('hello from tab one')};`);
     await run(
       second,
-      `document.querySelector('.reaction[data-message-id="${id}"]' +
-        '[data-reaction="like"]').click(); return true;`,
+      `document.querySelector('.message[data-id="${id}"] .react-btn').click();
+      document.querySelector('#palette [data-reaction="like"]').click();
+      return true;`,
     );
     const liked = `return app.replica.get('${id}').reactions?.like === 1;`;
     await wait(first, liked);
@@ -260,7 +261,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     assert.equal(count, '1');
   });
 
-  await t.test('new chat appears in other tab with unread badge', async () => {
+  await t.test('new chat appears in other tab', async () => {
     await run(
       first,
       `app.chatNameInput.value = 'dev';
@@ -271,14 +272,43 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(second, `return app.replica.get('${chatId}')?.name === 'dev';`);
     await send(first, 'ada', 'in dev chat');
     await focus(second);
-    const badge = `return document.querySelector(
-      '.chat-item[data-id="${chatId}"] .badge').textContent === '1';`;
-    await wait(second, badge);
+    const item = `return document.querySelector(
+      '.chat-item[data-id="${chatId}"] .name').textContent === '!dev';`;
+    await wait(second, item);
     await run(second, `app.selectChat('${chatId}'); return true;`);
     await wait(second, shown('in dev chat'));
-    const hidden = `return document.querySelector(
+    const badge = `return document.querySelector(
       '.chat-item[data-id="${chatId}"] .badge').classList.contains('hidden');`;
-    await wait(second, hidden);
+    await wait(second, badge);
+  });
+
+  await t.test('replies open in a thread and pins are listed', async () => {
+    await focus(first);
+    const id = await run(first, `return ${findText('in dev chat')};`);
+    const message = `.message[data-id="${id}"]`;
+    await wait(first, `return document.querySelector('${message}') !== null;`);
+    await run(
+      first,
+      `document.querySelector('${message} .reply-btn').click();
+      app.replyInput.value = 'thread reply';
+      await app.sendReply();
+      document.querySelector('${message} .pin-btn').click();
+      return true;`,
+    );
+    const replied = `return [...app.replica.keys('message')].some((key) =>
+      app.replica.get(key).replyTo === '${id}');`;
+    await wait(second, replied);
+    await wait(second, `return app.replica.get('${id}').pinned === true;`);
+    const count = `return document.querySelector('${message} .replies .count')
+      .textContent === '1 replies';`;
+    await wait(first, count);
+    await wait(first, 'return app.threadReplies.children.length === 1;');
+    await run(first, `app.togglePanel('pins'); return true;`);
+    await wait(
+      first,
+      'return app.pinList.querySelectorAll(".pin-item").length === 1;',
+    );
+    await run(first, 'app.closePanel(); return true;');
   });
 
   await t.test('older messages load on demand', async () => {
@@ -309,39 +339,93 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await untilServer(serverHas('written while server is down'), 20000);
   });
 
-  await t.test('peers in two browsers chat over WebRTC', async () => {
-    const contexts = [];
-    for (let i = 0; i < 2; i++) {
-      const created = await browser.request('Target.createBrowserContext');
-      contexts.push(created.browserContextId);
-    }
-    const host = await open(contexts[0]);
-    const guest = await open(contexts[1]);
-    await wait(guest, hasText('written while server is down'));
-    await run(host, `await app.peers.host('e2e'); return true;`);
-    await run(guest, `app.peers.join('e2e'); return true;`);
-    await wait(host, 'return app.peerConnected;', 30000);
-    await wait(guest, 'return app.peerConnected;', 30000);
-    await stop();
-    await wait(host, 'return !app.connected;');
-    await send(host, 'grace', 'over webrtc only');
-    await wait(guest, hasText('over webrtc only'));
-    await send(guest, 'linus', 'reply over webrtc');
-    await wait(host, hasText('reply over webrtc'));
-    await restart();
-    await untilServer((deltas) => {
-      const hasHost = serverHas('over webrtc only')(deltas);
-      return hasHost && serverHas('reply over webrtc')(deltas);
-    }, 25000);
-    await wait(first, hasText('reply over webrtc'));
-    await run(host, 'await app.peers.leave(); return true;');
-    await run(guest, 'await app.peers.leave(); return true;');
+  const contexts = [];
+  for (let i = 0; i < 2; i++) {
+    const created = await browser.request('Target.createBrowserContext');
+    contexts.push(created.browserContextId);
+  }
+  const grace = await open(contexts[0]);
+  const linus = await open(contexts[1]);
+  const graceId = await run(grace, 'return app.peerId;');
+  const linusId = await run(linus, 'return app.peerId;');
+  const linked = (peer) =>
+    `return app.mesh.links.get('${peer}')?.connected === true;`;
+
+  await t.test('peers in two browsers link automatically', async () => {
+    assert.notEqual(graceId, linusId);
+    await wait(grace, hasText('written while server is down'));
+    await wait(grace, linked(linusId), 45000);
+    await wait(linus, linked(graceId), 45000);
+    const firstId = await run(first, 'return app.peerId;');
+    await wait(grace, linked(firstId), 45000);
+    await wait(linus, linked(firstId), 45000);
   });
 
-  await t.test('clear database empties tabs until next sync', async () => {
+  await t.test('direct messages go over WebRTC only', async () => {
+    await run(
+      grace,
+      `app.usernameInput.value = 'grace';
+      app.selectDirect('${linusId}');
+      app.messageInput.value = 'secret direct';
+      await app.sendMessage();
+      return true;`,
+    );
+    const pair = await run(grace, 'return app.chat;');
+    const received = `const direct = app.directs.get('${pair}');
+      if (!direct) return false;
+      return [...direct.replica.keys('message')].some((key) =>
+        direct.replica.get(key).content === 'secret direct');`;
+    await wait(linus, received, 30000);
+    await focus(linus);
+    const badge = `return document.querySelector(
+      '.contact-item[data-peer="${graceId}"] .badge').textContent === '1';`;
+    await wait(linus, badge);
+    const deltas = await readServer();
+    assert.equal(serverHas('secret direct')(deltas), false);
+  });
+
+  await t.test('group chat syncs over WebRTC without server', async () => {
+    await run(grace, `app.selectChat('general'); return true;`);
+    await stop();
+    await wait(grace, 'return !app.connected;');
+    await wait(linus, 'return !app.connected;');
+    await send(grace, 'grace', 'over webrtc only');
+    await wait(linus, hasText('over webrtc only'), 30000);
+    await send(linus, 'linus', 'reply over webrtc');
+    await wait(grace, hasText('reply over webrtc'), 30000);
+  });
+
+  await t.test('dropped link reconnects through a relay peer', async () => {
+    await run(
+      grace,
+      `const link = app.mesh.links.get('${linusId}');
+      link.close();
+      app.mesh.links.delete('${linusId}');
+      app.mesh.update([...app.mesh.peers.values()]);
+      return true;`,
+    );
+    await wait(grace, linked(linusId), 45000);
+    await wait(linus, linked(graceId), 45000);
+    await send(linus, 'linus', 'after relayed handshake');
+    await wait(grace, hasText('after relayed handshake'), 30000);
+  });
+
+  await t.test('peer messages reach the server when it is back', async () => {
+    await restart();
+    await untilServer((deltas) => {
+      const hasGrace = serverHas('over webrtc only')(deltas);
+      return hasGrace && serverHas('reply over webrtc')(deltas);
+    }, 25000);
+    await wait(first, hasText('reply over webrtc'));
+  });
+
+  await t.test('clear database resets tabs, server refills them', async () => {
+    const cleared = (id) => `return app.replica.cleared.includes('${id}');`;
+    const firstLog = await run(first, 'return app.replica.id;');
+    const secondLog = await run(second, 'return app.replica.id;');
     await run(first, 'await app.clearDatabase(); return true;');
-    await wait(first, 'return [...app.replica.keys("message")].length === 0;');
-    await wait(second, 'return [...app.replica.keys("message")].length === 0;');
+    await wait(first, cleared(firstLog));
+    await wait(second, cleared(secondLog));
     await focus(second);
     await wait(second, 'return app.chatTitle.textContent === "!general";');
     await send(second, 'ada', 'after clear');

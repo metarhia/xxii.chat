@@ -1,14 +1,27 @@
-const REACTIONS = ['like', 'dislike', 'love', 'smile', 'poo'];
+const REACTIONS = {
+  like: '👍',
+  fire: '🔥',
+  done: '✅',
+  think: '🤔',
+  love: '❤️',
+  laugh: '😂',
+};
+
 const GENERAL = 'general';
 const MAX_LENGTH = 4096;
+const PAIR = /^[\w-]{1,64}_[\w-]{1,64}$/;
 
 const FIELDS = {
-  chat: { name: 'string', created: 'number' },
+  author: { nick: 'string', created: 'number' },
+  chat: { name: 'string', icon: 'string', created: 'number' },
   message: {
     chat: 'string',
-    username: 'string',
+    author: 'string',
+    nick: 'string',
     content: 'string',
     timestamp: 'number',
+    replyTo: 'string',
+    pinned: 'boolean',
   },
 };
 
@@ -18,7 +31,7 @@ const GENERAL_CHAT = {
   id: 'chat-general',
   entity: 'chat',
   target: GENERAL,
-  data: { name: genesis(GENERAL), created: genesis(0) },
+  data: { name: genesis(GENERAL), icon: genesis('💬'), created: genesis(0) },
 };
 
 const isField = (fields, key, node) => {
@@ -32,7 +45,7 @@ const isReactions = (reactions) => {
   const isTagged = Boolean(reactions.$lww || reactions.$counter);
   if (Array.isArray(reactions) || isTagged) return false;
   for (const name in reactions) {
-    if (!REACTIONS.includes(name)) return false;
+    if (!Object.hasOwn(REACTIONS, name)) return false;
     if (!reactions[name].$counter) return false;
   }
   return true;
@@ -53,14 +66,28 @@ const validate = (delta) => {
 
 const seed = (replica) => replica.merge([GENERAL_CHAT]);
 
+const pairOf = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
+
+const isPair = (value) => typeof value === 'string' && PAIR.test(value);
+
+const directUnit = (pair) => `dm_${pair}`;
+
+const saveAuthor = (replica, peer, nick) => {
+  const fields = { nick };
+  if (!replica.get(peer)) fields.created = Date.now();
+  return replica.assign('author', peer, fields);
+};
+
 const createChat = (replica, chat) => {
-  const { id, name, created } = chat;
-  return replica.assign('chat', id, { name, created });
+  const { id, name, icon, created } = chat;
+  return replica.assign('chat', id, { name, icon, created });
 };
 
 const createMessage = (replica, message) => {
-  const { id, chat, username, content, timestamp } = message;
-  return replica.assign('message', id, { chat, username, content, timestamp });
+  const { id, chat, author, nick, content, timestamp } = message;
+  const fields = { chat, author, nick, content, timestamp };
+  if (message.replyTo) fields.replyTo = message.replyTo;
+  return replica.assign('message', id, fields);
 };
 
 const react = (replica, messageId, reaction) => {
@@ -68,7 +95,11 @@ const react = (replica, messageId, reaction) => {
   return replica.increment('message', messageId, path);
 };
 
+const pin = (replica, messageId, pinned) =>
+  replica.assign('message', messageId, { pinned });
+
 const byCreated = (a, b) => a.created - b.created || (a.name > b.name ? 1 : -1);
+const byTime = (a, b) => a.timestamp - b.timestamp;
 
 const listChats = (replica) => {
   const chats = [];
@@ -79,17 +110,36 @@ const listChats = (replica) => {
   return chats.toSorted(byCreated);
 };
 
-const listMessages = (replica, chat) => {
-  const messages = [];
+const listAuthors = (replica) => {
+  const authors = [];
+  for (const id of replica.keys('author')) {
+    const record = replica.get(id);
+    if (record.nick !== undefined) authors.push({ id, ...record });
+  }
+  return authors;
+};
+
+const threadsOf = (replica, chat) => {
+  const roots = [];
+  const replies = new Map();
   for (const id of replica.keys('message')) {
     const record = replica.get(id);
     const isShown = record.chat === chat && record.timestamp !== undefined;
-    if (isShown) messages.push({ id, ...record });
+    if (!isShown) continue;
+    const message = { id, ...record };
+    if (!record.replyTo) {
+      roots.push(message);
+      continue;
+    }
+    const thread = replies.get(record.replyTo) ?? [];
+    thread.push(message);
+    replies.set(record.replyTo, thread);
   }
-  return messages.toSorted((a, b) => a.timestamp - b.timestamp);
+  for (const thread of replies.values()) thread.sort(byTime);
+  return { roots: roots.toSorted(byTime), replies };
 };
 
-const chatActivity = (replica) => {
+const activityOf = (replica) => {
   const activity = new Map();
   for (const id of replica.keys('message')) {
     const { chat, timestamp } = replica.get(id);
@@ -101,5 +151,6 @@ const chatActivity = (replica) => {
 };
 
 export { REACTIONS, GENERAL, validate, seed };
-export { createChat, createMessage, react };
-export { listChats, listMessages, chatActivity };
+export { pairOf, isPair, directUnit };
+export { saveAuthor, createChat, createMessage, react, pin };
+export { listChats, listAuthors, threadsOf, activityOf };
