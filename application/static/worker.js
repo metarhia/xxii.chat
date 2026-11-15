@@ -2,7 +2,7 @@ import { MetacomProxy } from './metacom.js';
 import { Replica, SyncService, Uplink, fsi } from './globalstorage.js';
 import { validate, seed, isPair, directUnit } from './chat.js';
 
-const CACHE = 'v5';
+const CACHE = 'v6';
 const DIRECT_PATH = 'dm';
 
 const ASSETS = [

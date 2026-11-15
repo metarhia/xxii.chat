@@ -22,6 +22,16 @@ sync. Terminal-like UI follows the
   themselves to the server and show up with presence (online, offline,
   linked over WebRTC) and unread direct messages
 - Chats: `!general` exists everywhere, new chats sync to all clients
+- Feeds: `#feed` timelines of posts, the first line of a post is its title
+  (`Ctrl+Enter` publishes), cards show author, date, excerpt, replies, and
+  reactions, `POST DETAILS` panel shows the full post, stats, outline from
+  `#`, `##`, `###` headings, and threaded replies
+- Folders: organize chats, feeds, and nested folders (`a/b` creates a path),
+  `unlisted` folders are listed only for the owner, `public` folders for
+  everyone; a channel in a listed folder leaves the `FEEDS` or `CHATS` list,
+  collapsed folders are remembered per browser
+- Channel names may start with an emoji icon (`📣 news`), owners edit the
+  description by clicking it in the top bar
 - Messages with reactions, threads (replies), pinned messages, unread
   badges, last activity, message search, older messages by pages of 50
 - Direct messages go only over WebRTC between the two browsers and are
@@ -54,9 +64,11 @@ tab: Replicas in memory; the mesh tab serves them to peers over WebRTC
     while either side has no server
 ```
 
-Records are CRDT states: chat, author, and message fields are
+Records are CRDT states: fields of `author`, `chat`, `feed`, `post`,
+`message`, `folder`, and `entry` (folder to channel link) are
 last-writer-wins registers, reactions are per-replica counters, so a change
-is applied once whichever way it travels. `application/static/chat.js`
+is applied once whichever way it travels. A folder `parent` loop made by
+concurrent moves shows the looped folders at the root. `application/static/chat.js`
 validates deltas in browsers and on the server. Only one server thread
 (`ports: [8001]`) owns the server replica files.
 
@@ -88,7 +100,8 @@ through `mesh/relay` of linked peers otherwise.
 
 - `npm test`: lint and types
 - `npm run test:app`: application tests in impress test mode
-- `npm run test:browser`: tabs, chats, threads, pins, offline writes, OPFS,
+- `npm run test:browser`: tabs, chats, threads, pins, feeds and post
+  details, folders and their visibility between peers, offline writes, OPFS,
   automatic WebRTC links, direct messages, group sync and relayed
   reconnection without server, and clear database in headless Chrome;
   ports `8000` and `8001` must be free

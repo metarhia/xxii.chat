@@ -33,10 +33,26 @@
       </section>
 
       <section class="section">
+        <h3>FEEDS</h3>
+        <ul id="feed-list" class="list"></ul>
+        <form id="feed-form" class="inline-form">
+          <input id="feed-name-input" type="text" maxlength="64" placeholder="+ new feed" />
+        </form>
+      </section>
+
+      <section class="section">
         <h3 class="small">CHATS</h3>
         <ul id="chat-list" class="list"></ul>
         <form id="chat-form" class="inline-form">
           <input id="chat-name-input" type="text" maxlength="64" placeholder="+ new chat" />
+        </form>
+      </section>
+
+      <section class="section">
+        <h3 class="small">FOLDERS</h3>
+        <ul id="folder-list" class="list"></ul>
+        <form id="folder-form" class="inline-form">
+          <input id="folder-name-input" type="text" maxlength="256" placeholder="+ new folder, a/b for nested" />
         </form>
       </section>
 
@@ -65,6 +81,9 @@
           <span id="chat-title" class="accent">!general</span>
           <span class="separator">|</span>
           <span id="chat-info" class="description"></span>
+          <form id="topic-form" class="topic-form hidden">
+            <input id="topic-input" type="text" maxlength="256" placeholder="description, Enter to save" />
+          </form>
         </div>
         <nav class="actions">
           <button id="search-btn" class="link-btn">[Search]</button>
@@ -100,6 +119,17 @@
       </header>
       <section class="panel-body" data-panel="thread">
         <div id="thread-root"></div>
+        <div id="post-info" class="post-info hidden">
+          <section class="panel-section">
+            <h3>STATS</h3>
+            <div class="stat"><span>Replies</span><span id="post-replies" class="accent"></span></div>
+            <div class="stat"><span>Reactions</span><span id="post-reactions" class="accent"></span></div>
+          </section>
+          <section id="outline-section" class="panel-section">
+            <h3>OUTLINE</h3>
+            <div id="post-outline" class="outline"></div>
+          </section>
+        </div>
         <div class="divider"><span id="thread-count">0 replies</span></div>
         <div id="thread-replies" class="thread-replies"></div>
         <form id="reply-form" class="reply-form">
@@ -139,8 +169,25 @@
     <li class="nav-item chat-item">
       <span class="icon"></span>
       <span class="name"></span>
+      <button class="link-btn remove-btn hidden" data-action="remove" title="Remove from folder">[x]</button>
       <span class="badge hidden"></span>
       <span class="time"></span>
+    </li>
+  </template>
+
+  <template id="folder-item-template">
+    <li class="folder">
+      <div class="nav-item folder-row">
+        <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+        <span class="icon"></span>
+        <span class="name"></span>
+        <span class="folder-actions">
+          <button class="link-btn" data-action="add" title="Add the open chat or feed">[+]</button>
+          <button class="link-btn" data-action="visibility" title="Who sees this folder"></button>
+        </span>
+        <span class="badge hidden"></span>
+      </div>
+      <ul class="list folder-items"></ul>
     </li>
   </template>
 
@@ -163,6 +210,39 @@
         <button class="pin-btn" title="Pin"></button>
       </div>
     </div>
+  </template>
+
+  <template id="post-template">
+    <article class="post">
+      <h2 class="title"></h2>
+      <div class="meta"><span class="nick"></span><span class="bullet">•</span><span class="date"></span></div>
+      <p class="excerpt"></p>
+      <div class="post-footer">
+        <button class="replies">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" /></svg>
+          <span class="count"></span>
+        </button>
+        <div class="reactions"></div>
+      </div>
+      <div class="message-actions">
+        <button class="react-btn" title="React">[+]</button>
+        <button class="reply-btn" title="Open post details">[open]</button>
+        <button class="pin-btn" title="Pin"></button>
+      </div>
+    </article>
+  </template>
+
+  <template id="article-template">
+    <article class="post-article">
+      <h1 class="title"></h1>
+      <div class="meta"><span class="nick"></span><span class="bullet">•</span><span class="date"></span></div>
+      <div class="post-text"></div>
+      <div class="reactions"></div>
+      <div class="message-actions">
+        <button class="react-btn" title="React">[+]</button>
+        <button class="pin-btn" title="Pin"></button>
+      </div>
+    </article>
   </template>
 
   <template id="thread-item-template">

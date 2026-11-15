@@ -265,7 +265,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await run(
       first,
       `app.chatNameInput.value = 'dev';
-      app.createChat();
+      app.addChannel('chat', app.chatNameInput);
       return true;`,
     );
     const chatId = await run(first, 'return app.chat;');
@@ -309,6 +309,85 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
       'return app.pinList.querySelectorAll(".pin-item").length === 1;',
     );
     await run(first, 'app.closePanel(); return true;');
+  });
+
+  let feedId = '';
+
+  await t.test('feed posts open details with outline and replies', async () => {
+    await focus(first);
+    const firstChat = await run(first, 'return app.chat;');
+    const secondChat = await run(second, 'return app.chat;');
+    await run(
+      first,
+      `app.feedNameInput.value = '📣 news';
+      app.addChannel('feed', app.feedNameInput);
+      return true;`,
+    );
+    feedId = await run(first, 'return app.chat;');
+    const text = 'Release notes\n## Intro\nfirst part\n## Next steps\nmore';
+    await send(first, 'ada', text);
+    const card = `app.render();
+      const title = document.querySelector('.post .title');
+      return title?.textContent === 'Release notes';`;
+    await wait(first, card);
+    await untilServer((deltas) =>
+      deltas.some((delta) => {
+        const title = delta.data.title?.$lww.value;
+        return delta.entity === 'post' && title === 'Release notes';
+      }),
+    );
+    const postId = await run(first, `return [...app.replica.keys('post')][0];`);
+    const listed = `app.render();
+      const item = app.feedList.querySelector('[data-id="${feedId}"]');
+      if (!item || !app.replica.get('${postId}')) return false;
+      const name = item.querySelector('.name').textContent;
+      const icon = item.querySelector('.icon').textContent;
+      return name === '#news' && icon === '📣';`;
+    await wait(second, listed);
+    await run(
+      second,
+      `app.selectChat('${feedId}');
+      document.querySelector('.post[data-id="${postId}"] .title').click();
+      return true;`,
+    );
+    const details = `const outline = [...app.postOutline.children]
+        .map((item) => item.textContent).join('|');
+      const title = app.panelTitle.textContent;
+      return title === 'POST DETAILS' && outline === '→ Intro|→ Next steps';`;
+    await wait(second, details);
+    await run(
+      second,
+      `app.usernameInput.value = 'ada';
+      app.replyInput.value = 'nice post';
+      await app.sendReply();
+      return true;`,
+    );
+    const replied = `app.render();
+      const post = document.querySelector('.post[data-id="${postId}"]');
+      const count = post?.querySelector('.replies .count').textContent;
+      return count === '1 replies';`;
+    await wait(first, replied);
+    await run(
+      first,
+      `app.editDescription();
+      app.topicInput.value = 'team news';
+      app.saveDescription();
+      return true;`,
+    );
+    await wait(
+      second,
+      'app.render(); return app.chatInfo.textContent === "team news";',
+    );
+    const keys = await run(
+      second,
+      `return [
+        app.isSendKey(new KeyboardEvent('keydown', { key: 'Enter' })),
+        app.isSendKey(new KeyboardEvent('keydown', { ctrlKey: true })),
+      ];`,
+    );
+    assert.deepEqual(keys, [false, true]);
+    await run(second, `app.closePanel(); app.selectChat('${secondChat}');`);
+    await run(first, `app.selectChat('${firstChat}'); return true;`);
   });
 
   await t.test('older messages load on demand', async () => {
@@ -382,6 +461,104 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(linus, badge);
     const deltas = await readServer();
     assert.equal(serverHas('secret direct')(deltas), false);
+  });
+
+  await t.test('folders are listed for the owner or everyone', async () => {
+    const folderOf = (name) => `[...app.replica.keys('folder')]
+      .find((id) => app.replica.get(id).name === '${name}')`;
+    const rowOf = (id) => `document.querySelector(
+      '.folder-row[data-folder="${id}"]')`;
+    const feedItem = `app.feedList.querySelector('[data-id="${feedId}"]')`;
+    await run(
+      grace,
+      `app.folderNameInput.value = 'Projects/📦 alpha';
+      app.addFolders();
+      app.selectChat('${feedId}');
+      return true;`,
+    );
+    const projects = await run(grace, `return ${folderOf('Projects')};`);
+    const alpha = await run(grace, `return ${folderOf('alpha')};`);
+    const folder = await run(grace, `return app.replica.get('${alpha}');`);
+    assert.equal(folder.parent, projects);
+    assert.equal(folder.icon, '📦');
+    assert.equal(folder.visibility, 'unlisted');
+    await run(
+      grace,
+      `app.render();
+      ${rowOf(alpha)}.querySelector('[data-action="add"]').click();
+      return true;`,
+    );
+    const placed = `app.render();
+      const nested = ${rowOf(projects)}?.closest('.folder')
+        .querySelector('.folder-row[data-folder="${alpha}"]');
+      const item = nested?.closest('.folder')
+        .querySelector('.chat-item[data-id="${feedId}"]');
+      return Boolean(item) && ${feedItem} === null;`;
+    await wait(grace, placed);
+    const synced = `return [...app.replica.keys('entry')].length > 0;`;
+    await wait(linus, synced);
+    const hidden = await run(
+      linus,
+      `app.render();
+      return app.folderList.children.length === 0 && ${feedItem} !== null;`,
+    );
+    assert.equal(hidden, true);
+    await run(
+      grace,
+      `app.toggleVisibility('${projects}');
+      app.toggleVisibility('${alpha}');
+      return true;`,
+    );
+    const shared = `app.render();
+      const row = ${rowOf(alpha)};
+      if (!row) return false;
+      const item = row.closest('.folder')
+        .querySelector('.chat-item[data-id="${feedId}"]');
+      const actions = row.querySelector('.folder-actions');
+      const isReadOnly = actions.classList.contains('hidden');
+      return Boolean(item) && isReadOnly && ${feedItem} === null;`;
+    await wait(linus, shared);
+    await run(linus, `app.toggleFolder('${projects}'); return true;`);
+    const collapsed = await run(
+      linus,
+      `const isOpen = ${rowOf(projects)}.closest('.folder')
+        .classList.contains('open');
+      const saved = localStorage.getItem('xxii:collapsed');
+      return !isOpen && saved === '${projects}';`,
+    );
+    assert.equal(collapsed, true);
+    await run(
+      linus,
+      `const chat = await import('/chat.js');
+      const owner = app.peerId;
+      const created = Date.now();
+      const loop = (id, parent) => {
+        const name = id.replace('-', ' ');
+        const folder = { id, name, icon: '📁', owner, parent, created };
+        chat.createFolder(app.replica, folder);
+      };
+      loop('loop-a', 'loop-b');
+      loop('loop-b', 'loop-a');
+      return true;`,
+    );
+    const roots = await run(
+      linus,
+      `app.render();
+      const rows = app.folderList
+        .querySelectorAll(':scope > .folder > .folder-row');
+      return [...rows].map((row) => row.dataset.folder)
+        .filter((id) => id.startsWith('loop-')).sort();`,
+    );
+    assert.deepEqual(roots, ['loop-a', 'loop-b']);
+    await run(
+      grace,
+      `app.render();
+      document.querySelector('.chat-item[data-id="${feedId}"] .remove-btn')
+        .click();
+      return true;`,
+    );
+    await wait(linus, `app.render(); return ${feedItem} !== null;`);
+    await run(grace, `app.selectChat('general'); return true;`);
   });
 
   await t.test('group chat syncs over WebRTC without server', async () => {
