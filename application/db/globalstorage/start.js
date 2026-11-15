@@ -7,10 +7,12 @@ async () => {
   const chat = node.module.createRequire(chatPath)(chatPath);
   const dataPath = process.env.XXII_DATA ?? 'application/data';
   const path = node.path.resolve(root, dataPath, 'chat');
+  const files = node.path.resolve(root, dataPath, 'files');
+  await node.fsp.mkdir(files, { recursive: true });
   const replica = new Replica({ path, validate: chat.validate });
   await replica.open();
   replica.on('error', (error) => console.error(error));
   chat.seed(replica);
   const service = new SyncService(replica, { unit: 'sync' });
-  db.globalstorage = { replica, service };
+  db.globalstorage = { replica, service, chat, files };
 };

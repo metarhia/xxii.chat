@@ -33,7 +33,12 @@ sync. Terminal-like UI follows the
 - Channel names may start with an emoji icon (`📣 news`), owners edit the
   description by clicking it in the top bar
 - Messages with reactions, threads (replies), pinned messages, unread
-  badges, last activity, message search, older messages by pages of 50
+  badges, last activity, message search, older messages by pages of 50;
+  hovering a message shows every reaction, `reply`, and `pin` for one click,
+  reactions stay visible once added
+- Files: `attach`, drop, or paste files up to 10 MB into messages and posts,
+  each file is stored once by its SHA-256 checksum, the download button saves
+  it from OPFS, the server, or a linked peer
 - Direct messages go only over WebRTC between the two browsers and are
   kept in OPFS of both, never on the server
 - Automatic mesh: no host or join buttons, browsers connect to every
@@ -65,12 +70,19 @@ tab: Replicas in memory; the mesh tab serves them to peers over WebRTC
 ```
 
 Records are CRDT states: fields of `author`, `chat`, `feed`, `post`,
-`message`, `folder`, and `entry` (folder to channel link) are
-last-writer-wins registers, reactions are per-replica counters, so a change
+`message`, `file` (attachment metadata), `folder`, and `entry` (folder to
+channel link) are last-writer-wins registers, reactions are per-replica counters, so a change
 is applied once whichever way it travels. A folder `parent` loop made by
 concurrent moves shows the looped folders at the root. `application/static/chat.js`
 validates deltas in browsers and on the server. Only one server thread
 (`ports: [8001]`) owns the server replica files.
+
+File bytes never go into replicas. A `file` record carries name, mime,
+size, and checksum; the bytes live in OPFS `files/<sha256>` shared by tabs
+and the worker, and on the server in `files/<sha256>` next to the replica.
+The worker uploads group chat files the server is missing, the server
+accepts only bytes that match a `file` record in its replica. Direct
+message files are exchanged only between the two peers over WebRTC.
 
 ## Mesh
 
@@ -80,13 +92,17 @@ lock. It announces `{ peer, nick }` with `presence/announce`, gets
 with the smaller id answers (serves `chat`, `direct`, and `mesh` units with
 `MetacomPeer`), the other one offers (metacom client over WebRTC with
 uplinks). Signaling goes through `signal/send` while the server is up, and
-through `mesh/relay` of linked peers otherwise.
+through `mesh/relay` of linked peers otherwise. The offering peer exchanges
+files of the direct chat (and of group chats while either side has no
+server) with `files/have`, `get`, and `put`.
 
 | Call                             | Handled by  | Description                        |
 | -------------------------------- | ----------- | ---------------------------------- |
 | `sync/subscribe`, `pull`, `push` | server      | Worker replica syncs with server   |
 | `presence/announce`, `list`      | server      | Peer coordinates and presence      |
 | `signal/send`                    | server      | WebRTC signaling to a peer by id   |
+| `files/missing`, `upload`        | server      | Worker uploads attached files      |
+| `files/download`                 | server      | Tab downloads a group chat file    |
 | `chat/subscribe`, `pull`, `push` | worker      | Tab replica syncs with worker      |
 | `chat/directs`, `openDirect`     | worker      | Direct chat replicas in OPFS       |
 | `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs           |
@@ -95,6 +111,7 @@ through `mesh/relay` of linked peers otherwise.
 | `cache/update`                   | worker      | Reload static cache                |
 | `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC       |
 | `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state      |
+| `files/have`, `get`, `put`       | answer peer | File exchange between peers        |
 
 ## Testing
 
@@ -102,6 +119,6 @@ through `mesh/relay` of linked peers otherwise.
 - `npm run test:app`: application tests in impress test mode
 - `npm run test:browser`: tabs, chats, threads, pins, feeds and post
   details, folders and their visibility between peers, offline writes, OPFS,
-  automatic WebRTC links, direct messages, group sync and relayed
-  reconnection without server, and clear database in headless Chrome;
-  ports `8000` and `8001` must be free
+  automatic WebRTC links, direct messages, files through the server and
+  peer to peer, group sync and relayed reconnection without server, and
+  clear database in headless Chrome; ports `8000` and `8001` must be free

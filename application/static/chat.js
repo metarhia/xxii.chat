@@ -15,6 +15,8 @@ const VISIBILITY = ['unlisted', 'public'];
 const GENERAL = 'general';
 const MAX_LENGTH = 4096;
 const TEXT_LENGTH = 65536;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const CHECKSUM = /^[0-9a-f]{64}$/;
 const PAIR = /^[\w-]{1,64}_[\w-]{1,64}$/;
 const ICON_PREFIX = /^(\p{Extended_Pictographic}\S*)\s+(.+)$/u;
 
@@ -23,6 +25,9 @@ const TYPES = {
   text: (value) => typeof value === 'string' && value.length <= TEXT_LENGTH,
   number: (value) => typeof value === 'number',
   boolean: (value) => typeof value === 'boolean',
+  checksum: (value) => typeof value === 'string' && CHECKSUM.test(value),
+  size: (value) =>
+    Number.isSafeInteger(value) && value > 0 && value <= MAX_FILE_SIZE,
 };
 
 const CHANNEL = {
@@ -56,6 +61,16 @@ const FIELDS = {
     content: 'text',
     timestamp: 'number',
     pinned: 'boolean',
+  },
+  file: {
+    chat: 'string',
+    message: 'string',
+    author: 'string',
+    name: 'string',
+    mime: 'string',
+    size: 'size',
+    checksum: 'checksum',
+    created: 'number',
   },
 };
 
@@ -164,6 +179,13 @@ const createPost = (replica, post) => {
   return replica.assign('post', id, fields);
 };
 
+const attachFile = (replica, file) => {
+  const { id, chat, message, author, name, mime, size, checksum } = file;
+  const { created } = file;
+  const fields = { chat, message, author, name, mime, size, checksum, created };
+  return replica.assign('file', id, fields);
+};
+
 const react = (replica, record, reaction) => {
   const path = ['reactions', reaction];
   return replica.increment(entityOf(record), record.id, path);
@@ -266,6 +288,29 @@ const threadsOf = (replica, chat) => {
   return { roots: roots.toSorted(byTime), replies };
 };
 
+const attachmentsOf = (replica, chat) => {
+  const attachments = new Map();
+  for (const id of replica.keys('file')) {
+    const record = replica.get(id);
+    const isShown = record.chat === chat && record.checksum !== undefined;
+    if (!isShown) continue;
+    const files = attachments.get(record.message) ?? [];
+    files.push({ id, ...record });
+    attachments.set(record.message, files);
+  }
+  for (const files of attachments.values()) files.sort(byCreated);
+  return attachments;
+};
+
+const filesOf = (replica) => {
+  const files = new Map();
+  for (const id of replica.keys('file')) {
+    const { checksum, size } = replica.get(id);
+    if (checksum !== undefined) files.set(checksum, { checksum, size });
+  }
+  return files;
+};
+
 const activityOf = (replica) => {
   const activity = new Map();
   for (const entity of TIMELINE) {
@@ -282,10 +327,11 @@ const activityOf = (replica) => {
 };
 
 export { REACTIONS, ICONS, CHANNELS, TIMELINE, GENERAL };
-export { MAX_LENGTH, TEXT_LENGTH, validate, seed };
+export { MAX_LENGTH, TEXT_LENGTH, MAX_FILE_SIZE, validate, seed };
 export { pairOf, isPair, directUnit };
 export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
 export { createFolder, setVisibility, placeItem };
-export { createMessage, createPost, react, pin };
+export { createMessage, createPost, attachFile, react, pin };
 export { listChannels, listAuthors, folderTree, threadsOf, activityOf };
+export { attachmentsOf, filesOf };
