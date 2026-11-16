@@ -16,9 +16,13 @@
   "types": "types/global.d.ts",
   "scripts": {
     "test": "npm run lint && npm run types",
+    "test:app": "MODE=test node server.js",
+    "test:browser": "node --test --test-concurrency=1 test/browser.js test/calls.js test/ice.js test/chat-records.js test/call-session.js test/call-view.js test/call-cards.js test/call-scenarios.js test/call-ring.js test/call-notifications.js test/media-capture.js test/call-media.js test/media-policy.js test/call-bandwidth.js test/call-speaker.js test/call-layout.js test/call-layouts.js test/call-stats.js test/call-volume.js test/call-tiles.js",
+    "test:calls": "node --test test/calls.js",
     "types": "tsc -p tsconfig.json",
     "lint": "eslint . && prettier -c \"**/*.js\" \"**/*.json\" \"**/*.md\"",
-    "fix": "eslint . --fix && prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\""
+    "fix": "eslint . --fix && prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\"",
+    "static": "cp node_modules/metacom/metacom.mjs application/static/metacom.js && cp node_modules/globalstorage/globalstorage.mjs application/static/globalstorage.js && cp node_modules/metacom/node_modules/metautil/metautil.mjs application/static/metautil.js"
   },
   "engines": {
     "node": ">=24"
@@ -33,8 +37,8 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "globalstorage": "github:metarhia/globalstorage",
-    "impress": "^3.1.2",
-    "metacom": "^3.2.6"
+    "globalstorage": "file:../globalstorage",
+    "impress": "file:../impress",
+    "metacom": "file:../.."
   }
 }

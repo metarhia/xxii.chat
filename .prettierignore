@@ -6,3 +6,6 @@
 .DS_Store
 package-lock.json
 package.json
+application/static/metacom.js
+application/static/metautil.js
+application/static/globalstorage.js

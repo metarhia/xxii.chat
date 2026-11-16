@@ -2,7 +2,14 @@
 
 const init = require('eslint-config-metarhia');
 
+const VENDOR = [
+  'application/static/metacom.js',
+  'application/static/metautil.js',
+  'application/static/globalstorage.js',
+];
+
 module.exports = [
+  { ignores: VENDOR },
   ...init,
   {
     files: ['application/**/*.js'],
@@ -32,6 +39,14 @@ module.exports = [
         File: true,
         localStorage: true,
         Notification: true,
+        requestAnimationFrame: true,
+        matchMedia: true,
+        getComputedStyle: true,
+        history: true,
+        CSS: true,
+        IntersectionObserver: true,
+        BroadcastChannel: true,
+        createImageBitmap: true,
       },
     },
   },
