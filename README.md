@@ -80,6 +80,7 @@ sync. Terminal-like UI follows the
 
 Calls in the session block stores network settings in the browser: public
 STUN off by default, user STUN and TURN servers, and force relay.
+The chat topbar starts a call.
 
 ## Releases
 

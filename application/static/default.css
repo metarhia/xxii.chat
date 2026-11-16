@@ -305,6 +305,14 @@ svg {
   text-align: center;
 }
 
+.call-mark {
+  flex: none;
+  color: var(--light);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
 .remove-btn,
 .folder-actions {
   visibility: hidden;
@@ -576,6 +584,21 @@ svg {
   padding: 48px 16px;
   color: var(--muted);
   text-align: center;
+}
+
+.call-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--button);
+  color: var(--light);
+}
+
+.call-card .link-btn {
+  margin-left: auto;
 }
 
 .message {
@@ -1752,6 +1775,291 @@ svg {
 
   .lightbox-nav {
     display: none;
+  }
+}
+
+.call-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.call-stage audio {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+#prejoin {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(240px, 340px);
+  flex: 1;
+  min-height: 0;
+}
+
+.preview {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.preview video,
+.preview .avatar-wrap {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.preview video {
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.prejoin-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--panel);
+}
+
+.call-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.call-field select,
+.call-field input {
+  color: var(--light);
+  background: var(--field);
+  border: none;
+  font: inherit;
+}
+
+.level {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 52px;
+  height: 8px;
+  background: var(--bg);
+}
+
+.level-bar {
+  height: 100%;
+  width: 0;
+  background: var(--online);
+}
+
+.prejoin-actions,
+.call-controls,
+.mini-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview .prejoin-actions {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+}
+
+.call-note {
+  color: var(--away);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.lobby {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  background: var(--surface);
+}
+
+#call-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.call-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: calc(6px + var(--safe-top)) 12px 6px;
+  background: var(--surface);
+}
+
+.call-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-auto-rows: minmax(160px, 1fr);
+  gap: 8px;
+  min-height: 0;
+  padding: 8px;
+}
+
+.call-tile {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.call-tile video,
+.call-tile .avatar-wrap {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+}
+
+.call-tile video {
+  object-fit: cover;
+  background: var(--bg);
+}
+
+.call-tile.local video,
+#mini-call.local video {
+  transform: scaleX(-1);
+}
+
+.avatar-wrap {
+  display: grid;
+  place-items: center;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--light);
+  font-size: 20px;
+}
+
+.call-name {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--light);
+  text-overflow: ellipsis;
+}
+
+.call-controls {
+  padding: 8px 12px calc(8px + var(--safe-bottom));
+  background: var(--surface);
+}
+
+.link-btn.off {
+  background: var(--raised);
+  color: var(--muted);
+}
+
+.link-btn.warn,
+.call-field.warn select {
+  box-shadow: inset 3px 0 0 var(--away);
+}
+
+[data-action='join'] {
+  background: var(--text);
+  color: var(--bg);
+}
+
+#mini-call {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+#mini-call video {
+  width: 100%;
+  height: 124px;
+  object-fit: cover;
+  background: var(--surface);
+}
+
+.mini-controls {
+  padding: 6px;
+}
+
+.app[data-call='prejoin'],
+.app[data-call='lobby'] {
+  grid-template-columns: 288px minmax(0, 1fr);
+}
+
+.app.sidebar-hidden[data-call='prejoin'],
+.app.sidebar-hidden[data-call='lobby'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app[data-call='call'] {
+  grid-template-columns: 288px minmax(0, 1fr) minmax(280px, 400px);
+}
+
+.app.sidebar-hidden[data-call='call'] {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+}
+
+.app[data-call='prejoin'] .chat-view,
+.app[data-call='lobby'] .chat-view,
+.app[data-call='prejoin'] .panel,
+.app[data-call='lobby'] .panel,
+.app[data-call='call'] .panel {
+  display: none;
+}
+
+.app[data-call='call'] .chat-view {
+  background: var(--panel);
+}
+
+@media (max-width: 900px) {
+  .app[data-call='call'],
+  .app.sidebar-hidden[data-call='call'],
+  .app[data-call='prejoin'],
+  .app[data-call='lobby'],
+  .app.sidebar-hidden[data-call='prejoin'],
+  .app.sidebar-hidden[data-call='lobby'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app[data-call='call'] .call-stage {
+    min-height: 55vh;
+  }
+
+  #prejoin {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

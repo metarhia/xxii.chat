@@ -17,7 +17,7 @@
   "scripts": {
     "test": "npm run lint && npm run types",
     "test:app": "MODE=test node server.js",
-    "test:browser": "node --test --test-concurrency=1 test/browser.js test/calls.js test/ice.js",
+    "test:browser": "node --test --test-concurrency=1 test/browser.js test/calls.js test/ice.js test/chat-records.js test/call-session.js test/call-view.js test/call-cards.js",
     "test:calls": "node --test test/calls.js",
     "types": "tsc -p tsconfig.json",
     "lint": "eslint . && prettier -c \"**/*.js\" \"**/*.json\" \"**/*.md\"",
