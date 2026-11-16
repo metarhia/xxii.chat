@@ -1181,8 +1181,44 @@ svg {
 
 .app[data-panel='pins'] .panel-body[data-panel='pins'],
 .app[data-panel='members'] .panel-body[data-panel='members'],
-.app[data-panel='log'] .panel-body[data-panel='log'] {
+.app[data-panel='log'] .panel-body[data-panel='log'],
+.app[data-panel='calls'] .panel-body[data-panel='calls'] {
   display: flex;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.check input {
+  flex: none;
+  width: auto;
+  margin-top: 3px;
+}
+
+.ice-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ice-form .link-btn {
+  align-self: flex-start;
+}
+
+.ice-server {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.ice-server span {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
 }
 
 .pin-item {

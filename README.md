@@ -76,6 +76,11 @@ sync. Terminal-like UI follows the
 - Nick shared between tabs, install prompt, clear database, members list,
   and activity log
 
+## Calls
+
+Calls in the session block stores network settings in the browser: public
+STUN off by default, user STUN and TURN servers, and force relay.
+
 ## Releases
 
 The app version lives in `application/static/manifest.json` as `"version"`;
@@ -140,22 +145,23 @@ through `mesh/relay` of linked peers otherwise. The offering peer exchanges
 files of the direct chat (and of group chats while either side has no
 server) with `files/have`, `get`, and `put`.
 
-| Call                             | Handled by  | Description                        |
-| -------------------------------- | ----------- | ---------------------------------- |
-| `sync/subscribe`, `pull`, `push` | server      | Worker replica syncs with server   |
-| `presence/announce`, `list`      | server      | Peer coordinates and presence      |
-| `signal/send`                    | server      | WebRTC signaling to a peer by id   |
-| `files/missing`, `upload`        | server      | Worker uploads attached files      |
-| `files/download`                 | server      | Tab downloads a group chat file    |
-| `chat/subscribe`, `pull`, `push` | worker      | Tab replica syncs with worker      |
-| `chat/directs`, `openDirect`     | worker      | Direct chat replicas in OPFS       |
-| `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs           |
-| `chat/username`                  | worker      | Pass nick to other tabs            |
-| `chat/clear`                     | worker      | Clear worker replicas, tabs follow |
-| `cache/check`                    | worker      | Check and install a new version    |
-| `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC       |
-| `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state      |
-| `files/have`, `get`, `put`       | answer peer | File exchange between peers        |
+| Call                             | Handled by  | Description                                                 |
+| -------------------------------- | ----------- | ----------------------------------------------------------- |
+| `sync/subscribe`, `pull`, `push` | server      | Worker replica syncs with server                            |
+| `presence/announce`, `list`      | server      | Peer coordinates and presence                               |
+| `signal/send`                    | server      | WebRTC signaling to a peer by id                            |
+| `files/missing`, `upload`        | server      | Worker uploads attached files                               |
+| `files/download`                 | server      | Tab downloads a group chat file                             |
+| `chat/subscribe`, `pull`, `push` | worker      | Tab replica syncs with worker                               |
+| `chat/directs`, `openDirect`     | worker      | Direct chat replicas in OPFS                                |
+| `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs                                    |
+| `chat/username`                  | worker      | Pass nick to other tabs                                     |
+| `chat/clear`                     | worker      | Clear worker replicas, tabs follow                          |
+| `cache/check`                    | worker      | Check and install a new version                             |
+| `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC                                |
+| `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state                               |
+| `files/have`, `get`, `put`       | answer peer | File exchange between peers                                 |
+| `ice/servers`                    | server      | ICE server list for the call tab; host is location.hostname |
 
 ## Testing
 
@@ -163,6 +169,9 @@ server) with `files/have`, `get`, and `put`.
 - `npm run test:app`: application tests in impress test mode
 - `npm run test:calls`: headless Chrome with fake camera, microphone, and
   screen capture for call scenarios
+- `node --test test/ice.js`: STUN and TURN URL checks. Calls network
+  settings keep public STUN off by default, store user servers, and can
+  force relay
 - `npm run test:browser`: the chat scenarios and `test:calls`; tabs, chats,
   menu reactions that toggle, quoted replies, threads, pins, feeds opened
   in place, keyboard selection, `Esc`,

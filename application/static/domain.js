@@ -16,6 +16,7 @@ import { formatSize, fitSize, readSetting, writeSetting } from './view.js';
 import { readMap, writeMap, cloneTemplate, setBadge } from './view.js';
 import { fillText, parseBlocks, excerptOf, isEditable } from './view.js';
 import { isReducedMotion } from './view.js';
+import { isIceUrl, readIce, writeIce, buildIce } from './ice.js';
 import { Press, Menu, Lightbox, Switcher } from './overlays.js';
 import { Replica, Uplink } from './globalstorage.js';
 import { generateUUID } from './metautil.js';
@@ -36,6 +37,7 @@ const PANELS = {
   pins: 'Pinned',
   members: 'Members',
   log: 'Log',
+  calls: 'Calls',
 };
 
 const SHORTCUTS = {
@@ -92,7 +94,7 @@ const STATES = {
 };
 
 const STATUS_ORDER = ['linked', 'online', 'away', 'offline', 'unknown'];
-const UNITS = ['chat', 'cache', 'presence', 'signal', 'files'];
+const UNITS = ['chat', 'cache', 'presence', 'signal', 'files', 'ice'];
 const ITEMS = '.message, .post, .post-article';
 const CHAT_ITEMS = '.nav-item[data-id], .nav-item[data-peer]';
 const TITLE = 'XXII Chat';
@@ -289,6 +291,20 @@ class Logger {
   }
 }
 
+const createIceRow = (server, index) => {
+  const row = document.createElement('li');
+  row.className = 'ice-server';
+  const url = document.createElement('span');
+  url.textContent = server.url;
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'link-btn';
+  remove.dataset.index = `${index}`;
+  remove.textContent = 'remove';
+  row.append(url, remove);
+  return row;
+};
+
 class ChatApplication extends Application {
   constructor(config = {}) {
     super(config);
@@ -311,6 +327,7 @@ class ChatApplication extends Application {
     this.divider = { chat: this.chat, at: this.readAtOf(this.chat) };
     this.collapsed = readCollapsed();
     this.cache = new Map();
+    this.iceCache = null;
     this.previews = new Map();
     this.loading = new Map();
     this.waiting = new Map();
@@ -343,6 +360,7 @@ class ChatApplication extends Application {
     const isSidebarHidden = readSetting(SIDEBAR_KEY, '') === 'hidden';
     this.app.classList.toggle('sidebar-hidden', isSidebarHidden);
     this.usernameInput.value = this.username;
+    this.renderIce();
     this.fillPalette();
     this.restoreDraft();
     this.mesh.start();
@@ -357,6 +375,7 @@ class ChatApplication extends Application {
     this.installBtn = byId('install-btn');
     this.versionBtn = byId('version-btn');
     this.clearMessagesBtn = byId('clear-messages-btn');
+    this.callsBtn = byId('calls-btn');
     this.clearLogBtn = byId('clear-log-btn');
     this.connectionStatus = byId('connection-status');
     this.meshStatus = byId('mesh-status');
@@ -406,6 +425,13 @@ class ChatApplication extends Application {
     this.panelCloseBtn = byId('panel-close-btn');
     this.pinList = byId('pin-list');
     this.memberList = byId('member-list');
+    this.icePublicStun = byId('ice-public-stun');
+    this.iceForceRelay = byId('ice-force-relay');
+    this.iceForm = byId('ice-form');
+    this.iceUrl = byId('ice-url');
+    this.iceUsername = byId('ice-username');
+    this.iceCredential = byId('ice-credential');
+    this.iceServers = byId('ice-servers');
     this.palette = byId('palette');
     this.notification = byId('notification');
     this.backdrop = byId('backdrop');
@@ -462,6 +488,15 @@ class ChatApplication extends Application {
     this.pinsBtn.onclick = () => this.togglePanel('pins');
     this.membersBtn.onclick = () => this.togglePanel('members');
     this.logBtn.onclick = () => this.togglePanel('log');
+    this.callsBtn.onclick = () => this.togglePanel('calls');
+    this.icePublicStun.addEventListener('change', () => this.saveIceFlags());
+    this.iceForceRelay.addEventListener('change', () => this.saveIceFlags());
+    onSubmit(this.iceForm, () => this.addIceServer());
+    this.iceServers.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      this.removeIceServer(Number(button.dataset.index));
+    });
     this.panelCloseBtn.onclick = () => this.closePanel();
     this.backBtn.onclick = () => this.closeThread();
     this.chatTitle.onclick = () => this.closeThread();
@@ -1572,6 +1607,7 @@ class ChatApplication extends Application {
     this.pinsBtn.classList.toggle('active', this.panel === 'pins');
     this.membersBtn.classList.toggle('active', this.panel === 'members');
     this.logBtn.classList.toggle('active', this.panel === 'log');
+    this.callsBtn.classList.toggle('active', this.panel === 'calls');
     if (!this.panel) return;
     this.panelTitle.textContent = PANELS[this.panel];
     if (this.panel === 'pins') this.renderPins();
@@ -1651,6 +1687,69 @@ class ChatApplication extends Application {
 
   closePanel() {
     if (this.panel) this.closeLayer('panel');
+  }
+
+  renderIce() {
+    const settings = readIce(localStorage);
+    this.icePublicStun.checked = settings.publicStun;
+    this.iceForceRelay.checked = settings.forceRelay;
+    const rows = settings.servers.map(createIceRow);
+    this.iceServers.replaceChildren(...rows);
+  }
+
+  commitIce(settings) {
+    const saved = writeIce(localStorage, settings);
+    this.iceCache = null;
+    if (!saved) {
+      this.showNotification('Could not save network settings', 'error');
+    }
+    this.renderIce();
+    return saved;
+  }
+
+  saveIceFlags() {
+    const settings = readIce(localStorage);
+    const publicStun = this.icePublicStun.checked;
+    const forceRelay = this.iceForceRelay.checked;
+    this.commitIce({ ...settings, publicStun, forceRelay });
+  }
+
+  addIceServer() {
+    const url = this.iceUrl.value.trim();
+    if (!isIceUrl(url)) {
+      const text = 'Use a stun: or turn: URL';
+      return void this.showNotification(text, 'warning');
+    }
+    const settings = readIce(localStorage);
+    const username = this.iceUsername.value;
+    const credential = this.iceCredential.value;
+    const server = { url, username, credential };
+    const servers = settings.servers.concat([server]);
+    const saved = this.commitIce({ ...settings, servers });
+    if (!saved) return;
+    this.iceUrl.value = '';
+    this.iceUsername.value = '';
+    this.iceCredential.value = '';
+  }
+
+  removeIceServer(index) {
+    if (!Number.isInteger(index)) return;
+    const settings = readIce(localStorage);
+    const servers = settings.servers.toSpliced(index, 1);
+    this.commitIce({ ...settings, servers });
+  }
+
+  async iceConfiguration(now = Date.now()) {
+    const cache = this.iceCache;
+    if (cache && now < cache.freshUntil) return cache.value;
+    const host = location.hostname;
+    const servers = await this.api.ice.servers({ host });
+    const settings = readIce(localStorage);
+    const built = buildIce({ servers, settings, now });
+    const { iceServers, iceTransportPolicy, freshUntil } = built;
+    const value = { iceServers, iceTransportPolicy };
+    this.iceCache = { freshUntil, value };
+    return value;
   }
 
   contextKey() {
