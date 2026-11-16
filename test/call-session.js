@@ -355,6 +355,33 @@ test('pagehide calls leave and does not await it', async () => {
   }
 });
 
+test('pagehide can be managed by the application', async () => {
+  const { CallSession } = await load();
+  const api = createApi();
+  const previous = globalThis.addEventListener;
+  const listeners = [];
+  globalThis.addEventListener = (name, listener) => {
+    listeners.push({ name, listener });
+  };
+  try {
+    const session = new CallSession({
+      api,
+      endpoint: 'ada',
+      call: 'room',
+      ice,
+      pagehide: false,
+    });
+    assert.deepEqual(listeners, []);
+    const leaving = session.leave();
+    assert.deepEqual(api.call.left, [{ call: 'room', endpoint: 'ada' }]);
+    await leaving;
+    assert.equal(session.phase, 'idle');
+  } finally {
+    if (previous) globalThis.addEventListener = previous;
+    else delete globalThis.addEventListener;
+  }
+});
+
 test('ended closes links and returns to idle', async (t) => {
   const { CallSession } = await load();
   const order = [];

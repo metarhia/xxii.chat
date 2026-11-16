@@ -24,6 +24,7 @@ import { generateUUID } from './metautil.js';
 import { Mesh } from './mesh.js';
 import { Application } from './application.js';
 import { CallSession } from './call.js';
+import { requestCallNotifications } from './notifications.js';
 import { CallStage, RingAlert } from './stage.js';
 
 const TASKS = {
@@ -56,6 +57,7 @@ const NAV_ACTIONS = {
 };
 
 const beginCall = (app) => {
+  requestCallNotifications();
   app.startCall(app.chat).catch((error) => app.report(error));
 };
 
@@ -692,7 +694,11 @@ class ChatApplication extends Application {
     window.addEventListener('popstate', () => this.handlePopState());
     window.addEventListener('storage', (event) => this.handleStorage(event));
     window.addEventListener('beforeunload', () => this.syncUsername());
-    window.addEventListener('pagehide', () => this.mesh.stop());
+    window.addEventListener('pagehide', () => {
+      const session = this.callSession;
+      if (session) session.leave().catch((error) => this.report(error));
+      this.mesh.stop();
+    });
   }
 
   async startSync() {
@@ -2999,6 +3005,7 @@ class ChatApplication extends Application {
   async answerRing(kind) {
     const chat = this.ring.chat;
     if (chat === '') return;
+    requestCallNotifications();
     const camera = kind === 'video';
     await this.startCall(chat, { camera });
   }
@@ -3039,6 +3046,7 @@ class ChatApplication extends Application {
       call: opened.id,
       chat,
       ice,
+      pagehide: false,
     });
     const stage = this.ensureCallStage();
     stage.attach(session, token, camera);

@@ -35,8 +35,8 @@ const untilLoaded = async (browser, sessionId) => {
   throw new Error('Page did not load');
 };
 
-const openTab = async (browser, browserContextId) => {
-  const url = `${ORIGIN}/`;
+const openTab = async (browser, browserContextId, source = '') => {
+  const url = source ? 'about:blank' : `${ORIGIN}/`;
   const params = { url, browserContextId };
   const { targetId } = await browser.request('Target.createTarget', params);
   const attach = { targetId, flatten: true };
@@ -44,6 +44,14 @@ const openTab = async (browser, browserContextId) => {
   const { sessionId } = target;
   await browser.request('Runtime.enable', {}, sessionId);
   await browser.request('Page.enable', {}, sessionId);
+  if (source) {
+    await browser.request(
+      'Page.addScriptToEvaluateOnNewDocument',
+      { source },
+      sessionId,
+    );
+    await browser.request('Page.navigate', { url: `${ORIGIN}/` }, sessionId);
+  }
   await untilLoaded(browser, sessionId);
   return { browserContextId, targetId, sessionId };
 };
@@ -212,8 +220,13 @@ const NOTE = `if (document.hidden !== true) throw new Error('not hidden');
   const registration = await navigator.serviceWorker.ready;
   const tag = app.ring ? app.ring.tag : '';
   const notes = await registration.getNotifications();
-  const found = notes.some((note) => note.tag === tag);
-  if (found) return true;
+  const found = notes.find((note) => note.tag === tag);
+  if (found) {
+    const { notificationClient } = await import('/notifications.js');
+    const clientId = await notificationClient(registration.active);
+    if (clientId && found.data?.clientId === clientId) return true;
+    throw new Error('notification origin identity missing');
+  }
   const titles = notes.map((note) => note.title).join('|');
   const reason = app.ring ? app.ring.noteError : '';
   throw new Error(tag + ' ' + reason + ' ' + titles);`;
@@ -325,5 +338,200 @@ test(
     await waitFor(browser, caller.sessionId, linked(1), 20000);
     await waitFor(browser, frontTab.sessionId, linked(1), 20000);
     await waitFront(browser, backTab.sessionId, GONE);
+  },
+);
+
+const permissionSpy = (permission) => `
+  window.notificationRequests = [];
+  window.callEntries = [];
+  Object.defineProperty(Notification, 'permission', {
+    get: () => ${JSON.stringify(permission)},
+    configurable: true,
+  });
+  Notification.requestPermission = () => {
+    window.notificationRequests.push(navigator.userActivation.isActive);
+    return new Promise(() => {});
+  };`;
+
+const realClick = async (browser, session, selector) => {
+  await browser.request('Page.bringToFront', {}, session);
+  const quoted = JSON.stringify(selector);
+  const point = await harness.run(
+    browser,
+    session,
+    `
+    const button = document.querySelector(${quoted});
+    if (!button) throw new Error('missing ' + ${quoted});
+    button.scrollIntoView({ block: 'center' });
+    const box = button.getBoundingClientRect();
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };`,
+  );
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    const params = { ...point, type, button: 'left', clickCount: 1 };
+    await browser.request('Input.dispatchMouseEvent', params, session);
+  }
+};
+
+const preparePermissionEntry = async (browser, session, entry) => {
+  const prejoin = entry === 'prejoin' || entry === 'enter';
+  if (prejoin) {
+    await harness.run(
+      browser,
+      session,
+      `
+      await app.startCall(app.chat);
+      app.callStage.session.join = async () => {
+        window.callEntries.push(window.notificationRequests.length);
+        return { status: 'lobby' };
+      };
+      return true;`,
+    );
+    return '#prejoin [data-action="join"]';
+  }
+  await harness.run(
+    browser,
+    session,
+    `
+    app.startCall = async () => {
+      window.callEntries.push(window.notificationRequests.length);
+    };
+    return true;`,
+  );
+  if (entry === 'topbar') return '#call-btn';
+  const quoted = JSON.stringify(entry);
+  if (entry === 'audio' || entry === 'video') {
+    await harness.run(
+      browser,
+      session,
+      `
+      app.ring.show({ call: 'permission', chat: app.chat, nick: 'Ada' });
+      return true;`,
+    );
+    return `#incoming-call [data-action="${entry}"]`;
+  }
+  await harness.run(
+    browser,
+    session,
+    `
+    const card = document.createElement('div');
+    card.dataset.id = 'permission';
+    const button = document.createElement('button');
+    button.dataset.action = ${quoted};
+    button.textContent = 'join';
+    card.append(button);
+    app.messageList.append(card);
+    return true;`,
+  );
+  return `[data-id="permission"] [data-action="${entry}"]`;
+};
+
+test(
+  'call gestures request notification permission once before call work',
+  { timeout: 180000 },
+  async (t) => {
+    const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), 'xxii-data-'));
+    t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+    const server = await startServer(dataPath);
+    t.after(() => stopServer(server));
+    const browser = await launch(t, FLAGS);
+    const entries = [
+      'topbar',
+      'join-call',
+      'call-back',
+      'audio',
+      'video',
+      'prejoin',
+      'enter',
+    ];
+    for (const entry of entries) {
+      await t.test(entry, async () => {
+        const created = await browser.request('Target.createBrowserContext');
+        const context = created.browserContextId;
+        try {
+          const source = permissionSpy('default');
+          const tab = await openTab(browser, context, source);
+          const session = tab.sessionId;
+          await waitFor(browser, session, READY);
+          const selector = await preparePermissionEntry(
+            browser,
+            session,
+            entry,
+          );
+
+          const before = await harness.run(
+            browser,
+            session,
+            'return window.notificationRequests;',
+          );
+          assert.deepEqual(before, []);
+          if (entry === 'enter') {
+            await front(browser, session);
+            await browser.request(
+              'Input.dispatchKeyEvent',
+              { type: 'keyDown', key: 'Enter', code: 'Enter' },
+              session,
+            );
+            await browser.request(
+              'Input.dispatchKeyEvent',
+              { type: 'keyUp', key: 'Enter', code: 'Enter' },
+              session,
+            );
+          } else {
+            await realClick(browser, session, selector);
+          }
+          const state = await harness.run(
+            browser,
+            session,
+            `return {
+            requests: window.notificationRequests,
+            entries: window.callEntries,
+          };`,
+          );
+          assert.deepEqual(state.requests, [true]);
+          assert.deepEqual(state.entries, [1]);
+          if (entry !== 'enter' && entry !== 'prejoin') {
+            await realClick(browser, session, selector);
+            const again = await harness.run(
+              browser,
+              session,
+              'return window.notificationRequests;',
+            );
+            assert.deepEqual(again, [true]);
+          }
+        } finally {
+          await dispose(browser, context);
+        }
+      });
+    }
+    for (const permission of ['granted', 'denied']) {
+      await t.test(permission, async () => {
+        const created = await browser.request('Target.createBrowserContext');
+        const context = created.browserContextId;
+        try {
+          const source = permissionSpy(permission);
+          const tab = await openTab(browser, context, source);
+          const session = tab.sessionId;
+          await waitFor(browser, session, READY);
+          const selector = await preparePermissionEntry(
+            browser,
+            session,
+            'topbar',
+          );
+          await realClick(browser, session, selector);
+          const state = await harness.run(
+            browser,
+            session,
+            `return {
+            requests: window.notificationRequests,
+            entries: window.callEntries,
+          };`,
+          );
+          assert.deepEqual(state.requests, []);
+          assert.deepEqual(state.entries, [0]);
+        } finally {
+          await dispose(browser, context);
+        }
+      });
+    }
   },
 );

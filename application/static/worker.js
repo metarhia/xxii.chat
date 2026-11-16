@@ -4,6 +4,7 @@ import { validate, seed, isPair, directUnit, filesOf } from './chat.js';
 import { readFile, localFiles, clearFiles } from './files.js';
 import { sendBlob, SerialTask } from './files.js';
 import { VERSION_URL, UPDATE_CHANNEL } from './application.js';
+import { onNotificationMessage, onNotificationClick } from './notifications.js';
 
 const CACHE_PREFIX = 'xxii-';
 const META_CACHE = 'xxii-meta';
@@ -22,6 +23,7 @@ const ASSETS = [
   '/call.js',
   '/media.js',
   '/stage.js',
+  '/notifications.js',
   '/files.js',
   '/view.js',
   '/overlays.js',
@@ -301,21 +303,12 @@ proxy.register('cache', {
   check: () => cacheManager.check(),
 });
 
-const ringNote = (data) => {
-  const title = typeof data.title === 'string' ? data.title : '';
-  const tag = typeof data.tag === 'string' ? data.tag : '';
-  if (title === '' || tag === '') return Promise.resolve();
-  const registration = self.registration;
-  const loud = { tag, renotify: true };
-  const showQuiet = () => registration.showNotification(title, { tag });
-  const shown = registration.showNotification(title, loud);
-  return shown.catch(showQuiet);
-};
-
 self.addEventListener('message', (event) => {
-  const data = event.data;
-  if (!data || data.type !== 'xxii:ring') return;
-  event.waitUntil(ringNote(data));
+  onNotificationMessage(self, event);
+});
+
+self.addEventListener('notificationclick', (event) => {
+  onNotificationClick(self, event);
 });
 
 self.addEventListener('install', (event) => cacheManager.handleInstall(event));

@@ -83,7 +83,10 @@ STUN off by default, user STUN and TURN servers, and force relay.
 The chat topbar starts a call. A direct call rings in every tab of the
 other person: video, audio, and decline, a generated tone, and a system
 notification while the page is hidden. Decline or a miss leaves a
-missed-call card with call back.
+missed-call card with call back. Notification permission is requested once
+when starting, joining, or accepting a call, while permission is undecided.
+The prompt does not hold up the call. A notification click focuses the tab
+that rang, a recent app window, or opens the app; answer in the call toast.
 
 ## Releases
 
@@ -161,6 +164,7 @@ server) with `files/have`, `get`, and `put`.
 | `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs                                    |
 | `chat/username`                  | worker      | Pass nick to other tabs                                     |
 | `chat/clear`                     | worker      | Clear worker replicas, tabs follow                          |
+| `xxii:client`, `xxii:ring`       | worker      | Notification source identity and incoming ring fallback     |
 | `cache/check`                    | worker      | Check and install a new version                             |
 | `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC                                |
 | `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state                               |
@@ -188,5 +192,9 @@ server) with `files/have`, `get`, and `put`.
   `test/call-scenarios.js` runs the Chrome call scenarios (media both ways,
   mute and camera, a third participant, liveness, and resume after restart);
   `test/call-ring.js` rings a direct call in two tabs, declines to a missed
-  card, and accepts into one link each way;
+  card, and accepts into one link each way; real mouse and keyboard gestures
+  check permission timing, one pending prompt, and granted/denied states;
+  `node --test test/call-notifications.js` checks notification click focus
+  priority, app window matching, source identity, and permission failures;
+  native permission prompts and OS notification clicks need a manual check;
   ports `8000` and `8001` must be free

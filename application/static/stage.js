@@ -1,4 +1,6 @@
 import { MediaCapture } from './media.js';
+import { requestCallNotifications } from './notifications.js';
+import { notificationClient } from './notifications.js';
 
 const LOBBY = 'waiting for an admin to let you in';
 const TONE_HZ = 440;
@@ -248,6 +250,7 @@ const closeContext = (context) => {
 };
 
 const notify = async (registration, title, options) => {
+  if (!options.data?.clientId) return false;
   try {
     await registration.showNotification(title, options);
     return true;
@@ -497,15 +500,19 @@ class RingAlert {
       if (!ready || Notify.permission !== 'granted') return;
       const registration = await worker.ready;
       if (this.call !== call || !document.hidden) return;
+      const clientId = await notificationClient(registration.active);
+      if (this.call !== call || !document.hidden) return;
+      const data = { clientId };
       const title = `${nick} is calling`;
-      const loud = { tag, renotify: true };
+      const loud = { tag, data, renotify: true };
       const didLoud = await notify(registration, title, loud);
       if (this.call !== call) return;
       if (didLoud) {
         this.noteError = '';
         return;
       }
-      const didQuiet = await notify(registration, title, { tag });
+      const quiet = { tag, data };
+      const didQuiet = await notify(registration, title, quiet);
       if (this.call !== call) return;
       if (didQuiet) {
         this.noteError = '';
@@ -693,6 +700,7 @@ class CallStage {
 
   async join() {
     if (this.mode !== 'prejoin' || this.joining || !this.session) return;
+    requestCallNotifications();
     this.joining = true;
     this.syncControls();
     this.media?.resume();

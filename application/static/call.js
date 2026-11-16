@@ -276,7 +276,7 @@ class CallSession extends Emitter {
     const create = () => new RtcConnection();
     this.#createConnection = connection ?? create;
     this.#bind();
-    this.#listenPage();
+    if (options.pagehide !== false) this.#listenPage();
   }
 
   begin() {

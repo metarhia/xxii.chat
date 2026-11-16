@@ -313,7 +313,7 @@ test('media, mute, and a third participant', { timeout: 180000 }, async (t) => {
   await waitFor(browser, right.sessionId, linked(1), 3000);
 });
 
-const silenceCase = async (t, hide) => {
+const silenceCase = async (t, action) => {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), 'xxii-data-'));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
   const server = await startShort(dataPath);
@@ -346,20 +346,58 @@ const silenceCase = async (t, hide) => {
   await waitFor(browser, left.sessionId, linked(1), 15000);
   await waitFor(browser, right.sessionId, linked(1), 15000);
   assert.equal(typeof opened.endpoint, 'string');
-  if (hide) {
-    const called = await run(
+  if (action) {
+    await run(
       right.sessionId,
-      `let calls = 0;
+      `const key = 'xxii:test:pagehide-leaves';
+        sessionStorage.setItem(key, '0');
+        window.pagehideDocument = true;
         const original = app.api.call.leave.bind(app.api.call);
         app.api.call.leave = (args) => {
-          calls += 1;
+          const calls = Number(sessionStorage.getItem(key));
+          sessionStorage.setItem(key, JSON.stringify(calls + 1));
           return original(args);
         };
-        window.dispatchEvent(new Event('pagehide'));
-        return calls;`,
+        return true;`,
     );
-    assert.equal(called > 0, true);
+    if (action === 'synthetic') {
+      await run(
+        right.sessionId,
+        `window.dispatchEvent(new Event('pagehide')); return true;`,
+      );
+    } else if (action === 'reload') {
+      await browser.request('Page.reload', {}, right.sessionId);
+    } else {
+      const url = 'about:blank';
+      await browser.request('Page.navigate', { url }, right.sessionId);
+    }
     await waitFor(browser, left.sessionId, GONE, 1000);
+    if (action === 'navigate') {
+      const url = `${ORIGIN}/`;
+      await browser.request('Page.navigate', { url }, right.sessionId);
+    }
+    if (action !== 'synthetic') {
+      await waitFor(
+        browser,
+        right.sessionId,
+        `return !window.pagehideDocument && app.connected &&
+          app.mesh.peers.has(app.peerId);`,
+      );
+    }
+    const calls = await run(
+      right.sessionId,
+      `return Number(sessionStorage.getItem('xxii:test:pagehide-leaves'));`,
+    );
+    assert.equal(calls, 1);
+    if (action !== 'synthetic') {
+      const active = await run(
+        right.sessionId,
+        `await app.api.call.active();
+          return app.metacom.active && app.callSession === null;`,
+      );
+      assert.equal(active, true);
+      await waitFor(browser, left.sessionId, GONE, 1000);
+    }
     return;
   }
   await run(right.sessionId, SILENT);
@@ -371,7 +409,15 @@ test('a silent endpoint is swept', { timeout: 120000 }, async (t) => {
 });
 
 test('pagehide leaves at once', { timeout: 120000 }, async (t) => {
-  await silenceCase(t, true);
+  await silenceCase(t, 'synthetic');
+});
+
+test('pagehide leaves on reload', { timeout: 120000 }, async (t) => {
+  await silenceCase(t, 'reload');
+});
+
+test('pagehide leaves on navigation', { timeout: 120000 }, async (t) => {
+  await silenceCase(t, 'navigate');
 });
 
 test('video survives a server restart', { timeout: 180000 }, async (t) => {
