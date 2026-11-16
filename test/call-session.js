@@ -50,7 +50,7 @@ const createApi = () => {
   return { call };
 };
 
-const createConnections = (order) => {
+const createConnections = (order, receivers = null) => {
   const connections = [];
   const connection = () => {
     const listeners = new Map();
@@ -61,6 +61,7 @@ const createConnections = (order) => {
       tracks: [],
       channel: null,
       received: [],
+      receiver: (slot) => receivers?.get(created.peerId)?.get(slot) ?? null,
       unsubscribe: null,
       open(options) {
         created.peerId = options.peerId;
@@ -560,4 +561,135 @@ test('a new offer replaces a connected answerer', async (t) => {
   const next = links.connections[1];
   assert.equal(next.opened.role, 'answerer');
   assert.deepEqual(next.received, [offer]);
+});
+
+test('stage restores retained receivers after partial resume', async (t) => {
+  const { CallSession } = await load();
+  const { CallStage } = await import('../application/static/stage.js');
+  const { CallLevels } = await import('../application/static/media.js');
+  const volume = await import('../application/static/call-volume.js');
+  const install = (name, value) => {
+    const before = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+    t.after(() => {
+      if (before) Object.defineProperty(globalThis, name, before);
+      else Reflect.deleteProperty(globalThis, name);
+    });
+  };
+  class Stream {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+
+    getAudioTracks() {
+      return this.tracks;
+    }
+  }
+  const createAudio = () => ({
+    dataset: {},
+    srcObject: null,
+    volume: 1,
+    removed: false,
+    play: async () => undefined,
+    remove() {
+      this.removed = true;
+    },
+  });
+  install('MediaStream', Stream);
+  install('document', { createElement: createAudio });
+  const call = 'room';
+  const ada = { ...person('ada', 1), mic: true, camera: true, screen: false };
+  const bob = { ...person('bob', 2), mic: true, camera: true, screen: true };
+  const slots = ['mic', 'camera', 'screen', 'screenAudio'];
+  const remote = new Map();
+  for (const slot of slots) {
+    const track = new EventTarget();
+    track.readyState = 'live';
+    track.muted = false;
+    remote.set(slot, {
+      track,
+      getSynchronizationSources: () => [{ audioLevel: 0.4 }],
+    });
+  }
+  const api = createApi();
+  const links = createConnections([], new Map([['bob', remote]]));
+  const session = new CallSession({
+    api,
+    call,
+    endpoint: 'ada',
+    ice,
+    connection: links.connection,
+    pagehide: false,
+  });
+  t.after(() => session.receive('ended', { call }));
+  const stage = new CallStage(null, { nick: () => 'Ada' });
+  stage.session = session;
+  stage.media = { level: 0, micOn: false, applySink: async () => undefined };
+  stage.volume = new volume.ParticipantVolume(assert.fail);
+  stage.volume.set('bob', 50);
+  stage.levels = new CallLevels(session, stage.media, () => stage.people);
+  const initial = stateOf(call, 1, [ada, bob]);
+  session.receive('state', initial);
+  await flush();
+  stage.onCallState(initial);
+  for (const slot of slots) {
+    const track = remote.get(slot).track;
+    stage.onRemoteTrack({ endpoint: 'bob', slot, track });
+  }
+  assert.equal(stage.audios.size, 2);
+  assert.equal(stage.volume.entries.size, 2);
+  assert.equal(stage.trackListeners.size, 4);
+  const previousAudios = [...stage.audios.values()];
+  const partial = stateOf(call, 0, [ada]);
+  api.call.joinResult = { status: 'joined', state: partial };
+  session.hold();
+  await session.resume({ call });
+  stage.onCallState(partial);
+  assert.equal(session.linkCount, 1);
+  assert.equal(stage.remote.size, 0);
+  assert.equal(stage.audios.size, 0);
+  assert.equal(stage.volume.entries.size, 0);
+  assert.equal(stage.trackListeners.size, 0);
+  assert.equal(stage.levels.levels.has('bob'), false);
+  for (const audio of previousAudios) {
+    assert.equal(audio.srcObject, null);
+    assert.equal(audio.removed, true);
+  }
+  const restored = stateOf(call, 1, [ada, bob]);
+  session.receive('state', restored);
+  stage.onCallState(restored);
+  assert.equal(links.connections.length, 1);
+  assert.equal(stage.videoTrack('bob'), remote.get('camera').track);
+  assert.equal(stage.screenTrack('bob'), remote.get('screen').track);
+  assert.equal(stage.audios.size, 2);
+  assert.equal(stage.volume.entries.size, 2);
+  assert.equal(stage.trackListeners.size, 4);
+  assert.equal(stage.levels.levels.get('bob'), 0.4);
+  for (const audio of stage.audios.values()) assert.equal(audio.volume, 0.5);
+  const mutedCamera = { ...bob, camera: false, screen: false };
+  const flags = stateOf(call, 2, [ada, mutedCamera]);
+  session.receive('state', flags);
+  stage.onCallState(flags);
+  assert.equal(stage.videoTrack('bob'), null);
+  assert.equal(stage.screenTrack('bob'), null);
+  assert.equal(stage.audios.size, 1);
+  stage.stats.set('bob', {});
+  stage.quality.set('bob', {});
+  stage.statsShown.add('bob');
+  stage.statsHidden.add('bob');
+  const departed = stateOf(call, 3, [ada]);
+  session.receive('state', departed);
+  stage.onCallState(departed);
+  assert.equal(session.linkCount, 0);
+  assert.equal(stage.remote.size, 0);
+  assert.equal(stage.audios.size, 0);
+  assert.equal(stage.volume.entries.size, 0);
+  assert.equal(stage.trackListeners.size, 0);
+  assert.equal(stage.levels.levels.has('bob'), false);
+  assert.equal(stage.stats.has('bob'), false);
+  assert.equal(stage.quality.has('bob'), false);
+  assert.equal(stage.statsShown.has('bob'), false);
+  assert.equal(stage.statsHidden.has('bob'), false);
+  stage.levels.stop();
+  stage.volume.stop();
 });

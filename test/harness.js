@@ -82,6 +82,19 @@ class BrowserProtocol {
 const script = (body) =>
   `(async () => { const { app } = await import('/domain.js'); ${body} })()`;
 
+const stopServer = async (server) => {
+  const stopped = server.exitCode !== null || server.signalCode !== null;
+  if (stopped) return;
+  const exited = once(server, 'exit');
+  const timer = setTimeout(() => server.kill('SIGKILL'), 8000);
+  try {
+    server.kill('SIGINT');
+    await exited;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const startServer = async (dataPath) => {
   const env = { ...process.env, XXII_DATA: dataPath };
   const stdio = ['ignore', 'pipe', 'pipe'];
@@ -98,15 +111,25 @@ const startServer = async (dataPath) => {
     if (server.exitCode !== null) break;
     await delay(100);
   }
-  server.kill('SIGKILL');
+  await stopServer(server);
   throw new Error(`Server did not start:\n${output}`);
 };
 
-const stopServer = async (server) => {
-  if (server.exitCode !== null) return;
-  server.kill('SIGINT');
-  await Promise.race([once(server, 'exit'), delay(8000)]);
-  if (server.exitCode === null) server.kill('SIGKILL');
+const startCallServer = async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), 'xxii-data-'));
+  let server = null;
+  t.after(async () => {
+    if (server) await stopServer(server);
+    const options = {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    };
+    await fs.rm(dataPath, options);
+  });
+  server = await startServer(dataPath);
+  return server;
 };
 
 const launch = async (t, flags) => {
@@ -185,8 +208,9 @@ module.exports = {
   MEDIA_FLAGS,
   BrowserProtocol,
   script,
-  startServer,
   stopServer,
+  startServer,
+  startCallServer,
   launch,
   readServer,
   run,
