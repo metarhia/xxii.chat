@@ -1,5 +1,6 @@
 import { Emitter, jsonParse } from './metautil.js';
 import { RtcConnection, emitError } from './metacom.js';
+import { CODECS, LinkMediaPolicy, validateHint } from './media.js';
 
 const CALL_SLOTS = [
   { slot: 'mic', kind: 'audio' },
@@ -122,6 +123,8 @@ class CallLink extends Emitter {
   #onMessage = null;
   #closed = false;
   #notified = false;
+  #messageStart = 0;
+  #messageCount = 0;
 
   constructor(options = {}) {
     super();
@@ -132,6 +135,7 @@ class CallLink extends Emitter {
     this.connected = false;
     this.retired = false;
     this.connectedAt = 0;
+    this.policy = new LinkMediaPolicy(this);
     this.#onTrack = (payload) => this.#emitTrack(payload);
     this.#onClose = (error) => this.#notifyClose(error);
     connection.on('track', this.#onTrack);
@@ -155,6 +159,7 @@ class CallLink extends Emitter {
         media,
         configuration,
         signaling,
+        codecs: CODECS,
       });
       this.#ready(channel);
     } catch (error) {
@@ -171,18 +176,28 @@ class CallLink extends Emitter {
     channel.send(text);
   }
 
-  setTrack(slot, track) {
-    return this.#connection.setTrack(slot, track);
+  async setTrack(slot, track) {
+    await this.#connection.setTrack(slot, track);
+    await this.policy.refresh();
+  }
+
+  sender(slot) {
+    return this.#connection.sender?.(slot) ?? null;
+  }
+
+  get peerConnection() {
+    return this.#connection.peerConnection;
   }
 
   receiver(slot) {
-    return this.#connection.receiver(slot);
+    return this.#connection.receiver?.(slot) ?? null;
   }
 
   close() {
     if (this.#closed) return;
     this.#closed = true;
     this.connected = false;
+    this.policy.stop();
     this.#unlisten();
     const connection = this.#connection;
     if (typeof connection.off === 'function') {
@@ -198,6 +213,14 @@ class CallLink extends Emitter {
     this.#channel = channel;
     this.#listen(channel);
     this.connected = true;
+    this.policy.start();
+    const proto = globalThis.RTCRtpTransceiver?.prototype;
+    const canPrefer = typeof proto?.setCodecPreferences === 'function';
+    const canRead =
+      typeof globalThis.RTCRtpSender?.getCapabilities === 'function';
+    if (!canPrefer || !canRead) {
+      this.policy.notice('Codec preferences are unavailable in this browser.');
+    }
     this.emit('connect');
   }
 
@@ -225,6 +248,18 @@ class CallLink extends Emitter {
     if (typeof data !== 'string' || data.length > MESSAGE_LIMIT) return;
     const message = jsonParse(data);
     if (!isRecord(message) || !TYPES.has(message.type)) return;
+    const now = Date.now();
+    if (now - this.#messageStart >= 1000) {
+      this.#messageStart = now;
+      this.#messageCount = 0;
+    }
+    this.#messageCount += 1;
+    if (this.#messageCount > 20) return;
+    if (message.type === 'hint') {
+      const hint = validateHint(message);
+      if (!hint) return;
+      this.policy.hint(hint);
+    }
     this.emit('message', message);
   }
 
@@ -238,6 +273,7 @@ class CallLink extends Emitter {
     if (this.#notified) return;
     this.#notified = true;
     this.connected = false;
+    this.policy.stop();
     this.emit('close', error);
   }
 }
@@ -259,6 +295,8 @@ class CallSession extends Emitter {
   #planTimers = new Map();
   #heartbeat = null;
   #onPageHide = null;
+  #viewHints = new Map();
+  #audioOnly = new Set();
 
   constructor(options) {
     super();
@@ -341,6 +379,55 @@ class CallSession extends Emitter {
     const link = this.#links.get(endpoint);
     if (!link) return null;
     return link.receiver(slot);
+  }
+
+  sender(endpoint, slot) {
+    return this.#links.get(endpoint)?.sender(slot) ?? null;
+  }
+
+  send(endpoint, message) {
+    this.#links.get(endpoint)?.send(message);
+  }
+
+  setViewHint(endpoint, message) {
+    const hint = validateHint(message);
+    if (!hint) return;
+    const key = `${endpoint}\n${hint.slot}`;
+    this.#viewHints.set(key, hint);
+    this.#sendHint(endpoint, hint);
+  }
+
+  setAudioOnly(endpoint, enabled) {
+    if (enabled) this.#audioOnly.add(endpoint);
+    else this.#audioOnly.delete(endpoint);
+    const link = this.#links.get(endpoint);
+    if (link) {
+      link.policy.localAudioOnly = enabled;
+      link.policy.refresh();
+    }
+    const key = `${endpoint}\ncamera`;
+    const hint = this.#viewHints.get(key) ?? {
+      slot: 'camera',
+      width: 1280,
+      height: 720,
+      fps: 30,
+    };
+    this.#viewHints.set(key, hint);
+    this.#sendHint(endpoint, hint);
+  }
+
+  isAudioOnly(endpoint) {
+    const policy = this.#links.get(endpoint)?.policy;
+    return this.#audioOnly.has(endpoint) || policy?.audioOnly === true;
+  }
+
+  requestedAudioOnly(endpoint) {
+    return this.#audioOnly.has(endpoint);
+  }
+
+  #sendHint(endpoint, hint) {
+    const audioOnly = this.#audioOnly.has(endpoint);
+    this.send(endpoint, { ...hint, type: 'hint', audioOnly });
   }
 
   get linkCount() {
@@ -505,6 +592,10 @@ class CallSession extends Emitter {
     if (stale) return;
     if (typeof version === 'number') this.#version = version;
     this.#state = state;
+    for (const link of this.#links.values()) {
+      link.policy.participants = state.participants?.length ?? 2;
+      link.policy.refresh();
+    }
     this.#dropMissing(state.participants);
     const local = participantOf(state.participants, this.endpoint);
     if (local) {
@@ -533,10 +624,22 @@ class CallSession extends Emitter {
     const endpoint = remote.endpoint;
     const connection = this.#createConnection();
     const link = new CallLink({ connection });
+    link.policy.participants = this.#state?.participants?.length ?? 2;
+    link.policy.localAudioOnly = this.#audioOnly.has(endpoint);
     const signaling = this.#signaling(endpoint);
     this.#links.set(endpoint, link);
     link.on('close', () => this.#onLinkClose(endpoint, link));
     link.on('connect', () => this.#onLinkConnect(endpoint, link));
+    link.on('message', (message) => {
+      this.emit('message', { endpoint, message });
+    });
+    link.on('notice', (text) => this.emit('notice', text));
+    link.on('stats', (stats) => {
+      this.emit('stats', { endpoint, stats });
+    });
+    link.on('quality', (quality) => {
+      this.emit('quality', { endpoint, ...quality });
+    });
     link.on('track', (payload) => {
       const slot = payload?.slot;
       const track = payload?.track ?? null;
@@ -620,6 +723,10 @@ class CallSession extends Emitter {
     if (link.retired || this.#links.get(endpoint) !== link) return;
     link.connectedAt = this.#now();
     this.#attempts.set(endpoint, 0);
+    for (const slot of ['camera', 'screen']) {
+      const hint = this.#viewHints.get(`${endpoint}\n${slot}`);
+      if (hint) this.#sendHint(endpoint, hint);
+    }
     if (this.#plans.size > 0 || this.phase !== 'reconnecting') return;
     this.#setPhase('joined');
   }
