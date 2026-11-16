@@ -55,6 +55,15 @@
       };
     };
 
+    const ownedBy = (owner) => {
+      const previous = db.globalstorage;
+      const replica = { get: () => ({ owner }) };
+      db.globalstorage = { ...previous, replica };
+      return () => {
+        db.globalstorage = previous;
+      };
+    };
+
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     const begin = (client, chat, endpoint, extra = {}) =>
@@ -183,7 +192,7 @@
 
     await t.test('Admission follows policy, token, and lock', async () => {
       const clients = [];
-      const previous = domain.storage.get;
+      let restore = null;
       try {
         const host = person(clients, 'm-host');
         const token = person(clients, 'm-tok');
@@ -226,7 +235,7 @@
         const admin = await enter(host, id, 'm-host:lock2');
         node.assert.strictEqual(admin.status, 'joined');
         await domain.call.end(host, { call: id });
-        domain.storage.get = async () => ({ owner: 'm-own' });
+        restore = ownedBy('m-own');
         const owned = await begin(host, 'room-own', 'm-host:own', {
           policy: 'approval',
         });
@@ -234,19 +243,9 @@
         const asOwner = await enter(owner, ownedId, 'm-own:1');
         node.assert.strictEqual(asOwner.status, 'joined');
         node.assert.strictEqual(row(asOwner.state, 'm-own:1').admin, true);
-        domain.storage.get = async () => ({
-          data: { owner: { $lww: { value: 'm-own' } } },
-        });
         await domain.call.end(host, { call: ownedId });
-        const crdt = await begin(host, 'room-crdt', 'm-host:crdt', {
-          policy: 'approval',
-        });
-        const crdtId = crdt.state.call;
-        const again = await enter(owner, crdtId, 'm-own:2');
-        node.assert.strictEqual(again.status, 'joined');
-        node.assert.strictEqual(row(again.state, 'm-own:2').admin, true);
       } finally {
-        domain.storage.get = previous;
+        if (restore) restore();
         await done(clients);
       }
     });
@@ -626,7 +625,7 @@
 
     await t.test('Resume recreates a lost call', async () => {
       const clients = [];
-      const previous = domain.storage.get;
+      let restore = null;
       try {
         const ada = person(clients, 'u-ada');
         const bob = person(clients, 'u-bob');
@@ -680,9 +679,7 @@
         node.assert.strictEqual(bobBack.status, 'joined');
         node.assert.strictEqual(bobBack.state.kind, 'direct');
         node.assert.strictEqual(bobBack.state.host, 'u-ada');
-        domain.storage.get = async () => ({
-          data: { owner: { $lww: { value: 'u-cam' } } },
-        });
+        restore = ownedBy('u-cam');
         const secret = await begin(ada, 'secret', 'u-ada:3');
         const secretId = secret.state.call;
         const secretStarted = secret.state.started;
@@ -696,7 +693,7 @@
         node.assert.strictEqual(camBack.status, 'joined');
         node.assert.strictEqual(domain.call.calls.get(secretId).host, 'u-ada');
       } finally {
-        domain.storage.get = previous;
+        if (restore) restore();
         await done(clients);
       }
     });

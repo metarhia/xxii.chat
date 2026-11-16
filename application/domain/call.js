@@ -96,25 +96,9 @@ const allow = (endpoint, kind) => {
   return takeToken(bucket, rate, burst, now);
 };
 
-const readOwner = (record) => {
-  if (!record || typeof record !== 'object') return '';
-  if (typeof record.owner === 'string' && record.owner !== '') {
-    return record.owner;
-  }
-  const value = record.data?.owner?.$lww?.value;
-  if (typeof value !== 'string') return '';
-  return value;
-};
-
-const ownerOf = async (chat) => {
-  const storage = domain.storage;
-  if (!storage || typeof storage.get !== 'function') return '';
-  try {
-    const record = await storage.get(chat);
-    return readOwner(record);
-  } catch {
-    return '';
-  }
+const ownerOf = (chat) => {
+  const record = db.globalstorage?.replica?.get(chat);
+  return record?.owner ?? '';
 };
 
 const isAdmin = (state, peer, owner) => {
@@ -281,7 +265,7 @@ const announce = (state, ended) => {
 const publish = async (state) => {
   const version = state.version;
   state.version += 1;
-  const owner = await ownerOf(state.chat);
+  const owner = ownerOf(state.chat);
   const admins = Object.freeze(adminsOf(state, owner));
   const people = Object.freeze(peopleOf(state, admins));
   const lobby = Object.freeze(lobbyOf(state));
@@ -444,7 +428,7 @@ const ring = (state, peer, nick) => {
 const again = async (state, peer, endpoint) => {
   const item = state.participants.get(endpoint);
   item.seen = Date.now();
-  const owner = await ownerOf(state.chat);
+  const owner = ownerOf(state.chat);
   const admins = adminsOf(state, owner);
   const people = peopleOf(state, admins);
   const show = isAdmin(state, peer, owner);
@@ -467,7 +451,7 @@ const arrive = async (client, state, args) => {
   if (state.participants.has(endpoint)) return again(state, peer, endpoint);
   const direct = state.kind === 'direct';
   if (direct && !inPair(state.chat, peer)) return fail('call/forbidden');
-  const owner = await ownerOf(state.chat);
+  const owner = ownerOf(state.chat);
   const admin = isAdmin(state, peer, owner);
   if (!direct) {
     const decision = admissionOf(state, {
@@ -505,7 +489,7 @@ const restore = async (client, args) => {
   if (!ready) return fail('call/not-found');
   const kind = kindOf(chat);
   if (!kind) return fail('call/not-found');
-  const owner = await ownerOf(chat);
+  const owner = ownerOf(chat);
   if (!canResume(peer, host, kind, chat, owner)) {
     return fail('call/not-found');
   }
@@ -714,7 +698,7 @@ const accessOf = async (client, id) => {
     return { error: fail('call/not-found'), state, peer: '', owner: '' };
   }
   const peer = peerOf(client);
-  const owner = await ownerOf(state.chat);
+  const owner = ownerOf(state.chat);
   if (!isAdmin(state, peer, owner)) {
     return { error: fail('call/admin-only'), state: null, peer, owner };
   }
