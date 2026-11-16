@@ -294,6 +294,9 @@ const hosted = (peer) => {
 };
 
 const createCall = (fields) => {
+  const given = fields.token;
+  const hasToken = typeof given === 'string' && given !== '';
+  const token = hasToken ? given : tokenOf();
   const state = {
     id: fields.id,
     chat: fields.chat,
@@ -302,7 +305,7 @@ const createCall = (fields) => {
     started: fields.started,
     version: 1,
     policy: fields.policy,
-    token: tokenOf(),
+    token,
     locked: false,
     spotlight: '',
     host: fields.host,
@@ -473,8 +476,10 @@ const canResume = (peer, host, kind, chat, owner) => {
 };
 
 const restore = async (client, args) => {
-  const peer = peerOf(client);
   const id = args.call;
+  const existing = domain.call.calls.get(id);
+  if (existing) return arrive(client, existing, args);
+  const peer = peerOf(client);
   const chat = args.chat;
   const host = args.host;
   const started = args.started;
@@ -493,8 +498,6 @@ const restore = async (client, args) => {
   if (!canResume(peer, host, kind, chat, owner)) {
     return fail('call/not-found');
   }
-  const existing = domain.call.calls.get(id);
-  if (existing) return arrive(client, existing, args);
   const state = createCall({
     id,
     chat,
@@ -503,6 +506,7 @@ const restore = async (client, args) => {
     started,
     host,
     policy: config.call.defaultPolicy,
+    token: args.token,
   });
   return enter(state, client, peer, args.endpoint, args.nick);
 };
@@ -737,6 +741,7 @@ const sweepAll = async () => {
   buckets: new Map(),
   pending: new WeakMap(),
   timer: null,
+  stopping: false,
 
   async start(client, args) {
     if (args === undefined) {
@@ -747,6 +752,7 @@ const sweepAll = async () => {
   },
 
   async stop() {
+    domain.call.stopping = true;
     if (!domain.call.timer) return;
     clearInterval(domain.call.timer);
     domain.call.timer = null;
@@ -761,6 +767,7 @@ const sweepAll = async () => {
   },
 
   async drop(client) {
+    if (domain.call.stopping) return null;
     const current = domain.call.pending.get(client);
     if (current) return current;
     const task = removeClient(client);

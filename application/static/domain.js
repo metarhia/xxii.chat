@@ -400,6 +400,7 @@ class ChatApplication extends Application {
     this.callBook = null;
     this.callBound = false;
     this.callBinding = null;
+    this.callLost = false;
     this.replica = new Replica({ validate });
     this.uplink = null;
     this.directs = new Map();
@@ -657,10 +658,17 @@ class ChatApplication extends Application {
       if (!isPalette) this.closePalette();
     });
 
-    this.on('ready', () => this.startSync());
+    this.on('ready', () => {
+      this.startSync();
+      this.bindCalls().catch((error) => this.report(error));
+    });
     this.on('status', ({ connected }) => {
       this.showStatus(connected);
-      if (connected) this.bindCalls().catch((error) => this.report(error));
+      if (!connected) {
+        this.noteCallDown();
+        return;
+      }
+      this.restoreCall();
     });
     this.on('network', () => this.updateInterface());
     this.on('version', (versions) => this.showVersion(versions));
@@ -2701,10 +2709,49 @@ class ChatApplication extends Application {
     return this.callBinding;
   }
 
+  noteCallDown() {
+    if (!this.hasConnected) return;
+    const session = this.callSession;
+    const phase = session?.phase ?? '';
+    const joined = phase === 'joined';
+    const live = joined || phase === 'reconnecting';
+    if (!live) return;
+    this.callLost = true;
+    session.hold();
+  }
+
+  restoreCall() {
+    const run = async () => {
+      await this.bindCalls();
+      const mesh = this.mesh;
+      if (mesh?.connected && this.connected) await mesh.attach();
+      await this.resumeCall();
+    };
+    run().catch((error) => this.report(error));
+  }
+
+  async resumeCall() {
+    if (!this.callLost) return;
+    this.callLost = false;
+    const session = this.callSession;
+    const phase = session?.phase ?? '';
+    const joined = phase === 'joined';
+    const live = joined || phase === 'reconnecting';
+    if (!session || !live) return;
+    const stored = this.replicaOf(session.chat).get(session.call);
+    const started = stored?.timestamp;
+    const host = typeof stored?.host === 'string' ? stored.host : '';
+    const named = typeof stored?.chat === 'string';
+    const chat = named ? stored.chat : session.chat;
+    const call = session.call;
+    const token = this.callToken;
+    const record = { call, chat, host, started, token };
+    await session.resume(record);
+  }
+
   async openCallEvents() {
     try {
-      if (!this.metacom?.active) return;
-      await this.metacom.load('call');
+      if (this.metacom?.active) await this.metacom.load('call');
       if (this.callBound) return;
       const call = this.api?.call;
       if (!call) return;
@@ -2712,7 +2759,7 @@ class ChatApplication extends Application {
       call.on('active', (data) => this.onCallActive(data));
       call.on('state', (data) => this.noteRoster(data));
       call.on('ended', (data) => this.onCallEnded(data));
-      await this.loadLiveCalls();
+      if (this.metacom?.active) await this.loadLiveCalls();
     } finally {
       this.callBinding = null;
     }
@@ -2888,15 +2935,28 @@ class ChatApplication extends Application {
     }
   }
 
+  attachCallEvents() {
+    if (this.callBound) return;
+    const call = this.api?.call;
+    if (!call?.on) return;
+    this.callBound = true;
+    call.on('active', (data) => this.onCallActive(data));
+    call.on('state', (data) => this.noteRoster(data));
+    call.on('ended', (data) => this.onCallEnded(data));
+    this.loadLiveCalls().catch((error) => this.report(error));
+  }
+
   async startCall(chat, options = {}) {
     await this.closeCall();
+    await this.bindCalls();
+    this.attachCallEvents();
     const endpoint = `${this.peerId}:${tabId()}`;
     const nick = this.username;
     const opened = await this.openCall(chat, endpoint, nick);
     const given = options.token;
     const hasToken = typeof given === 'string' && given !== '';
     const token = hasToken ? given : opened.token;
-    if (opened.token !== '') this.callToken = opened.token;
+    if (token !== '') this.callToken = token;
     if (opened.created) this.recordCallStart(chat, opened);
     else this.prepareJoinedCall(chat, opened.id);
     const ice = () => this.iceConfiguration();

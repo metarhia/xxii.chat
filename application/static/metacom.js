@@ -971,9 +971,12 @@ class ClientEventTransport extends ClientTransport {
       this.#worker = controller;
       this.#drop();
     };
+    // Macrotask so a leave packet already queued on the port is read first
     this.#onPageHide = () => {
-      this.#disconnect();
-      this.#drop();
+      setTimeout(() => {
+        this.#disconnect();
+        this.#drop();
+      }, 0);
     };
   }
 

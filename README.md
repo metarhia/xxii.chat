@@ -182,4 +182,6 @@ server) with `files/have`, `get`, and `put`.
   peer to peer, image previews and viewer, group sync and relayed
   reconnection without server, clear database, and an automatic update to
   a new version and back in headless Chrome;
+  `test/call-scenarios.js` runs the Chrome call scenarios (media both ways,
+  mute and camera, a third participant, liveness, and resume after restart);
   ports `8000` and `8001` must be free

@@ -450,6 +450,10 @@ class CallStage {
   onPhase(phase) {
     if (phase === 'lobby' && this.mode !== 'lobby') this.showLobby();
     if (phase === 'joined' && this.mode === 'lobby') this.showCall();
+    const showing = this.mode === 'call' || this.mode === 'mini';
+    if (phase === 'joined' && showing) {
+      this.updateServer().catch((error) => this.hooks.fail(error));
+    }
     const idle = phase === 'idle';
     const open = this.mode !== 'prejoin' && this.mode !== '';
     if (idle && open) this.detach();
@@ -464,7 +468,8 @@ class CallStage {
       if (!endpoint) continue;
       const nick = typeof item.nick === 'string' ? item.nick : '';
       const peer = typeof item.peer === 'string' ? item.peer : '';
-      people.push({ endpoint, nick, peer });
+      const camera = item.camera === true;
+      people.push({ endpoint, nick, peer, camera });
     }
     this.people = people;
     if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
@@ -718,8 +723,18 @@ class CallStage {
       const live = track && track.readyState === 'live' && this.media.cameraOn;
       return live ? track : null;
     }
+    let listed = false;
+    let cameraOn = false;
+    for (const person of this.people) {
+      if (person.endpoint !== endpoint) continue;
+      listed = true;
+      cameraOn = person.camera === true;
+      break;
+    }
+    if (listed && !cameraOn) return null;
     const track = this.remote.get(endpoint)?.camera ?? null;
-    if (!track || track.readyState !== 'live') return null;
+    const live = track && track.readyState === 'live' && !track.muted;
+    if (!live) return null;
     return track;
   }
 

@@ -10,6 +10,8 @@ const CALL_SLOTS = [
 const SLOTS = CALL_SLOTS.map((item) => item.slot);
 const RECONNECT_MS = [1000, 2000, 5000, 10000];
 const HEARTBEAT_MS = 10000;
+const RESUME_LIMIT = 12;
+const RESUME_WAIT_MS = 300;
 const MESSAGE_LIMIT = 4096;
 const TYPES = new Set(['hint', 'reaction', 'ping', 'relay']);
 const EVENTS = [
@@ -24,6 +26,7 @@ const EVENTS = [
   'request',
 ];
 const LIVE = new Set(['joined', 'lobby', 'reconnecting']);
+const RESUMABLE = new Set(['joined', 'reconnecting']);
 
 const isOfferer = (local, remote) => {
   if (local.joined !== remote.joined) return local.joined > remote.joined;
@@ -51,6 +54,15 @@ const relax = (timer) => {
   if (timer && typeof timer.unref === 'function') timer.unref();
   return timer;
 };
+
+const pause = (schedule, ms) =>
+  new Promise((resolve) => {
+    schedule(resolve, ms);
+  });
+
+const RETRYABLE = new Set(['call/not-found', 'call/forbidden']);
+
+const isRetryable = (error) => RETRYABLE.has(error?.code);
 
 const guard = async (work, session) => {
   try {
@@ -163,6 +175,10 @@ class CallLink extends Emitter {
     return this.#connection.setTrack(slot, track);
   }
 
+  receiver(slot) {
+    return this.#connection.receiver(slot);
+  }
+
   close() {
     if (this.#closed) return;
     this.#closed = true;
@@ -236,6 +252,8 @@ class CallSession extends Emitter {
   #nick = '';
   #links = new Map();
   #tracks = new Map();
+  #token = '';
+  #keep = false;
   #attempts = new Map();
   #plans = new Map();
   #planTimers = new Map();
@@ -271,24 +289,34 @@ class CallSession extends Emitter {
   async join(input) {
     const nick = input.nick;
     if (typeof nick === 'string') this.#nick = nick;
+    const given = input.token;
+    if (typeof given === 'string' && given !== '') this.#token = given;
+    const phase = this.phase;
     this.#setPhase('joining');
     const payload = this.#joinPayload(input);
     try {
       const result = await this.api.call.join(payload);
       return this.#joined(result);
     } catch (error) {
-      this.#setPhase('idle');
+      const kept = input.resume === true && RESUMABLE.has(phase);
+      this.#setPhase(kept ? phase : 'idle');
       throw error;
     }
   }
 
+  hold() {
+    this.#keep = true;
+  }
+
   async resume(record) {
-    const nick = this.#nick;
-    const call = record.call;
-    const chat = record.chat;
-    const host = record.host;
-    const started = record.started;
-    return this.join({ nick, resume: true, call, chat, host, started });
+    this.#keep = true;
+    this.#version = -1;
+    try {
+      const input = this.#resumeInput(record);
+      return await this.#attemptResume(input);
+    } finally {
+      this.#keep = false;
+    }
   }
 
   async leave() {
@@ -309,6 +337,16 @@ class CallSession extends Emitter {
     for (const link of this.#links.values()) this.#putTrack(link, slot, track);
   }
 
+  receiver(endpoint, slot) {
+    const link = this.#links.get(endpoint);
+    if (!link) return null;
+    return link.receiver(slot);
+  }
+
+  get linkCount() {
+    return this.#links.size;
+  }
+
   receive(eventName, data) {
     if (!data || data.call !== this.call) return;
     if (eventName === 'state') return void this.#onState(data);
@@ -316,8 +354,59 @@ class CallSession extends Emitter {
     if (eventName === 'admitted') return void this.#onAdmitted(data);
     if (eventName === 'denied') return void this.#onDenied(data);
     if (eventName === 'removed') return void this.#onRemoved(data);
-    if (eventName === 'ended') return void this.#shutdown();
+    if (eventName === 'ended') {
+      if (this.#keep) return;
+      return void this.#shutdown();
+    }
     if (eventName === 'request') return void this.#onRequest(data);
+  }
+
+  #resumeInput(record) {
+    const nick = this.#nick;
+    const call = record.call ?? this.call;
+    const chat = record.chat ?? this.chat;
+    const host = record.host;
+    const started = record.started;
+    const given = record.token;
+    const hasToken = typeof given === 'string' && given !== '';
+    const token = hasToken ? given : this.#token;
+    return { nick, token, resume: true, call, chat, host, started };
+  }
+
+  async #shown() {
+    const call = this.api?.call;
+    if (typeof call?.active !== 'function') return true;
+    const list = await call.active();
+    if (!Array.isArray(list)) return false;
+    for (const item of list) {
+      if (item.call === this.call && item.count > 0) return true;
+    }
+    return false;
+  }
+
+  async #resumeOnce(input) {
+    const result = await this.join(input);
+    if (result?.status !== 'joined') return result;
+    const shown = await this.#shown();
+    if (shown) return result;
+    const error = new Error('Call not found');
+    error.code = 'call/not-found';
+    throw error;
+  }
+
+  async #attemptResume(input) {
+    let error = null;
+    for (let attempt = 0; attempt < RESUME_LIMIT; attempt += 1) {
+      try {
+        return await this.#resumeOnce(input);
+      } catch (caught) {
+        error = caught;
+        if (!isRetryable(caught)) throw caught;
+      }
+      const again = attempt + 1 < RESUME_LIMIT;
+      if (again) await pause(this.#schedule, RESUME_WAIT_MS);
+    }
+    throw error;
   }
 
   #joinPayload(input) {
@@ -360,7 +449,7 @@ class CallSession extends Emitter {
       const endpoint = this.endpoint;
       this.api.call.leave({ call, endpoint });
     };
-    globalThis.addEventListener('pagehide', this.#onPageHide);
+    globalThis.addEventListener('pagehide', this.#onPageHide, true);
   }
 
   #onState(state) {
@@ -497,7 +586,8 @@ class CallSession extends Emitter {
     const endpoints = [];
     for (const endpoint of this.#links.keys()) endpoints.push(endpoint);
     for (const endpoint of endpoints) {
-      if (!present.has(endpoint)) this.#drop(endpoint);
+      if (present.has(endpoint) || this.#keep) continue;
+      this.#drop(endpoint);
     }
   }
 
