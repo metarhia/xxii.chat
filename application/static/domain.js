@@ -3069,7 +3069,8 @@ class ChatApplication extends Application {
     const endpoint = session.endpoint;
     const mic = flags.mic;
     const camera = flags.camera;
-    await this.api.call.update({ call, endpoint, mic, camera });
+    const screen = flags.screen;
+    await this.api.call.update({ call, endpoint, mic, camera, screen });
   }
 
   showNotification(message, type = 'info') {

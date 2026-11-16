@@ -88,6 +88,35 @@ when starting, joining, or accepting a call, while permission is undecided.
 The prompt does not hold up the call. A notification click focuses the tab
 that rang, a recent app window, or opens the app; answer in the call toast.
 
+The share control sends a screen or window and its available audio to everyone
+in the call, including later arrivals. Its menu can capture without sharing,
+keeping the source local, and switch between detail and 30 fps video mode.
+Stopping capture in the browser or leaving the call releases the source.
+
+Call senders budget bandwidth per participant count and receiver tile size.
+Hidden tiles pause their camera encoding on that link and resume when shown.
+Each remote tile menu has an audio-only control for both camera directions, with
+a suggestion after sustained poor quality. Five poor seconds lower camera
+quality one row; twenty clean seconds restore one row. Screen sharing keeps
+its own budget. Browsers without the required controls show a notice.
+
+The call view offers Auto, Grid, Spotlight and Sidebar layouts, self and
+camera visibility options, and strip placement. Double-click a tile to pin
+or unpin it. Auto features a shared screen; Spotlight follows the active
+speaker. Speaking tiles show a green bar and an avatar ring that follows the
+microphone level. The mini call follows the active speaker. Press `F` outside
+text fields for full screen, or `Ctrl+Alt+L` to cycle layouts.
+
+Tile options open with the ellipsis, keyboard focus, or touch long press.
+The menu offers pin, full screen, audio only, stats, and local volume from
+0–200%. Volume is remembered per peer for all their microphone and screen
+audio tracks. Boost uses Web Audio; a visible notice explains a 100% limit
+when unavailable. Recording will have an independent audio mix. Escape closes
+the menu and returns focus. The view menu toggles stats for all remote tiles;
+each tile can also show or hide its own stats. Connection bars use RTT and
+loss. Stats include bitrate, codecs, video size and frame rate, and candidate
+types where the browser supplies them, reusing the bandwidth policy sample.
+
 ## Releases
 
 The app version lives in `application/static/manifest.json` as `"version"`;
@@ -152,24 +181,27 @@ through `mesh/relay` of linked peers otherwise. The offering peer exchanges
 files of the direct chat (and of group chats while either side has no
 server) with `files/have`, `get`, and `put`.
 
-| Call                             | Handled by  | Description                                                 |
-| -------------------------------- | ----------- | ----------------------------------------------------------- |
-| `sync/subscribe`, `pull`, `push` | server      | Worker replica syncs with server                            |
-| `presence/announce`, `list`      | server      | Peer coordinates and presence                               |
-| `signal/send`                    | server      | WebRTC signaling to a peer by id                            |
-| `files/missing`, `upload`        | server      | Worker uploads attached files                               |
-| `files/download`                 | server      | Tab downloads a group chat file                             |
-| `chat/subscribe`, `pull`, `push` | worker      | Tab replica syncs with worker                               |
-| `chat/directs`, `openDirect`     | worker      | Direct chat replicas in OPFS                                |
-| `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs                                    |
-| `chat/username`                  | worker      | Pass nick to other tabs                                     |
-| `chat/clear`                     | worker      | Clear worker replicas, tabs follow                          |
-| `xxii:client`, `xxii:ring`       | worker      | Notification source identity and incoming ring fallback     |
-| `cache/check`                    | worker      | Check and install a new version                             |
-| `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC                                |
-| `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state                               |
-| `files/have`, `get`, `put`       | answer peer | File exchange between peers                                 |
-| `ice/servers`                    | server      | ICE server list for the call tab; host is location.hostname |
+| Call                             | Handled by  | Description                                                        |
+| -------------------------------- | ----------- | ------------------------------------------------------------------ |
+| `sync/subscribe`, `pull`, `push` | server      | Worker replica syncs with server                                   |
+| `presence/announce`, `list`      | server      | Peer coordinates and presence                                      |
+| `signal/send`                    | server      | WebRTC signaling to a peer by id                                   |
+| `files/missing`, `upload`        | server      | Worker uploads attached files                                      |
+| `files/download`                 | server      | Tab downloads a group chat file                                    |
+| `chat/subscribe`, `pull`, `push` | worker      | Tab replica syncs with worker                                      |
+| `chat/directs`, `openDirect`     | worker      | Direct chat replicas in OPFS                                       |
+| `dm_<pair>/pull`, `push`, ...    | worker      | Tab direct replica syncs                                           |
+| `chat/username`                  | worker      | Pass nick to other tabs                                            |
+| `chat/clear`                     | worker      | Clear worker replicas, tabs follow                                 |
+| `xxii:client`, `xxii:ring`       | worker      | Notification source identity and incoming ring fallback            |
+| `cache/check`                    | worker      | Check and install a new version                                    |
+| `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC                                       |
+| `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state                                      |
+| `files/have`, `get`, `put`       | answer peer | File exchange between peers                                        |
+| `CallSession` event `stats`      | call tab    | Per-link RTT, loss, streams and candidates sampled once per second |
+| `call/update`                    | server      | Mic, camera, and shared screen state for the endpoint              |
+| `hint` peer message              | call link   | Rendered slot size, frame cap, and camera audio-only request       |
+| `ice/servers`                    | server      | ICE server list for the call tab; host is location.hostname        |
 
 ## Testing
 
@@ -197,4 +229,20 @@ server) with `files/have`, `get`, and `put`.
   `node --test test/call-notifications.js` checks notification click focus
   priority, app window matching, source identity, and permission failures;
   native permission prompts and OS notification clicks need a manual check;
+  `node --test test/media-capture.js` checks capture cleanup, focus, mode,
+  cancellation, local-only slots, and stale picker results;
+  `test/call-media.js` checks screen video and audio, stop, local capture,
+  and sharing inherited by a later participant (scenario 7);
+  `node --test test/media-policy.js` checks bandwidth rows, hint validation,
+  scaling, adaptation timing, sender controls, audio-only and view visibility;
+  `test/call-bandwidth.js` checks four-person bitrate, hidden tile pause and
+  restoration, and both camera directions in audio-only mode (scenario 8);
+  `node --test test/call-speaker.js test/call-layout.js` checks speaker hold
+  clocks, candidate stability, layout geometry, filtering and pin priority;
+  `test/call-layouts.js` checks layout controls, double-click pinning, screen
+  Auto, hidden tiles, real remote speaking levels and the mini call;
+  `node --test test/call-stats.js test/call-volume.js` checks stats deltas,
+  missing fields, connection bars, peer volume storage, gain and cleanup;
+  `test/call-tiles.js` checks menus, volume, restoration, real Chrome stats,
+  screen audio and teardown;
   ports `8000` and `8001` must be free
