@@ -1626,6 +1626,33 @@ svg {
   border-left-color: var(--offline);
 }
 
+.incoming {
+  position: fixed;
+  top: calc(52px + var(--safe-top));
+  right: 16px;
+  z-index: 36;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--text);
+  border-radius: 0 4px 4px 0;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  color: var(--light);
+}
+
+.incoming-note {
+  color: var(--away);
+  font-size: 12px;
+}
+
+.incoming-actions {
+  display: flex;
+  gap: 6px;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .message {
     grid-template-columns: 44px minmax(0, 1fr);

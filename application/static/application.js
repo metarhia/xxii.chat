@@ -48,7 +48,6 @@ class Application extends Emitter {
     this.#setupUpdates();
     this.#setupNetworkStatus();
     this.#setupInstallPrompt();
-    this.#setupNotifications();
     this.setupEvents();
     this.updateInterface();
   }
@@ -174,13 +173,6 @@ class Application extends Emitter {
       this.emit('installed');
       this.logger.log('App installed successfully');
     });
-  }
-
-  async #setupNotifications() {
-    if (typeof Notification === 'undefined') return false;
-    const permission = await Notification.requestPermission();
-    this.logger.log('Notification permission:', permission);
-    return permission === 'granted';
   }
 
   async install() {

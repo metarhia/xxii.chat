@@ -1,6 +1,11 @@
 import { MediaCapture } from './media.js';
+import { requestCallNotifications } from './notifications.js';
+import { notificationClient } from './notifications.js';
 
 const LOBBY = 'waiting for an admin to let you in';
+const TONE_HZ = 440;
+const RING_MS = 1600;
+const RING_PATTERN = [280, 120, 280, 920];
 
 const ACTIONS = {
   mic: (stage) => stage.toggle('mic'),
@@ -236,6 +241,295 @@ const createTile = (endpoint) => {
   return tile;
 };
 
+const audioContext = () =>
+  globalThis.AudioContext ?? globalThis.webkitAudioContext;
+
+const closeContext = (context) => {
+  if (!context || context.state === 'closed') return;
+  context.close().catch(() => undefined);
+};
+
+const notify = async (registration, title, options) => {
+  if (!options.data?.clientId) return false;
+  try {
+    await registration.showNotification(title, options);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const dismissNotes = (tag) => {
+  const run = async () => {
+    if (tag === '') return;
+    const worker = globalThis.navigator?.serviceWorker;
+    if (!worker?.ready) return;
+    const registration = await worker.ready;
+    if (typeof registration.getNotifications !== 'function') return;
+    const notes = await registration.getNotifications({ tag });
+    for (const note of notes) note.close();
+  };
+  run().catch(() => undefined);
+};
+
+const createIncoming = (ring) => {
+  const toast = document.createElement('aside');
+  toast.id = 'incoming-call';
+  toast.className = 'incoming';
+  const text = document.createElement('p');
+  text.className = 'incoming-text';
+  text.textContent = `${ring.nick} is calling`;
+  const note = document.createElement('p');
+  note.className = 'incoming-note hidden';
+  const actions = document.createElement('div');
+  actions.className = 'incoming-actions';
+  const video = createButton('video', 'video');
+  const audio = createButton('audio', 'audio');
+  const decline = createButton('decline', 'decline');
+  actions.append(video, audio, decline);
+  toast.append(text, note, actions);
+  toast.addEventListener('click', (event) => ring.onClick(event));
+  return toast;
+};
+
+class RingAlert {
+  constructor(hooks) {
+    this.hooks = hooks;
+    this.generation = 0;
+    this.call = '';
+    this.chat = '';
+    this.nick = '';
+    this.peer = '';
+    this.tab = '';
+    this.tag = '';
+    this.notice = '';
+    this.noteError = '';
+    this.context = null;
+    this.oscillator = null;
+    this.gain = null;
+    this.pulse = 0;
+    this.vibe = 0;
+    this.root = null;
+  }
+
+  show(ring) {
+    this.stop();
+    this.generation += 1;
+    const call = typeof ring.call === 'string' ? ring.call : '';
+    if (call === '') return;
+    const chat = typeof ring.chat === 'string' ? ring.chat : '';
+    const nick = typeof ring.nick === 'string' ? ring.nick : '';
+    const peer = typeof ring.peer === 'string' ? ring.peer : '';
+    const tab = typeof ring.tab === 'string' ? ring.tab : '';
+    this.call = call;
+    this.chat = chat;
+    this.nick = nick;
+    this.peer = peer;
+    this.tab = tab;
+    this.tag = `${call}:${tab}`;
+    this.notice = '';
+    this.noteError = '';
+    this.root = createIncoming(this);
+    document.body.append(this.root);
+    const generation = this.generation;
+    this.play(generation).catch(() => undefined);
+    this.buzz();
+    this.alert();
+  }
+
+  stop(call = '') {
+    const current = this.call;
+    if (current === '') return;
+    if (call !== '' && call !== current) return;
+    const tag = this.tag;
+    this.generation += 1;
+    this.call = '';
+    this.chat = '';
+    this.nick = '';
+    this.peer = '';
+    this.tab = '';
+    this.tag = '';
+    this.notice = '';
+    this.noteError = '';
+    this.root?.remove();
+    this.root = null;
+    this.silence();
+    this.quiet();
+    dismissNotes(tag);
+  }
+
+  onClick(event) {
+    const button = event.target.closest('[data-action]');
+    if (!button || this.call === '') return;
+    const action = button.dataset.action;
+    if (action === 'decline') {
+      this.hooks.decline();
+      return;
+    }
+    const answering = action === 'video' || action === 'audio';
+    if (answering) this.hooks.answer(action);
+  }
+
+  onVisibility() {
+    if (this.call === '') return;
+    if (document.hidden) {
+      this.alert();
+      return;
+    }
+    dismissNotes(this.tag);
+  }
+
+  setNotice(text) {
+    this.notice = text;
+    const note = this.root?.querySelector('.incoming-note');
+    if (!note) return;
+    note.textContent = text;
+    note.classList.toggle('hidden', text === '');
+  }
+
+  async play(generation) {
+    const Context = audioContext();
+    if (!Context) {
+      this.setNotice('sound is unavailable');
+      return;
+    }
+    let context = null;
+    try {
+      context = new Context();
+    } catch {
+      if (this.generation === generation) {
+        this.setNotice('sound is unavailable');
+      }
+      return;
+    }
+    if (this.generation !== generation) {
+      closeContext(context);
+      return;
+    }
+    if (context.state === 'suspended') {
+      try {
+        await context.resume();
+      } catch {
+        if (this.generation === generation) this.setNotice('sound is blocked');
+        closeContext(context);
+        return;
+      }
+    }
+    if (this.generation !== generation) {
+      closeContext(context);
+      return;
+    }
+    this.context = context;
+    if (context.state !== 'running') {
+      this.setNotice('sound is blocked');
+      return;
+    }
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = TONE_HZ;
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    if (this.generation !== generation) {
+      oscillator.stop();
+      closeContext(context);
+      if (this.context === context) this.context = null;
+      return;
+    }
+    this.oscillator = oscillator;
+    this.gain = gain;
+    this.pulse = setInterval(() => this.beat(), RING_MS);
+    this.beat();
+  }
+
+  beat() {
+    const gain = this.gain;
+    const context = this.context;
+    const live = gain && context && context.state === 'running';
+    if (!live) return;
+    const now = context.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.05, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+  }
+
+  silence() {
+    if (this.pulse) clearInterval(this.pulse);
+    this.pulse = 0;
+    const oscillator = this.oscillator;
+    this.oscillator = null;
+    this.gain = null;
+    if (oscillator) oscillator.stop();
+    const context = this.context;
+    this.context = null;
+    closeContext(context);
+  }
+
+  buzz() {
+    const vibrate = globalThis.navigator?.vibrate;
+    if (typeof vibrate !== 'function') return;
+    const call = this.call;
+    const tick = () => {
+      if (this.call !== call) return;
+      vibrate.call(globalThis.navigator, RING_PATTERN);
+    };
+    tick();
+    this.vibe = setInterval(tick, RING_MS);
+  }
+
+  quiet() {
+    if (this.vibe) clearInterval(this.vibe);
+    this.vibe = 0;
+    const vibrate = globalThis.navigator?.vibrate;
+    if (typeof vibrate !== 'function') return;
+    vibrate.call(globalThis.navigator, 0);
+  }
+
+  alert() {
+    const call = this.call;
+    const tag = this.tag;
+    const nick = this.nick;
+    const run = async () => {
+      if (call === '' || this.call !== call || !document.hidden) return;
+      const Notify = globalThis.Notification;
+      const worker = globalThis.navigator?.serviceWorker;
+      const ready = typeof Notify === 'function' && worker?.ready;
+      if (!ready || Notify.permission !== 'granted') return;
+      const registration = await worker.ready;
+      if (this.call !== call || !document.hidden) return;
+      const clientId = await notificationClient(registration.active);
+      if (this.call !== call || !document.hidden) return;
+      const data = { clientId };
+      const title = `${nick} is calling`;
+      const loud = { tag, data, renotify: true };
+      const didLoud = await notify(registration, title, loud);
+      if (this.call !== call) return;
+      if (didLoud) {
+        this.noteError = '';
+        return;
+      }
+      const quiet = { tag, data };
+      const didQuiet = await notify(registration, title, quiet);
+      if (this.call !== call) return;
+      if (didQuiet) {
+        this.noteError = '';
+        return;
+      }
+      const active = registration.active;
+      if (!active) {
+        this.noteError = 'showNotification failed';
+        return;
+      }
+      active.postMessage({ type: 'xxii:ring', title, tag });
+      this.noteError = 'posted to worker';
+    };
+    run().catch(() => undefined);
+  }
+}
+
 class CallStage {
   #onKey = null;
   #onPhase = null;
@@ -263,7 +557,7 @@ class CallStage {
     this.#onCall = (state) => this.onCallState(state);
   }
 
-  attach(session, token) {
+  attach(session, token, camera = true) {
     this.detach();
     this.session = session;
     this.token = token;
@@ -272,6 +566,7 @@ class CallStage {
     this.people = [];
     this.remote = new Map();
     this.media = new MediaCapture();
+    this.media.cameraOn = camera;
     this.media.onChange = () => this.onMedia();
     this.media.onLevel = (level) => this.paintLevel(level);
     session.on('state', this.#onPhase);
@@ -405,6 +700,7 @@ class CallStage {
 
   async join() {
     if (this.mode !== 'prejoin' || this.joining || !this.session) return;
+    requestCallNotifications();
     this.joining = true;
     this.syncControls();
     this.media?.resume();
@@ -779,4 +1075,4 @@ class CallStage {
   }
 }
 
-export { CallStage };
+export { CallStage, RingAlert };
