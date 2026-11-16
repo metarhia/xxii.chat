@@ -5,6 +5,7 @@ import { isFeed, isPost, labelOf, parseTitle } from './chat.js';
 import { saveAuthor, createChannel, describe } from './chat.js';
 import { createFolder, setVisibility, placeItem } from './chat.js';
 import { createMessage, createPost, setReaction, pin } from './chat.js';
+import { startCall as saveCall, endCall as saveCallEnd } from './chat.js';
 import { MAX_FILE_SIZE, attachFile, attachmentsOf } from './chat.js';
 import { listChannels, listAuthors, folderTree } from './chat.js';
 import { threadsOf, activityOf, reactionsOf, unreadOf } from './chat.js';
@@ -22,6 +23,8 @@ import { Replica, Uplink } from './globalstorage.js';
 import { generateUUID } from './metautil.js';
 import { Mesh } from './mesh.js';
 import { Application } from './application.js';
+import { CallSession } from './call.js';
+import { CallStage } from './stage.js';
 
 const TASKS = {
   clear: {
@@ -52,6 +55,10 @@ const NAV_ACTIONS = {
   remove: (app, { folder, item }) => app.removeFromFolder(folder, item),
 };
 
+const beginCall = (app) => {
+  app.startCall(app.chat).catch((error) => app.report(error));
+};
+
 const MESSAGE_ACTIONS = {
   react: (app, id, { dataset }) => app.toggleReaction(id, dataset.reaction),
   reply: (app, id) => app.startReply(id),
@@ -63,6 +70,8 @@ const MESSAGE_ACTIONS = {
   view: (app, id, { dataset }) => app.viewImage(dataset.file),
   download: (app, id, { dataset }) => app.downloadFile(dataset.file),
   heading: (app, id, { dataset }) => app.scrollToHeading(dataset.heading),
+  'join-call': beginCall,
+  'call-back': beginCall,
 };
 
 const ITEM_KEYS = {
@@ -94,7 +103,7 @@ const STATES = {
 };
 
 const STATUS_ORDER = ['linked', 'online', 'away', 'offline', 'unknown'];
-const UNITS = ['chat', 'cache', 'presence', 'signal', 'files', 'ice'];
+const UNITS = ['chat', 'cache', 'presence', 'signal', 'files', 'ice', 'call'];
 const ITEMS = '.message, .post, .post-article';
 const CHAT_ITEMS = '.nav-item[data-id], .nav-item[data-peer]';
 const TITLE = 'XXII Chat';
@@ -104,6 +113,7 @@ const FLASH_COLOR = 'rgba(255, 97, 0, 0.25)';
 const MAX_FILE_MB = MAX_FILE_SIZE / 1024 / 1024;
 const PAGE_SIZE = 50;
 const GROUP_MS = 5 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
 const REVOKE_MS = 10000;
 const RETRY_MS = 2000;
 const MAX_RETRY_MS = 30000;
@@ -121,6 +131,17 @@ const READ_KEY = 'xxii:read';
 const DRAFTS_KEY = 'xxii:drafts';
 const COLLAPSED_KEY = 'xxii:collapsed';
 const SIDEBAR_KEY = 'xxii:sidebar';
+const TAB_KEY = 'xxii:tab';
+
+const tabId = () => {
+  const storage = globalThis.sessionStorage;
+  if (!storage) return generateUUID();
+  const saved = storage.getItem(TAB_KEY);
+  if (saved) return saved;
+  const id = generateUUID();
+  storage.setItem(TAB_KEY, id);
+  return id;
+};
 
 const loadPeerId = () => {
   const saved = readSetting(PEER_KEY, '');
@@ -251,6 +272,38 @@ const createDay = (timestamp) => {
   return section;
 };
 
+const minutesOf = (record) => {
+  const span = record.ended - record.timestamp;
+  const rounded = Math.round(span / MINUTE_MS);
+  if (rounded < 1) return 1;
+  return rounded;
+};
+
+const callLabel = (record, live) => {
+  const nick = record.nick ?? '';
+  if (typeof record.ended === 'number') {
+    const missed = record.peak === 1 && isPair(record.chat);
+    if (missed) return `📞 missed call from ${nick}`;
+    const minutes = minutesOf(record);
+    const names = record.names ?? '';
+    return `📞 call · ${minutes} min · ${names}`;
+  }
+  const time = timeOf(record.timestamp);
+  const started = `📞 call · ${nick} · started ${time}`;
+  if (!live) return started;
+  return `${started} · ${live.count} in call`;
+};
+
+const callAction = (record, live) => {
+  if (typeof record.ended !== 'number') {
+    if (!live) return null;
+    return { action: 'join-call', label: 'join' };
+  }
+  const missed = record.peak === 1 && isPair(record.chat);
+  if (!missed) return null;
+  return { action: 'call-back', label: 'call back' };
+};
+
 const imagesOf = (checksum) => {
   const selector = `.image[data-checksum="${checksum}"]`;
   return document.querySelectorAll(selector);
@@ -338,6 +391,16 @@ class ChatApplication extends Application {
     this.hasConnected = false;
     this.isRenderScheduled = false;
     this.started = new Promise((resolve) => this.on('ready', resolve));
+    this.callStage = null;
+    this.callSession = null;
+    this.callToken = '';
+    this.callLeaving = null;
+    this.callHold = false;
+    this.liveCalls = new Map();
+    this.callBook = null;
+    this.callBound = false;
+    this.callBinding = null;
+    this.callLost = false;
     this.replica = new Replica({ validate });
     this.uplink = null;
     this.directs = new Map();
@@ -397,6 +460,7 @@ class ChatApplication extends Application {
     this.chatInfo = byId('chat-info');
     this.topicForm = byId('topic-form');
     this.topicInput = byId('topic-input');
+    this.callBtn = byId('call-btn');
     this.searchBtn = byId('search-btn');
     this.pinsBtn = byId('pins-btn');
     this.membersBtn = byId('members-btn');
@@ -484,6 +548,7 @@ class ChatApplication extends Application {
     this.versionBtn.onclick = () => this.handleVersionClick();
     this.clearMessagesBtn.onclick = () => this.clearDatabase();
     this.clearLogBtn.onclick = () => this.logger.clear();
+    this.callBtn.onclick = () => beginCall(this);
     this.searchBtn.onclick = () => this.toggleSearch();
     this.pinsBtn.onclick = () => this.togglePanel('pins');
     this.membersBtn.onclick = () => this.togglePanel('members');
@@ -593,8 +658,18 @@ class ChatApplication extends Application {
       if (!isPalette) this.closePalette();
     });
 
-    this.on('ready', () => this.startSync());
-    this.on('status', ({ connected }) => this.showStatus(connected));
+    this.on('ready', () => {
+      this.startSync();
+      this.bindCalls().catch((error) => this.report(error));
+    });
+    this.on('status', ({ connected }) => {
+      this.showStatus(connected);
+      if (!connected) {
+        this.noteCallDown();
+        return;
+      }
+      this.restoreCall();
+    });
     this.on('network', () => this.updateInterface());
     this.on('version', (versions) => this.showVersion(versions));
     this.on('install', () => this.showInstallButton(true));
@@ -608,7 +683,11 @@ class ChatApplication extends Application {
     window.addEventListener('popstate', () => this.handlePopState());
     window.addEventListener('storage', (event) => this.handleStorage(event));
     window.addEventListener('beforeunload', () => this.syncUsername());
-    window.addEventListener('pagehide', () => this.mesh.stop());
+    window.addEventListener('pagehide', () => {
+      const session = this.callSession;
+      if (session) session.leave().catch((error) => this.report(error));
+      this.mesh.stop();
+    });
   }
 
   async startSync() {
@@ -620,6 +699,7 @@ class ChatApplication extends Application {
     this.uplink.start();
     this.api.chat.on('username', (username) => this.showUsername(username));
     this.api.chat.on('direct', ({ pair }) => this.restoreDirect(pair));
+    this.bindCalls().catch((error) => this.report(error));
     try {
       await this.uplink.sync();
       this.saveAuthor();
@@ -852,6 +932,7 @@ class ChatApplication extends Application {
     item.querySelector('.name').textContent = contact.nick;
     item.querySelector('.time').textContent = dayOf(contact.time);
     setBadge(item.querySelector('.badge'), this.unreadOf(pair));
+    this.setCallMark(item, pair);
     return item;
   }
 
@@ -888,6 +969,8 @@ class ChatApplication extends Application {
     item.querySelector('.name').textContent = labelOf(channel);
     item.querySelector('.time').textContent = dayOf(time);
     setBadge(item.querySelector('.badge'), this.unreadOf(channel.id));
+    const chatId = channel.entity === 'chat' ? channel.id : '';
+    this.setCallMark(item, chatId);
     const isRemovable = folder?.owner === this.peerId;
     const remove = item.querySelector('.remove-btn');
     remove.classList.toggle('hidden', !isRemovable);
@@ -1003,6 +1086,11 @@ class ChatApplication extends Application {
         isMarked = true;
         previous = null;
       }
+      if (message.kind === 'call') {
+        section.append(this.createCallCard(message));
+        previous = null;
+        continue;
+      }
       const details = this.detailsOf(message, view);
       details.isContinued = isGrouped(previous, message);
       section.append(this.messageElement(message, details, cache));
@@ -1027,7 +1115,8 @@ class ChatApplication extends Application {
 
   isNew(message) {
     const { chat, at } = this.divider;
-    const isOthers = message.author !== this.peerId;
+    const author = message.kind === 'call' ? message.host : message.author;
+    const isOthers = author !== this.peerId;
     const isTimeline = chat === this.chat && !this.thread;
     return isTimeline && isOthers && message.timestamp > at;
   }
@@ -1068,11 +1157,14 @@ class ChatApplication extends Application {
   }
 
   isMatch(message, view) {
-    const { nick, title = '', content } = message;
+    const nick = message.nick ?? '';
+    const title = message.title ?? '';
+    const content = message.content ?? '';
+    const names = message.names ?? '';
     const files = view.attachments.get(message.id) ?? [];
-    const names = files.map((file) => file.name).join(' ');
-    const text = `${nick} ${title} ${content} ${names}`.toLowerCase();
-    return text.includes(this.filter);
+    const fileNames = files.map((file) => file.name).join(' ');
+    const text = `${nick} ${title} ${content} ${names} ${fileNames}`;
+    return text.toLowerCase().includes(this.filter);
   }
 
   channelEntity() {
@@ -1117,6 +1209,49 @@ class ChatApplication extends Application {
       : this.chatDescription(view.items);
     this.chatInfo.textContent = info;
     this.chatInfo.classList.toggle('editable', !root && this.canDescribe());
+    this.renderCallButton();
+  }
+
+  renderCallButton() {
+    const isFeedOpen = this.channelEntity() === 'feed';
+    const live = isFeedOpen ? null : this.liveOf(this.chat);
+    const label = live ? `join · ${live.count}` : 'call';
+    this.callBtn.textContent = label;
+    this.callBtn.classList.toggle('hidden', isFeedOpen);
+    this.callBtn.classList.toggle('active', live !== null);
+  }
+
+  liveOf(chat) {
+    for (const item of this.liveCalls.values()) {
+      if (item.chat === chat) return item;
+    }
+    return null;
+  }
+
+  setCallMark(item, chat) {
+    const mark = item.querySelector('.call-mark');
+    const live = chat === '' ? null : this.liveOf(chat);
+    mark.classList.toggle('hidden', live === null);
+    mark.textContent = live === null ? '' : `📞 ${live.count}`;
+  }
+
+  createCallCard(record) {
+    const live = this.liveCalls.get(record.id) ?? null;
+    const element = document.createElement('div');
+    element.className = 'call-card';
+    element.dataset.id = record.id;
+    const text = document.createElement('span');
+    text.textContent = callLabel(record, live);
+    element.append(text);
+    const choice = callAction(record, live);
+    if (!choice) return element;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'link-btn';
+    button.dataset.action = choice.action;
+    button.textContent = choice.label;
+    element.append(button);
+    return element;
   }
 
   renderComposer() {
@@ -1130,7 +1265,10 @@ class ChatApplication extends Application {
     this.messageInput.maxLength = isPostMode ? TEXT_LENGTH : MAX_LENGTH;
     const nick = this.username ? `@${this.username}` : 'set your nick first';
     const hint = isPostMode ? ', first line is the title, Ctrl+Enter' : '';
-    this.composerInfo.textContent = `${nick}${hint}`;
+    const mode = this.callStage?.mode;
+    const inCall = mode === 'call' || mode === 'mini';
+    const keys = inCall ? ' · Ctrl D mic · Ctrl E camera' : '';
+    this.composerInfo.textContent = `${nick}${hint}${keys}`;
     this.replyBar.classList.toggle('hidden', !quote);
     if (!quote) return;
     this.replyAuthor.textContent = quote.nick;
@@ -1975,6 +2113,9 @@ class ChatApplication extends Application {
   }
 
   selectChat(id) {
+    const stage = this.callStage;
+    const other = stage?.mode === 'call' && id !== stage.chat;
+    if (other && !this.callHold) stage.collapse();
     this.chat = id;
     this.limit = PAGE_SIZE;
     const at = this.unreadOf(id) > 0 ? this.readAtOf(id) : Infinity;
@@ -2527,6 +2668,332 @@ class ChatApplication extends Application {
     const text = 'App installed successfully!';
     if (!visible) this.showNotification(text);
     this.installBtn.classList.toggle('hidden', !visible);
+  }
+
+  callTitle(chat) {
+    const current = this.chat;
+    if (current === chat) return this.chatName();
+    this.chat = chat;
+    const title = this.chatName();
+    this.chat = current;
+    return title;
+  }
+
+  ensureCallStage() {
+    if (this.callStage) return this.callStage;
+    const hooks = {
+      nick: () => this.username,
+      hasNick: () => this.username !== '',
+      saveNick: (nick) => {
+        this.usernameInput.value = nick;
+        this.syncUsername();
+      },
+      titleOf: (chat) => this.callTitle(chat),
+      update: (flags) => this.pushCallState(flags),
+      focusChat: (id) => this.focusCallChat(id),
+      changed: () => this.scheduleRender(),
+      fail: (error) => this.report(error),
+      closed: () => {
+        this.callSession = null;
+      },
+      leave: () => this.closeCall(),
+      isText: (element) => isEditable(element),
+      before: (node) => this.chatView.before(node),
+      listen: (listener) => this.api.call.on('state', listener),
+      unlisten: (listener) => this.api.call.off('state', listener),
+    };
+    this.callStage = new CallStage(this.app, hooks);
+    return this.callStage;
+  }
+
+  bindCalls() {
+    if (this.callBound) return Promise.resolve();
+    if (this.callBinding) return this.callBinding;
+    this.callBinding = this.openCallEvents();
+    return this.callBinding;
+  }
+
+  noteCallDown() {
+    if (!this.hasConnected) return;
+    const session = this.callSession;
+    const phase = session?.phase ?? '';
+    const joined = phase === 'joined';
+    const live = joined || phase === 'reconnecting';
+    if (!live) return;
+    this.callLost = true;
+    session.hold();
+  }
+
+  restoreCall() {
+    const run = async () => {
+      await this.bindCalls();
+      const mesh = this.mesh;
+      if (mesh?.connected && this.connected) await mesh.attach();
+      await this.resumeCall();
+    };
+    run().catch((error) => this.report(error));
+  }
+
+  async resumeCall() {
+    if (!this.callLost) return;
+    this.callLost = false;
+    const session = this.callSession;
+    const phase = session?.phase ?? '';
+    const joined = phase === 'joined';
+    const live = joined || phase === 'reconnecting';
+    if (!session || !live) return;
+    const stored = this.replicaOf(session.chat).get(session.call);
+    const started = stored?.timestamp;
+    const host = typeof stored?.host === 'string' ? stored.host : '';
+    const named = typeof stored?.chat === 'string';
+    const chat = named ? stored.chat : session.chat;
+    const call = session.call;
+    const token = this.callToken;
+    const record = { call, chat, host, started, token };
+    await session.resume(record);
+  }
+
+  async openCallEvents() {
+    try {
+      if (this.metacom?.active) await this.metacom.load('call');
+      if (this.callBound) return;
+      const call = this.api?.call;
+      if (!call) return;
+      this.callBound = true;
+      call.on('active', (data) => this.onCallActive(data));
+      call.on('state', (data) => this.noteRoster(data));
+      call.on('ended', (data) => this.onCallEnded(data));
+      if (this.metacom?.active) await this.loadLiveCalls();
+    } finally {
+      this.callBinding = null;
+    }
+  }
+
+  onCallActive(data) {
+    if (!data || typeof data.call !== 'string') return;
+    const call = data.call;
+    if (data.ended === true) {
+      this.liveCalls.delete(call);
+      this.markBookEnded(call);
+    } else {
+      const chat = typeof data.chat === 'string' ? data.chat : '';
+      const count = typeof data.count === 'number' ? data.count : 0;
+      const started = typeof data.started === 'number' ? data.started : 0;
+      this.liveCalls.set(call, { call, chat, count, started });
+      this.raisePeak(call, count);
+    }
+    this.scheduleRender();
+  }
+
+  onCallEnded(data) {
+    const call = data?.call;
+    if (typeof call !== 'string') return;
+    this.liveCalls.delete(call);
+    this.markBookEnded(call);
+    this.scheduleRender();
+  }
+
+  async loadLiveCalls() {
+    const list = await this.api.call.active();
+    if (!Array.isArray(list)) return;
+    for (const item of list) this.onCallActive(item);
+  }
+
+  noteRoster(state) {
+    const book = this.callBook;
+    if (!book || !state || state.call !== book.id) return;
+    const list = Array.isArray(state.participants) ? state.participants : [];
+    if (list.length > book.peak) book.peak = list.length;
+    for (const item of list) {
+      const nick = typeof item.nick === 'string' ? item.nick : '';
+      if (nick === '' || book.names.includes(nick)) continue;
+      book.names.push(nick);
+    }
+  }
+
+  raisePeak(call, count) {
+    const book = this.callBook;
+    if (!book || book.id !== call) return;
+    if (count > book.peak) book.peak = count;
+  }
+
+  markBookEnded(call) {
+    const book = this.callBook;
+    if (!book || book.id !== call) return;
+    book.ended = true;
+    if (book.phase === 'idle') this.writeCallEnd(book);
+  }
+
+  beginCallBook(id, chat, isHost, nick) {
+    const names = [];
+    if (nick) names.push(nick);
+    this.callBook = {
+      id,
+      chat,
+      isHost,
+      joined: false,
+      ended: false,
+      closed: false,
+      phase: '',
+      peak: 1,
+      names,
+    };
+  }
+
+  storedTitle(chat) {
+    if (isPair(chat)) return '';
+    const name = this.replica.get(chat)?.name;
+    if (typeof name !== 'string') return '';
+    return name;
+  }
+
+  recordCallStart(chat, opened) {
+    const state = opened.state;
+    const id = opened.id;
+    const host = this.peerId;
+    const nick = this.username;
+    const started = state?.started;
+    const timestamp = typeof started === 'number' ? started : Date.now();
+    const title = this.storedTitle(chat);
+    const record = { id, chat, host, nick, timestamp, title };
+    saveCall(this.replicaOf(chat), record);
+    this.beginCallBook(id, chat, true, nick);
+    if (state) this.noteRoster(state);
+  }
+
+  prepareJoinedCall(chat, id) {
+    this.beginCallBook(id, chat, false, this.username);
+    const live = this.liveOf(chat);
+    if (!live || live.call !== id) return;
+    if (live.count > this.callBook.peak) this.callBook.peak = live.count;
+  }
+
+  followCall(session) {
+    const book = this.callBook;
+    if (!book || book.id !== session.call) return;
+    if (session.phase === 'joined') book.joined = true;
+    book.phase = session.phase;
+    const onPhase = (phase) => {
+      book.phase = phase;
+      if (phase === 'joined') book.joined = true;
+      if (phase !== 'idle') return;
+      session.off('state', onPhase);
+      this.writeCallEnd(book);
+    };
+    session.on('state', onPhase);
+  }
+
+  writeCallEnd(book) {
+    if (book.closed || !book.joined || !book.ended) return;
+    const replica = this.replicaOf(book.chat);
+    const current = replica.get(book.id);
+    book.closed = true;
+    if (typeof current?.ended === 'number') return;
+    const ended = Date.now();
+    const peak = book.peak > 0 ? book.peak : 1;
+    const names = book.names.join(', ');
+    saveCallEnd(replica, book.id, { ended, peak, names });
+  }
+
+  async existingCall(error, chat) {
+    if (error?.code !== 'call/exists') return '';
+    if (typeof error.cause === 'string' && error.cause !== '') {
+      return error.cause;
+    }
+    const list = await this.api.call.active();
+    if (!Array.isArray(list)) return '';
+    for (const item of list) {
+      if (item.chat === chat) return item.call;
+    }
+    return '';
+  }
+
+  async openCall(chat, endpoint, nick) {
+    try {
+      const result = await this.api.call.start({ chat, endpoint, nick });
+      const state = result?.state ?? null;
+      const id = state?.call;
+      const token = typeof result?.token === 'string' ? result.token : '';
+      if (typeof id !== 'string' || id === '') {
+        throw new Error('Call did not start');
+      }
+      return { id, token, state, created: true };
+    } catch (error) {
+      const id = await this.existingCall(error, chat);
+      if (!id) throw error;
+      return { id, token: '', state: null, created: false };
+    }
+  }
+
+  async closeCall() {
+    if (this.callLeaving) await this.callLeaving;
+    const session = this.callStage?.session;
+    if (!session) return;
+    this.callStage.detach();
+    const leaving = session.leave().catch((error) => this.report(error));
+    this.callLeaving = leaving;
+    try {
+      await leaving;
+    } finally {
+      if (this.callLeaving === leaving) this.callLeaving = null;
+    }
+  }
+
+  attachCallEvents() {
+    if (this.callBound) return;
+    const call = this.api?.call;
+    if (!call?.on) return;
+    this.callBound = true;
+    call.on('active', (data) => this.onCallActive(data));
+    call.on('state', (data) => this.noteRoster(data));
+    call.on('ended', (data) => this.onCallEnded(data));
+    this.loadLiveCalls().catch((error) => this.report(error));
+  }
+
+  async startCall(chat, options = {}) {
+    await this.closeCall();
+    await this.bindCalls();
+    this.attachCallEvents();
+    const endpoint = `${this.peerId}:${tabId()}`;
+    const nick = this.username;
+    const opened = await this.openCall(chat, endpoint, nick);
+    const given = options.token;
+    const hasToken = typeof given === 'string' && given !== '';
+    const token = hasToken ? given : opened.token;
+    if (token !== '') this.callToken = token;
+    if (opened.created) this.recordCallStart(chat, opened);
+    else this.prepareJoinedCall(chat, opened.id);
+    const ice = () => this.iceConfiguration();
+    const session = new CallSession({
+      api: this.api,
+      endpoint,
+      call: opened.id,
+      chat,
+      ice,
+      pagehide: false,
+    });
+    const stage = this.ensureCallStage();
+    stage.attach(session, token);
+    this.callSession = session;
+    this.followCall(session);
+    session.begin();
+  }
+
+  focusCallChat(id) {
+    if (!id || this.chat === id) return;
+    this.callHold = true;
+    this.selectChat(id);
+    this.callHold = false;
+  }
+
+  async pushCallState(flags) {
+    const session = this.callSession;
+    if (!session) return;
+    const call = session.call;
+    const endpoint = session.endpoint;
+    const mic = flags.mic;
+    const camera = flags.camera;
+    await this.api.call.update({ call, endpoint, mic, camera });
   }
 
   showNotification(message, type = 'info') {
