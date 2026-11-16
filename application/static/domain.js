@@ -24,7 +24,7 @@ import { generateUUID } from './metautil.js';
 import { Mesh } from './mesh.js';
 import { Application } from './application.js';
 import { CallSession } from './call.js';
-import { CallStage } from './stage.js';
+import { CallStage, RingAlert } from './stage.js';
 
 const TASKS = {
   clear: {
@@ -401,6 +401,14 @@ class ChatApplication extends Application {
     this.callBound = false;
     this.callBinding = null;
     this.callLost = false;
+    this.ring = new RingAlert({
+      answer: (kind) => {
+        this.answerRing(kind).catch((error) => this.report(error));
+      },
+      decline: () => {
+        this.declineRing().catch((error) => this.report(error));
+      },
+    });
     this.replica = new Replica({ validate });
     this.uplink = null;
     this.directs = new Map();
@@ -678,6 +686,7 @@ class ChatApplication extends Application {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.syncUsername();
       else this.scheduleRender();
+      this.ring.onVisibility();
     });
     window.addEventListener('resize', () => this.closeMenu());
     window.addEventListener('popstate', () => this.handlePopState());
@@ -2704,6 +2713,8 @@ class ChatApplication extends Application {
 
   bindCalls() {
     if (this.callBound) return Promise.resolve();
+    this.attachCallEvents();
+    if (this.callBound) return Promise.resolve();
     if (this.callBinding) return this.callBinding;
     this.callBinding = this.openCallEvents();
     return this.callBinding;
@@ -2751,15 +2762,9 @@ class ChatApplication extends Application {
 
   async openCallEvents() {
     try {
-      if (this.metacom?.active) await this.metacom.load('call');
-      if (this.callBound) return;
-      const call = this.api?.call;
-      if (!call) return;
-      this.callBound = true;
-      call.on('active', (data) => this.onCallActive(data));
-      call.on('state', (data) => this.noteRoster(data));
-      call.on('ended', (data) => this.onCallEnded(data));
-      if (this.metacom?.active) await this.loadLiveCalls();
+      if (this.callBound || !this.metacom?.active) return;
+      await this.metacom.load('call');
+      this.attachCallEvents();
     } finally {
       this.callBinding = null;
     }
@@ -2771,12 +2776,14 @@ class ChatApplication extends Application {
     if (data.ended === true) {
       this.liveCalls.delete(call);
       this.markBookEnded(call);
+      this.ring.stop(call);
     } else {
       const chat = typeof data.chat === 'string' ? data.chat : '';
       const count = typeof data.count === 'number' ? data.count : 0;
       const started = typeof data.started === 'number' ? data.started : 0;
       this.liveCalls.set(call, { call, chat, count, started });
       this.raisePeak(call, count);
+      if (count >= 2) this.ring.stop(call);
     }
     this.scheduleRender();
   }
@@ -2786,6 +2793,8 @@ class ChatApplication extends Application {
     if (typeof call !== 'string') return;
     this.liveCalls.delete(call);
     this.markBookEnded(call);
+    this.ring.stop(call);
+    this.dropPrejoin(call);
     this.scheduleRender();
   }
 
@@ -2943,7 +2952,70 @@ class ChatApplication extends Application {
     call.on('active', (data) => this.onCallActive(data));
     call.on('state', (data) => this.noteRoster(data));
     call.on('ended', (data) => this.onCallEnded(data));
+    call.on('ring', (data) => this.onRing(data));
+    call.on('ringing', (data) => this.onRinging(data));
     this.loadLiveCalls().catch((error) => this.report(error));
+  }
+
+  onRing(data) {
+    if (!data || typeof data.call !== 'string') return;
+    const from = data.from ?? {};
+    const nick = typeof from.nick === 'string' ? from.nick : '';
+    const peer = typeof from.peer === 'string' ? from.peer : '';
+    const chat = typeof data.chat === 'string' ? data.chat : '';
+    const tab = tabId();
+    this.ring.show({ call: data.call, chat, nick, peer, tab });
+  }
+
+  onRinging(data) {
+    const call = data?.call;
+    const state = data?.state;
+    if (typeof call !== 'string') return;
+    const missed = state === 'declined' || state === 'missed';
+    if (!missed) return;
+    this.recordMissed(call);
+  }
+
+  recordMissed(call) {
+    const book = this.callBook;
+    if (!book || book.id !== call || book.closed) return;
+    if (!isPair(book.chat)) return;
+    book.ended = true;
+    if (book.peak > 1) return;
+    book.peak = 1;
+    const replica = this.replicaOf(book.chat);
+    const current = replica.get(book.id);
+    if (typeof current?.ended === 'number') {
+      book.closed = true;
+      return;
+    }
+    book.closed = true;
+    const ended = Date.now();
+    const names = book.names.join(', ');
+    saveCallEnd(replica, book.id, { ended, peak: 1, names });
+    this.scheduleRender();
+  }
+
+  async answerRing(kind) {
+    const chat = this.ring.chat;
+    if (chat === '') return;
+    const camera = kind === 'video';
+    await this.startCall(chat, { camera });
+  }
+
+  async declineRing() {
+    const call = this.ring.call;
+    if (call === '') return;
+    this.ring.stop(call);
+    await this.api.call.decline({ call });
+  }
+
+  dropPrejoin(call) {
+    const stage = this.callStage;
+    const session = stage?.session;
+    if (!session || session.call !== call) return;
+    if (stage.mode !== 'prejoin') return;
+    stage.detach();
   }
 
   async startCall(chat, options = {}) {
@@ -2956,6 +3028,7 @@ class ChatApplication extends Application {
     const given = options.token;
     const hasToken = typeof given === 'string' && given !== '';
     const token = hasToken ? given : opened.token;
+    const camera = options.camera !== false;
     if (token !== '') this.callToken = token;
     if (opened.created) this.recordCallStart(chat, opened);
     else this.prepareJoinedCall(chat, opened.id);
@@ -2968,7 +3041,7 @@ class ChatApplication extends Application {
       ice,
     });
     const stage = this.ensureCallStage();
-    stage.attach(session, token);
+    stage.attach(session, token, camera);
     this.callSession = session;
     this.followCall(session);
     session.begin();

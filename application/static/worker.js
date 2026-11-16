@@ -301,6 +301,23 @@ proxy.register('cache', {
   check: () => cacheManager.check(),
 });
 
+const ringNote = (data) => {
+  const title = typeof data.title === 'string' ? data.title : '';
+  const tag = typeof data.tag === 'string' ? data.tag : '';
+  if (title === '' || tag === '') return Promise.resolve();
+  const registration = self.registration;
+  const loud = { tag, renotify: true };
+  const showQuiet = () => registration.showNotification(title, { tag });
+  const shown = registration.showNotification(title, loud);
+  return shown.catch(showQuiet);
+};
+
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data || data.type !== 'xxii:ring') return;
+  event.waitUntil(ringNote(data));
+});
+
 self.addEventListener('install', (event) => cacheManager.handleInstall(event));
 self.addEventListener('fetch', (event) => cacheManager.handleFetch(event));
 

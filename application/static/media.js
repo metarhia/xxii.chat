@@ -157,7 +157,7 @@ class MediaCapture {
     try {
       await this.start();
       await this.openMic();
-      await this.openCamera();
+      if (this.cameraOn) await this.openCamera();
       await this.refresh();
     } catch (error) {
       this.message = messageOf(error);

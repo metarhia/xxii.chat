@@ -80,7 +80,10 @@ sync. Terminal-like UI follows the
 
 Calls in the session block stores network settings in the browser: public
 STUN off by default, user STUN and TURN servers, and force relay.
-The chat topbar starts a call.
+The chat topbar starts a call. A direct call rings in every tab of the
+other person: video, audio, and decline, a generated tone, and a system
+notification while the page is hidden. Decline or a miss leaves a
+missed-call card with call back.
 
 ## Releases
 
@@ -184,4 +187,6 @@ server) with `files/have`, `get`, and `put`.
   a new version and back in headless Chrome;
   `test/call-scenarios.js` runs the Chrome call scenarios (media both ways,
   mute and camera, a third participant, liveness, and resume after restart);
+  `test/call-ring.js` rings a direct call in two tabs, declines to a missed
+  card, and accepts into one link each way;
   ports `8000` and `8001` must be free
