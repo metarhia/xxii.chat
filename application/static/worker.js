@@ -16,6 +16,7 @@ const ASSETS = [
   '/default.css',
   '/application.js',
   '/domain.js',
+  '/ice.js',
   '/chat.js',
   '/mesh.js',
   '/files.js',

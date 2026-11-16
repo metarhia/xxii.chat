@@ -1,311 +1,596 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-  <meta name="description" content="XXII local-first chat: globalstorage CRDT, metacom and WebRTC" />
-  <meta name="theme-color" content="#090a0c" />
-  <meta name="color-scheme" content="dark" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-  <meta name="apple-mobile-web-app-title" content="XXII Chat" />
-  <title>XXII Chat</title>
-  <link rel="stylesheet" href="/default.css" />
-  <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-  <link rel="shortcut icon" href="/favicon.ico" type="image/vnd.microsoft.icon" />
-  <link rel="apple-touch-icon" href="/favicon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap" rel="stylesheet" />
-</head>
-<body>
-  <div class="app">
-    <aside class="sidebar" id="sidebar">
-      <header class="brand">
-        <img class="logo" src="/icon.svg" alt="Metarhia" />
-        <h1>xxii.chat</h1>
-        <span class="peers"><span class="muted">peers:</span> <span id="peer-count">0</span></span>
-      </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta
+      name="description"
+      content="XXII local-first chat: globalstorage CRDT, metacom and WebRTC"
+    />
+    <meta name="theme-color" content="#090a0c" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="XXII Chat" />
+    <title>XXII Chat</title>
+    <link rel="stylesheet" href="/default.css" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link
+      rel="shortcut icon"
+      href="/favicon.ico"
+      type="image/vnd.microsoft.icon"
+    />
+    <link rel="apple-touch-icon" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" id="sidebar">
+        <header class="brand">
+          <img class="logo" src="/icon.svg" alt="Metarhia" />
+          <h1>xxii.chat</h1>
+          <span class="peers"
+            ><span class="muted">peers:</span>
+            <span id="peer-count">0</span></span
+          >
+        </header>
 
-      <section class="section">
-        <h3>CONTACTS</h3>
-        <ul id="contact-list" class="list"></ul>
-        <p id="contacts-empty" class="hint">Peers appear here when they come online</p>
-      </section>
+        <section class="section">
+          <h3>CONTACTS</h3>
+          <ul id="contact-list" class="list"></ul>
+          <p id="contacts-empty" class="hint">
+            Peers appear here when they come online
+          </p>
+        </section>
 
-      <section class="section">
-        <h3>FEEDS</h3>
-        <ul id="feed-list" class="list"></ul>
-        <form id="feed-form" class="inline-form">
-          <input id="feed-name-input" type="text" maxlength="64" placeholder="+ new feed" />
-        </form>
-      </section>
-
-      <section class="section">
-        <h3 class="small">CHATS</h3>
-        <ul id="chat-list" class="list"></ul>
-        <form id="chat-form" class="inline-form">
-          <input id="chat-name-input" type="text" maxlength="64" placeholder="+ new chat" />
-        </form>
-      </section>
-
-      <section class="section">
-        <h3 class="small">FOLDERS</h3>
-        <ul id="folder-list" class="list"></ul>
-        <form id="folder-form" class="inline-form">
-          <input id="folder-name-input" type="text" maxlength="256" placeholder="+ new folder, a/b for nested" />
-        </form>
-      </section>
-
-      <section class="section session">
-        <h3 class="small">SESSION</h3>
-        <label class="nick">
-          <span class="accent">@</span>
-          <input id="username-input" type="text" maxlength="32" placeholder="your nick" />
-        </label>
-        <div class="status-line">
-          <span id="connection-status" class="status offline">offline</span>
-          <span id="mesh-status" class="muted"></span>
-        </div>
-        <div class="tools">
-          <button id="install-btn" class="link-btn hidden">install</button>
-          <button id="version-btn" class="link-btn" type="button" title="Updates install automatically; click to check now">v…</button>
-          <button id="clear-messages-btn" class="link-btn">clear database</button>
-        </div>
-      </section>
-    </aside>
-
-    <main id="chat-view" class="chat-view">
-      <header class="topbar">
-        <button id="menu-btn" class="link-btn menu-btn" title="Chats (Esc)" aria-label="Chats">≡</button>
-        <div class="context">
-          <button id="back-btn" class="link-btn back-btn hidden" type="button" title="Back to chat (Esc)" aria-label="Back to chat">‹</button>
-          <span id="chat-title" class="chat-title">!general</span>
-          <span id="chat-info" class="description"></span>
-          <form id="topic-form" class="topic-form hidden">
-            <input id="topic-input" type="text" maxlength="256" placeholder="description, Enter to save" />
+        <section class="section">
+          <h3>FEEDS</h3>
+          <ul id="feed-list" class="list"></ul>
+          <form id="feed-form" class="inline-form">
+            <input
+              id="feed-name-input"
+              type="text"
+              maxlength="64"
+              placeholder="+ new feed"
+            />
           </form>
+        </section>
+
+        <section class="section">
+          <h3 class="small">CHATS</h3>
+          <ul id="chat-list" class="list"></ul>
+          <form id="chat-form" class="inline-form">
+            <input
+              id="chat-name-input"
+              type="text"
+              maxlength="64"
+              placeholder="+ new chat"
+            />
+          </form>
+        </section>
+
+        <section class="section">
+          <h3 class="small">FOLDERS</h3>
+          <ul id="folder-list" class="list"></ul>
+          <form id="folder-form" class="inline-form">
+            <input
+              id="folder-name-input"
+              type="text"
+              maxlength="256"
+              placeholder="+ new folder, a/b for nested"
+            />
+          </form>
+        </section>
+
+        <section class="section session">
+          <h3 class="small">SESSION</h3>
+          <label class="nick">
+            <span class="accent">@</span>
+            <input
+              id="username-input"
+              type="text"
+              maxlength="32"
+              placeholder="your nick"
+            />
+          </label>
+          <div class="status-line">
+            <span id="connection-status" class="status offline">offline</span>
+            <span id="mesh-status" class="muted"></span>
+          </div>
+          <div class="tools">
+            <button id="calls-btn" class="link-btn">calls</button>
+            <button id="install-btn" class="link-btn hidden">install</button>
+            <button
+              id="version-btn"
+              class="link-btn"
+              type="button"
+              title="Updates install automatically; click to check now"
+            >
+              v…
+            </button>
+            <button id="clear-messages-btn" class="link-btn">
+              clear database
+            </button>
+          </div>
+        </section>
+      </aside>
+
+      <main id="chat-view" class="chat-view">
+        <header class="topbar">
+          <button
+            id="menu-btn"
+            class="link-btn menu-btn"
+            title="Chats (Esc)"
+            aria-label="Chats"
+          >
+            ≡
+          </button>
+          <div class="context">
+            <button
+              id="back-btn"
+              class="link-btn back-btn hidden"
+              type="button"
+              title="Back to chat (Esc)"
+              aria-label="Back to chat"
+            >
+              ‹
+            </button>
+            <span id="chat-title" class="chat-title">!general</span>
+            <span id="chat-info" class="description"></span>
+            <form id="topic-form" class="topic-form hidden">
+              <input
+                id="topic-input"
+                type="text"
+                maxlength="256"
+                placeholder="description, Enter to save"
+              />
+            </form>
+          </div>
+          <nav class="actions">
+            <button id="search-btn" class="link-btn">Search</button>
+            <button id="pins-btn" class="link-btn">Pin list</button>
+            <button id="members-btn" class="link-btn">Members</button>
+            <button id="log-btn" class="link-btn">Log</button>
+          </nav>
+        </header>
+        <div id="search-bar" class="search hidden">
+          <input
+            id="search-input"
+            type="search"
+            placeholder="filter messages in this chat"
+          />
         </div>
-        <nav class="actions">
-          <button id="search-btn" class="link-btn">Search</button>
-          <button id="pins-btn" class="link-btn">Pin list</button>
-          <button id="members-btn" class="link-btn">Members</button>
-          <button id="log-btn" class="link-btn">Log</button>
-        </nav>
+        <div class="timeline">
+          <div id="chat-messages" class="messages">
+            <button id="load-more-btn" class="link-btn load-more hidden">
+              load older messages
+            </button>
+            <div id="message-list" class="message-list"></div>
+          </div>
+          <button
+            id="jump-btn"
+            class="jump hidden"
+            type="button"
+            title="Jump to latest"
+            aria-label="Jump to latest"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 3v10M3 8l5 5 5-5" />
+            </svg>
+            <span id="jump-count" class="jump-count hidden"></span>
+          </button>
+        </div>
+        <form id="composer" class="composer">
+          <div id="reply-bar" class="reply-bar hidden">
+            <button
+              id="reply-target"
+              class="reply-target"
+              type="button"
+              title="Show the message"
+            >
+              <span class="reply-label"
+                >reply to <span class="reply-author"></span
+              ></span>
+              <span class="reply-text"></span>
+            </button>
+            <button
+              id="reply-cancel"
+              class="link-btn"
+              type="button"
+              title="Cancel reply (Esc)"
+              aria-label="Cancel reply"
+            >
+              ×
+            </button>
+          </div>
+          <div id="pending-files" class="pending-files hidden"></div>
+          <textarea
+            id="message-input"
+            rows="1"
+            enterkeyhint="send"
+            placeholder="> new message to !general"
+          ></textarea>
+          <div class="composer-bar">
+            <div class="composer-tools">
+              <button id="attach-btn" class="link-btn" type="button">
+                attach
+              </button>
+              <input id="file-input" type="file" multiple hidden />
+              <button id="emoji-btn" class="link-btn" type="button">
+                emoji
+              </button>
+              <span id="composer-info" class="composer-info"></span>
+            </div>
+            <span class="shortcuts"
+              ><kbd>Ctrl K</kbd> jump <kbd>↑</kbd> select
+              <kbd>Esc</kbd> sidebar</span
+            >
+            <button id="send-btn" class="send" type="submit">send</button>
+          </div>
+        </form>
+      </main>
+
+      <aside id="panel" class="panel">
+        <header class="panel-header">
+          <span id="panel-title" class="panel-title">Members</span>
+          <button
+            id="panel-close-btn"
+            class="link-btn"
+            aria-label="Close panel"
+          >
+            close
+          </button>
+        </header>
+        <section class="panel-body" data-panel="pins">
+          <div id="pin-list" class="pin-list"></div>
+        </section>
+        <section class="panel-body" data-panel="members">
+          <ul id="member-list" class="member-list"></ul>
+        </section>
+        <section class="panel-body" data-panel="log">
+          <div class="panel-tools">
+            <button id="clear-log-btn" class="link-btn">clear</button>
+          </div>
+          <pre id="output" class="log"></pre>
+        </section>
+        <section class="panel-body" data-panel="calls">
+          <section class="section">
+            <h3 class="small">NETWORK</h3>
+            <label class="check">
+              <input id="ice-public-stun" type="checkbox" />
+              <span>Public STUN, these servers see your IP address</span>
+            </label>
+            <label class="check">
+              <input id="ice-force-relay" type="checkbox" />
+              <span>Force relay, media goes only through TURN</span>
+            </label>
+          </section>
+          <section class="section">
+            <h3 class="small">SERVERS</h3>
+            <form id="ice-form" class="ice-form">
+              <input
+                id="ice-url"
+                type="text"
+                placeholder="stun: or turn: url"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <input
+                id="ice-username"
+                type="text"
+                placeholder="username"
+                autocomplete="off"
+              />
+              <input
+                id="ice-credential"
+                type="text"
+                placeholder="credential"
+                autocomplete="off"
+              />
+              <button id="ice-add" class="link-btn" type="submit">add</button>
+            </form>
+            <ul id="ice-servers" class="list"></ul>
+          </section>
+        </section>
+      </aside>
+    </div>
+
+    <div id="backdrop" class="backdrop hidden"></div>
+    <div id="menu" class="menu hidden" role="menu"></div>
+    <div
+      id="switcher"
+      class="switcher hidden"
+      role="dialog"
+      aria-label="Jump to chat"
+    >
+      <input
+        type="text"
+        placeholder="Jump to a chat, feed or contact"
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="Chat name"
+      />
+      <ul class="switcher-list" role="listbox"></ul>
+    </div>
+    <div
+      id="lightbox"
+      class="lightbox hidden"
+      role="dialog"
+      aria-label="Image viewer"
+    >
+      <header class="lightbox-bar">
+        <span class="lightbox-name"></span>
+        <span class="lightbox-count"></span>
+        <button class="link-btn" type="button" data-lightbox="download">
+          download
+        </button>
+        <button
+          class="link-btn"
+          type="button"
+          data-lightbox="close"
+          aria-label="Close"
+        >
+          ×
+        </button>
       </header>
-      <div id="search-bar" class="search hidden">
-        <input id="search-input" type="search" placeholder="filter messages in this chat" />
-      </div>
-      <div class="timeline">
-        <div id="chat-messages" class="messages">
-          <button id="load-more-btn" class="link-btn load-more hidden">load older messages</button>
-          <div id="message-list" class="message-list"></div>
-        </div>
-        <button id="jump-btn" class="jump hidden" type="button" title="Jump to latest" aria-label="Jump to latest">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8l5 5 5-5" /></svg>
-          <span id="jump-count" class="jump-count hidden"></span>
+      <div class="lightbox-stage" data-lightbox="close">
+        <button
+          class="lightbox-nav"
+          type="button"
+          data-lightbox="prev"
+          aria-label="Previous image"
+        >
+          ‹
+        </button>
+        <img class="lightbox-image" alt="" />
+        <button
+          class="lightbox-nav"
+          type="button"
+          data-lightbox="next"
+          aria-label="Next image"
+        >
+          ›
         </button>
       </div>
-      <form id="composer" class="composer">
-        <div id="reply-bar" class="reply-bar hidden">
-          <button id="reply-target" class="reply-target" type="button" title="Show the message">
-            <span class="reply-label">reply to <span class="reply-author"></span></span>
-            <span class="reply-text"></span>
-          </button>
-          <button id="reply-cancel" class="link-btn" type="button" title="Cancel reply (Esc)" aria-label="Cancel reply">×</button>
-        </div>
-        <div id="pending-files" class="pending-files hidden"></div>
-        <textarea id="message-input" rows="1" enterkeyhint="send" placeholder="> new message to !general"></textarea>
-        <div class="composer-bar">
-          <div class="composer-tools">
-            <button id="attach-btn" class="link-btn" type="button">attach</button>
-            <input id="file-input" type="file" multiple hidden />
-            <button id="emoji-btn" class="link-btn" type="button">emoji</button>
-            <span id="composer-info" class="composer-info"></span>
-          </div>
-          <span class="shortcuts"><kbd>Ctrl K</kbd> jump <kbd>↑</kbd> select <kbd>Esc</kbd> sidebar</span>
-          <button id="send-btn" class="send" type="submit">send</button>
-        </div>
-      </form>
-    </main>
-
-    <aside id="panel" class="panel">
-      <header class="panel-header">
-        <span id="panel-title" class="panel-title">Members</span>
-        <button id="panel-close-btn" class="link-btn" aria-label="Close panel">close</button>
-      </header>
-      <section class="panel-body" data-panel="pins">
-        <div id="pin-list" class="pin-list"></div>
-      </section>
-      <section class="panel-body" data-panel="members">
-        <ul id="member-list" class="member-list"></ul>
-      </section>
-      <section class="panel-body" data-panel="log">
-        <div class="panel-tools">
-          <button id="clear-log-btn" class="link-btn">clear</button>
-        </div>
-        <pre id="output" class="log"></pre>
-      </section>
-    </aside>
-  </div>
-
-  <div id="backdrop" class="backdrop hidden"></div>
-  <div id="menu" class="menu hidden" role="menu"></div>
-  <div id="switcher" class="switcher hidden" role="dialog" aria-label="Jump to chat">
-    <input type="text" placeholder="Jump to a chat, feed or contact" autocomplete="off" spellcheck="false" aria-label="Chat name" />
-    <ul class="switcher-list" role="listbox"></ul>
-  </div>
-  <div id="lightbox" class="lightbox hidden" role="dialog" aria-label="Image viewer">
-    <header class="lightbox-bar">
-      <span class="lightbox-name"></span>
-      <span class="lightbox-count"></span>
-      <button class="link-btn" type="button" data-lightbox="download">download</button>
-      <button class="link-btn" type="button" data-lightbox="close" aria-label="Close">×</button>
-    </header>
-    <div class="lightbox-stage" data-lightbox="close">
-      <button class="lightbox-nav" type="button" data-lightbox="prev" aria-label="Previous image">‹</button>
-      <img class="lightbox-image" alt="" />
-      <button class="lightbox-nav" type="button" data-lightbox="next" aria-label="Next image">›</button>
     </div>
-  </div>
-  <div id="palette" class="palette hidden"></div>
-  <div id="notification" class="notification hidden" role="status"></div>
+    <div id="palette" class="palette hidden"></div>
+    <div id="notification" class="notification hidden" role="status"></div>
 
-  <template id="contact-item-template">
-    <li class="nav-item contact-item">
-      <span class="icon">👤</span>
-      <span class="dot"></span>
-      <span class="name"></span>
-      <span class="badge hidden"></span>
-      <span class="time"></span>
-    </li>
-  </template>
+    <template id="contact-item-template">
+      <li class="nav-item contact-item">
+        <span class="icon">👤</span>
+        <span class="dot"></span>
+        <span class="name"></span>
+        <span class="badge hidden"></span>
+        <span class="time"></span>
+      </li>
+    </template>
 
-  <template id="chat-item-template">
-    <li class="nav-item chat-item">
-      <span class="icon"></span>
-      <span class="name"></span>
-      <button class="link-btn remove-btn hidden" data-action="remove" title="Remove from folder" aria-label="Remove from folder">×</button>
-      <span class="badge hidden"></span>
-      <span class="time"></span>
-    </li>
-  </template>
-
-  <template id="folder-item-template">
-    <li class="folder">
-      <div class="nav-item folder-row">
-        <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+    <template id="chat-item-template">
+      <li class="nav-item chat-item">
         <span class="icon"></span>
         <span class="name"></span>
-        <span class="folder-actions">
-          <button class="link-btn" data-action="add" title="Add the open chat or feed" aria-label="Add the open chat or feed">+</button>
-          <button class="link-btn" data-action="visibility" title="Who sees this folder"></button>
-        </span>
+        <button
+          class="link-btn remove-btn hidden"
+          data-action="remove"
+          title="Remove from folder"
+          aria-label="Remove from folder"
+        >
+          ×
+        </button>
         <span class="badge hidden"></span>
-      </div>
-      <ul class="list folder-items"></ul>
-    </li>
-  </template>
+        <span class="time"></span>
+      </li>
+    </template>
 
-  <template id="message-template">
-    <div class="message">
-      <span class="time"></span>
-      <div class="body">
-        <button class="quote hidden" type="button" data-action="quote"><span class="quote-author"></span><span class="quote-text"></span></button>
-        <div class="line">
-          <span class="author"></span><span class="content"></span>
+    <template id="folder-item-template">
+      <li class="folder">
+        <div class="nav-item folder-row">
+          <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="m4 6 4 4 4-4" />
+          </svg>
+          <span class="icon"></span>
+          <span class="name"></span>
+          <span class="folder-actions">
+            <button
+              class="link-btn"
+              data-action="add"
+              title="Add the open chat or feed"
+              aria-label="Add the open chat or feed"
+            >
+              +
+            </button>
+            <button
+              class="link-btn"
+              data-action="visibility"
+              title="Who sees this folder"
+            ></button>
+          </span>
+          <span class="badge hidden"></span>
         </div>
+        <ul class="list folder-items"></ul>
+      </li>
+    </template>
+
+    <template id="message-template">
+      <div class="message">
+        <span class="time"></span>
+        <div class="body">
+          <button class="quote hidden" type="button" data-action="quote">
+            <span class="quote-author"></span><span class="quote-text"></span>
+          </button>
+          <div class="line">
+            <span class="author"></span><span class="content"></span>
+          </div>
+          <div class="attachments"></div>
+          <div class="reactions"></div>
+          <button class="replies hidden" data-action="thread">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" />
+            </svg>
+            <span class="count"></span>
+          </button>
+        </div>
+        <button
+          class="more"
+          type="button"
+          data-action="menu"
+          tabindex="-1"
+          title="Actions"
+          aria-label="Message actions"
+        >
+          ⋯
+        </button>
+      </div>
+    </template>
+
+    <template id="post-template">
+      <article class="post">
+        <h2 class="title"></h2>
+        <div class="meta">
+          <span class="nick"></span><span class="bullet">•</span
+          ><span class="date"></span>
+        </div>
+        <p class="excerpt"></p>
+        <div class="attachments"></div>
+        <div class="post-footer">
+          <button class="replies" data-action="thread">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" />
+            </svg>
+            <span class="count"></span>
+          </button>
+          <div class="reactions"></div>
+        </div>
+        <button
+          class="more"
+          type="button"
+          data-action="menu"
+          tabindex="-1"
+          title="Actions"
+          aria-label="Message actions"
+        >
+          ⋯
+        </button>
+      </article>
+    </template>
+
+    <template id="article-template">
+      <article class="post-article">
+        <h1 class="title"></h1>
+        <div class="meta">
+          <span class="nick"></span><span class="bullet">•</span
+          ><span class="date"></span>
+        </div>
+        <nav class="outline hidden" aria-label="Outline"></nav>
+        <div class="post-text"></div>
         <div class="attachments"></div>
         <div class="reactions"></div>
-        <button class="replies hidden" data-action="thread">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" /></svg>
-          <span class="count"></span>
+        <button
+          class="more"
+          type="button"
+          data-action="menu"
+          tabindex="-1"
+          title="Actions"
+          aria-label="Message actions"
+        >
+          ⋯
+        </button>
+      </article>
+    </template>
+
+    <template id="pin-item-template">
+      <div class="pin-item">
+        <div class="who"></div>
+        <div class="text"></div>
+        <button class="link-btn unpin-btn">unpin</button>
+      </div>
+    </template>
+
+    <template id="member-item-template">
+      <li class="member">
+        <span class="dot"></span>
+        <span class="name"></span>
+        <span class="state"></span>
+      </li>
+    </template>
+
+    <template id="reaction-button-template">
+      <button class="reaction" data-action="react">
+        <span class="emoji"></span>
+        <span class="count"></span>
+      </button>
+    </template>
+
+    <template id="image-template">
+      <figure class="image">
+        <button class="image-open" type="button" data-action="view">
+          <img alt="" decoding="async" />
+        </button>
+        <button
+          class="image-download"
+          type="button"
+          data-action="download"
+          title="Download"
+          aria-label="Download"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+            <path d="m7 11 5 5 5-5" />
+            <path d="M12 4v12" />
+          </svg>
+        </button>
+      </figure>
+    </template>
+
+    <template id="file-template">
+      <div class="file">
+        <svg class="file-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+          <path
+            d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"
+          />
+        </svg>
+        <span class="file-name"></span>
+        <span class="file-size"></span>
+        <button
+          class="download-btn"
+          data-action="download"
+          title="Download"
+          aria-label="Download"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+            <path d="m7 11 5 5 5-5" />
+            <path d="M12 4v12" />
+          </svg>
         </button>
       </div>
-      <button class="more" type="button" data-action="menu" tabindex="-1" title="Actions" aria-label="Message actions">⋯</button>
-    </div>
-  </template>
+    </template>
 
-  <template id="post-template">
-    <article class="post">
-      <h2 class="title"></h2>
-      <div class="meta"><span class="nick"></span><span class="bullet">•</span><span class="date"></span></div>
-      <p class="excerpt"></p>
-      <div class="attachments"></div>
-      <div class="post-footer">
-        <button class="replies" data-action="thread">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" /></svg>
-          <span class="count"></span>
+    <template id="pending-file-template">
+      <div class="file pending-file">
+        <span class="file-name"></span>
+        <span class="file-size"></span>
+        <button
+          class="remove-file"
+          type="button"
+          title="Remove"
+          aria-label="Remove"
+        >
+          ×
         </button>
-        <div class="reactions"></div>
       </div>
-      <button class="more" type="button" data-action="menu" tabindex="-1" title="Actions" aria-label="Message actions">⋯</button>
-    </article>
-  </template>
+    </template>
 
-  <template id="article-template">
-    <article class="post-article">
-      <h1 class="title"></h1>
-      <div class="meta"><span class="nick"></span><span class="bullet">•</span><span class="date"></span></div>
-      <nav class="outline hidden" aria-label="Outline"></nav>
-      <div class="post-text"></div>
-      <div class="attachments"></div>
-      <div class="reactions"></div>
-      <button class="more" type="button" data-action="menu" tabindex="-1" title="Actions" aria-label="Message actions">⋯</button>
-    </article>
-  </template>
-
-  <template id="pin-item-template">
-    <div class="pin-item">
-      <div class="who"></div>
-      <div class="text"></div>
-      <button class="link-btn unpin-btn">unpin</button>
-    </div>
-  </template>
-
-  <template id="member-item-template">
-    <li class="member">
-      <span class="dot"></span>
-      <span class="name"></span>
-      <span class="state"></span>
-    </li>
-  </template>
-
-  <template id="reaction-button-template">
-    <button class="reaction" data-action="react">
-      <span class="emoji"></span>
-      <span class="count"></span>
-    </button>
-  </template>
-
-  <template id="image-template">
-    <figure class="image">
-      <button class="image-open" type="button" data-action="view"><img alt="" decoding="async" /></button>
-      <button class="image-download" type="button" data-action="download" title="Download" aria-label="Download">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /><path d="m7 11 5 5 5-5" /><path d="M12 4v12" /></svg>
-      </button>
-    </figure>
-  </template>
-
-  <template id="file-template">
-    <div class="file">
-      <svg class="file-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" /></svg>
-      <span class="file-name"></span>
-      <span class="file-size"></span>
-      <button class="download-btn" data-action="download" title="Download" aria-label="Download">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /><path d="m7 11 5 5 5-5" /><path d="M12 4v12" /></svg>
-      </button>
-    </div>
-  </template>
-
-  <template id="pending-file-template">
-    <div class="file pending-file">
-      <span class="file-name"></span>
-      <span class="file-size"></span>
-      <button class="remove-file" type="button" title="Remove" aria-label="Remove">×</button>
-    </div>
-  </template>
-
-  <script type="module" src="/domain.js"></script>
-</body>
+    <script type="module" src="/domain.js"></script>
+  </body>
 </html>
