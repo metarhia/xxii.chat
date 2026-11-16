@@ -161,8 +161,11 @@ server) with `files/have`, `get`, and `put`.
 
 - `npm test`: lint and types
 - `npm run test:app`: application tests in impress test mode
-- `npm run test:browser`: tabs, chats, menu reactions that toggle, quoted
-  replies, threads, pins, feeds opened in place, keyboard selection, `Esc`,
+- `npm run test:calls`: headless Chrome with fake camera, microphone, and
+  screen capture for call scenarios
+- `npm run test:browser`: the chat scenarios and `test:calls`; tabs, chats,
+  menu reactions that toggle, quoted replies, threads, pins, feeds opened
+  in place, keyboard selection, `Esc`,
   `Ctrl+K`, drafts, swipe and long press,
   folders and their visibility between peers, offline writes, OPFS,
   automatic WebRTC links, direct messages, files through the server and
