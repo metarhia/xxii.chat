@@ -26,7 +26,7 @@ const openPerson = async (t, browser) => {
       .catch(() => undefined),
   );
   const { targetId } = await browser.request('Target.createTarget', {
-    url: `${ORIGIN}/?test`,
+    url: `${ORIGIN}/`,
     browserContextId,
   });
   const { sessionId } = await browser.request('Target.attachToTarget', {

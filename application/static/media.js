@@ -546,7 +546,6 @@ class MediaCapture {
   #screenGen = 0;
   #screenStream = null;
   #onScreenEnd = null;
-  #testMode = false;
 
   constructor(storage = globalThis.localStorage) {
     this.storage = storage;
@@ -565,7 +564,6 @@ class MediaCapture {
     this.screenPending = false;
     this.canScreen =
       typeof globalThis.navigator?.mediaDevices?.getDisplayMedia === 'function';
-    this.testScreen = undefined;
     this.micOn = true;
     this.cameraOn = true;
     this.level = 0;
@@ -577,8 +575,6 @@ class MediaCapture {
     this.onChange = null;
     this.onLevel = null;
     this.#tick = () => this.#sample();
-    const search = globalThis.location?.search ?? '';
-    this.#testMode = new URLSearchParams(search).has('test');
     this.#onScreenEnd = () => this.stopScreen();
     this.#onDevice = () => {
       this.refresh().catch(() => this.#notify());
@@ -769,7 +765,7 @@ class MediaCapture {
       const video = { ...SCREEN.video, frameRate };
       const options = { ...SCREEN, video };
       if (controller) options.controller = controller;
-      stream = await this.#display(options);
+      stream = await globalThis.navigator.mediaDevices.getDisplayMedia(options);
       if (generation !== this.#screenGen) return void stopStream(stream);
       const track = stream.getVideoTracks()[0] ?? null;
       if (!track || track.readyState !== 'live') {
@@ -811,16 +807,6 @@ class MediaCapture {
     this.screenMotion = !this.screenMotion;
     if (this.screenTrack) await this.#screenQuality(this.screenTrack);
     this.#notify();
-  }
-
-  async #display(options) {
-    try {
-      return await globalThis.navigator.mediaDevices.getDisplayMedia(options);
-    } catch (error) {
-      const fallback = this.#testMode && typeof this.testScreen === 'function';
-      if (!fallback) throw error;
-      return this.testScreen(options);
-    }
   }
 
   #focusScreen(controller, track) {
