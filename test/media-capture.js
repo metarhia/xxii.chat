@@ -45,7 +45,7 @@ const source = (surface = 'browser') => {
   };
 };
 
-const environment = async (t, display, search = '') => {
+const environment = async (t, display) => {
   const replace = (key, value) => {
     const original = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, value });
@@ -55,7 +55,6 @@ const environment = async (t, display, search = '') => {
     });
   };
   replace('navigator', { mediaDevices: { getDisplayMedia: display } });
-  replace('location', { search });
   const focuses = [];
   class Controller {
     constructor() {
@@ -197,21 +196,18 @@ test('screen capture degrades when browser APIs are missing', async (t) => {
   assert.match(media.message, /unavailable/);
 });
 
-test('screen fallback runs only after failure in test pages', async (t) => {
-  const stream = source();
+test('screen capture failure leaves no source and notifies', async (t) => {
   const error = new Error('capture unavailable');
   const { media } = await environment(t, async () => {
     throw error;
   });
-  media.testScreen = async () => stream;
+  const messages = [];
+  media.onChange = () => messages.push(media.message);
   await media.openScreen();
   assert.equal(media.screenTrack, null);
-  assert.equal(stream.video.readyState, 'live');
-  globalThis.location.search = '?test';
-  const { MediaCapture } = await import('../application/static/media.js');
-  const testing = new MediaCapture(null);
-  t.after(() => testing.stop());
-  testing.testScreen = async () => stream;
-  await testing.openScreen();
-  assert.equal(testing.screenTrack, stream.video);
+  assert.equal(media.screenAudioTrack, null);
+  assert.equal(media.screenPending, false);
+  assert.equal(media.screenShared, false);
+  assert.equal(media.message, 'Could not capture the screen.');
+  assert.equal(messages.at(-1), media.message);
 });

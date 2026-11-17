@@ -25,7 +25,7 @@ const openPerson = async (t, browser) => {
       })
       .catch(() => undefined),
   );
-  const url = `${ORIGIN}/?test`;
+  const url = `${ORIGIN}/`;
   const { targetId } = await browser.request('Target.createTarget', {
     url,
     browserContextId,
@@ -109,8 +109,7 @@ const CAPTURED = `const media = app.callStage.media;
   if (!media.screenTrack) throw new Error(media.message || 'no screen');
   return media.screenTrack.readyState === 'live';`;
 
-const PREPARE = `const media = app.callStage.media;
-  window.screenSends = [];
+const PREPARE = `window.screenSends = [];
   const session = app.callSession;
   const putTrack = session.setTrack.bind(session);
   session.setTrack = (slot, track) => {
@@ -118,10 +117,6 @@ const PREPARE = `const media = app.callStage.media;
       window.screenSends.push({ slot, shared: Boolean(track) });
     }
     return putTrack(slot, track);
-  };
-  media.testScreen = async () => {
-    window.usedScreenFallback = true;
-    return navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   };
   return true;`;
 
@@ -226,10 +221,6 @@ test(
 
     await gesture(browser, left, 'capture-local');
     await waitFor(browser, left, CAPTURED);
-    const usedFallback = 'return Boolean(window.usedScreenFallback);';
-    const fallback = await run(left, usedFallback);
-    const source = fallback ? 'test fallback used' : 'getDisplayMedia only';
-    t.diagnostic(`Screen capture source: ${source}`);
     const stoppedOnLeave = await run(
       left,
       `const media = app.callStage.media;
