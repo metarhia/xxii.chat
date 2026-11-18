@@ -7,7 +7,11 @@
     if (raw === '') return 3478;
     return Number(raw);
   })(),
-  tlsPort: 0,
+  tlsPort: (() => {
+    const raw = process.env.XXII_TURN_TLS_PORT ?? '';
+    if (raw === '') return 0;
+    return Number(raw);
+  })(),
   relayPorts: [49160, 49359],
   tls: null,
   realm: 'xxii',
