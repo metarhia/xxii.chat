@@ -185,22 +185,21 @@ const streamOf = (track) => {
   return new Stream([track]);
 };
 
-const showTrack = (video, track, mirrored) => {
-  video.classList.toggle('mirrored', mirrored);
+const showTrack = (video, track) => {
   const current = video.srcObject?.getVideoTracks?.()[0] ?? null;
   if (current === track) return;
   video.srcObject = streamOf(track);
   if (track) video.play().catch(() => undefined);
 };
 
-const paintPerson = (root, track, name, color, mirror) => {
+const paintPerson = (root, track, name, color) => {
   const video = root.querySelector('video');
   const wrap = root.querySelector('.avatar-wrap');
   const avatar = wrap?.querySelector('.avatar');
   const live = Boolean(track);
   if (video) {
     video.classList.toggle('hidden', !live);
-    showTrack(video, track, mirror && root.classList.contains('local'));
+    showTrack(video, track);
   }
   wrap?.classList.toggle('hidden', live);
   if (!avatar || live) return;
@@ -1043,6 +1042,8 @@ class CallStage {
     this.media.cameraOn = camera && !this.preferences.joinCameraOff;
     this.media.micOn = !this.preferences.joinMicOff;
     this.media.noise = this.preferences.noise;
+    this.media.mirrorOn = this.preferences.mirror;
+    this.media.mirrorState = this.preferences.mirror ? '' : 'off';
     this.media.onChange = () => this.onMedia();
     this.media.onLevel = (level) => this.paintLevel(level);
     this.levels = new CallLevels(session, this.media, () => this.people);
@@ -1730,6 +1731,7 @@ class CallStage {
     this.volume?.setSink(this.media.speakerId);
     this.syncControls();
     this.paintPreview();
+    this.paintStats();
     this.showNote(this.media.message || this.media.notice);
     if (this.mode !== 'call' && this.mode !== 'mini') return;
     this.renderTiles();
@@ -1981,7 +1983,7 @@ class CallStage {
     preview.classList.toggle('local', true);
     const nick = this.hooks.nick() || 'you';
     const color = colorOf(this.session?.endpoint);
-    paintPerson(preview, live, nick, color, this.preferences.mirror);
+    paintPerson(preview, live, nick, color);
   }
 
   showNote(text) {
@@ -2089,6 +2091,9 @@ class CallStage {
     this.lowerState = createAutoLower();
     this.media
       ?.setNoise(settings.noise)
+      .catch((error) => this.hooks.fail(error));
+    this.media
+      ?.setMirror(settings.mirror)
       .catch((error) => this.hooks.fail(error));
     this.syncControls();
     this.paintPreview();
@@ -2555,13 +2560,7 @@ class CallStage {
     tile.dataset.slot = 'camera';
     const name = this.nameOf(endpoint);
     const color = colorOf(endpoint);
-    paintPerson(
-      tile,
-      this.videoTrack(endpoint),
-      name,
-      color,
-      this.preferences.mirror,
-    );
+    paintPerson(tile, this.videoTrack(endpoint), name, color);
     const chip = tile.querySelector('.call-name');
     const mic = local
       ? this.media?.micOn
@@ -2608,6 +2607,11 @@ class CallStage {
     this.paintStats();
   }
 
+  statsOf(local, sample) {
+    if (!local) return statsText(sample);
+    return `mirror: ${this.media?.mirrorState || 'off'}`;
+  }
+
   paintStats() {
     const tiles = this.host?.querySelectorAll('.call-tile') ?? [];
     for (const tile of tiles) {
@@ -2618,8 +2622,8 @@ class CallStage {
       const shown = this.statsAll
         ? !this.statsHidden.has(endpoint)
         : this.statsShown.has(endpoint);
-      overlay.classList.toggle('hidden', local || !shown);
-      if (!local && shown) overlay.textContent = statsText(sample);
+      overlay.classList.toggle('hidden', !shown);
+      if (shown) overlay.textContent = this.statsOf(local, sample);
       const bars = tile.querySelector('.connection-bars');
       bars.classList.toggle('hidden', local);
       const count = sample?.bars ?? 0;
@@ -2693,13 +2697,7 @@ class CallStage {
     for (const root of this.miniRoots()) {
       root.dataset.endpoint = endpoint;
       root.classList.toggle('local', local);
-      paintPerson(
-        root,
-        this.videoTrack(endpoint),
-        name,
-        color,
-        this.preferences.mirror,
-      );
+      paintPerson(root, this.videoTrack(endpoint), name, color);
       this.paintSpeakingTile(root, endpoint);
       const chip = root.querySelector('.pip-name');
       if (chip) chip.textContent = name;

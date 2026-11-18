@@ -2324,10 +2324,6 @@ svg {
   white-space: pre-wrap;
 }
 
-video.mirrored {
-  transform: scaleX(-1);
-}
-
 .avatar-wrap {
   display: grid;
   place-items: center;

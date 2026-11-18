@@ -152,11 +152,9 @@ test(
       document.querySelector(q).getBoundingClientRect();
     const stage = rect('.call-stage');
     const controls = rect('.call-controls');
-    const video = document.querySelector('.call-tile.local video');
     return [stage.left, stage.top, stage.width, controls.bottom,
-      document.querySelector('.call-share').offsetWidth,
-      video.classList.contains('mirrored')];`);
-    assert.deepEqual(bounds, [0, 0, 390, 844, 0, false]);
+      document.querySelector('.call-share').offsetWidth];`);
+    assert.deepEqual(bounds, [0, 0, 390, 844, 0]);
     await enter('summary[aria-label="camera options"]');
     await enter('[data-action="switch-camera"]');
     await wait(`return app.callStage.media.facing === 'environment' &&
