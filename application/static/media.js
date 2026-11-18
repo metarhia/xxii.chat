@@ -92,14 +92,27 @@ const isMobile = () => {
   return query(MOBILE).matches;
 };
 
-const cameraVideo = (deviceId) => {
+const pausesCameraInBackground = () => {
+  const nav = globalThis.navigator;
+  if (/Android|iPhone|iPad|iPod/i.test(nav?.userAgent ?? '')) return true;
+  return nav?.platform === 'MacIntel' && nav.maxTouchPoints > 1;
+};
+
+const cameraVideo = (deviceId, facing) => {
   const video = isMobile() ? { ...CAMERA_MOBILE } : { ...CAMERA };
+  if (facing && !deviceId) video.facingMode = { ideal: facing };
   if (deviceId) video.deviceId = { exact: deviceId };
   return video;
 };
 
-const micAudio = (deviceId) => {
+const micAudio = (deviceId, noise) => {
   const audio = { ...MIC };
+  if (noise === 'strong') {
+    const devices = globalThis.navigator?.mediaDevices;
+    if (devices?.getSupportedConstraints?.().voiceIsolation) {
+      audio.voiceIsolation = true;
+    }
+  }
   if (deviceId) audio.deviceId = { exact: deviceId };
   return audio;
 };
@@ -549,6 +562,9 @@ class MediaCapture {
 
   constructor(storage = globalThis.localStorage) {
     this.storage = storage;
+    this.facing = isMobile() ? 'user' : '';
+    this.cameraPaused = false;
+    this.noise = 'standard';
     this.cameraId = '';
     this.micId = '';
     this.speakerId = '';
@@ -584,7 +600,7 @@ class MediaCapture {
   async openPreview() {
     try {
       await this.start();
-      await this.openMic();
+      if (this.micOn) await this.openMic();
       if (this.cameraOn) await this.openCamera();
       await this.refresh();
     } catch (error) {
@@ -649,12 +665,42 @@ class MediaCapture {
     else this.#notify();
   }
 
+  async switchCamera() {
+    const actual = this.cameraTrack?.getSettings?.().facingMode || this.facing;
+    this.facing = actual === 'environment' ? 'user' : 'environment';
+    this.stopCamera();
+    await this.setCamera('');
+  }
+
+  async setCameraPaused(paused) {
+    if (this.cameraPaused === paused) return;
+    this.cameraPaused = paused;
+    if (!this.cameraOn) return;
+    if (!paused) {
+      await this.openCamera();
+      return;
+    }
+    this.#cameraGen++;
+    this.stopCamera();
+    this.#notify();
+  }
+
+  async setNoise(noise) {
+    if (this.noise === noise) return;
+    this.noise = noise;
+    if (this.micTrack) await this.openMic();
+  }
+
   async setMic(id) {
     this.micId = id;
     this.micMissing = false;
     this.#save();
-    if (this.micOn) await this.openMic();
-    else this.#notify();
+    if (this.micOn) {
+      await this.openMic();
+    } else {
+      this.#micGen++;
+      this.useMic(null);
+    }
   }
 
   async setSpeaker(id) {
@@ -698,7 +744,9 @@ class MediaCapture {
     const generation = this.#micGen + 1;
     this.#micGen = generation;
     try {
-      const stream = await capture('audio', { audio: micAudio(this.micId) });
+      const stream = await capture('audio', {
+        audio: micAudio(this.micId, this.noise),
+      });
       if (generation !== this.#micGen) return void stopStream(stream);
       const track = stream.getAudioTracks()[0] ?? null;
       this.message = '';
@@ -712,10 +760,11 @@ class MediaCapture {
   }
 
   async openCamera() {
+    if (this.cameraPaused) return;
     const generation = this.#cameraGen + 1;
     this.#cameraGen = generation;
     try {
-      const video = cameraVideo(this.cameraId);
+      const video = cameraVideo(this.cameraId, this.facing);
       const stream = await capture('video', { video });
       if (generation !== this.#cameraGen || !this.cameraOn) {
         return void stopStream(stream);
@@ -876,6 +925,7 @@ class MediaCapture {
       this.#closeMeter();
       this.notice = 'Local speaking detection is unavailable in this browser.';
     }
+    if (track && !this.micOn) this.#armMute();
     this.#notify();
   }
 
@@ -1003,3 +1053,11 @@ export { BANDWIDTH_ROWS, CODECS, LOSS_HOLD_MS, CLEAN_HOLD_MS };
 export { bandwidthRow, validateHint, encodingPolicy, adaptBandwidth };
 export { readLinkStats, LinkMediaPolicy };
 export { createSpeakerState, selectSpeaker, CallLevels };
+
+export {
+  readDevices,
+  writeDevices,
+  canSink,
+  isMobile,
+  pausesCameraInBackground,
+};

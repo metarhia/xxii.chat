@@ -94,6 +94,7 @@ textarea::placeholder {
 }
 
 button:focus-visible,
+summary:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 1px;
@@ -2031,7 +2032,6 @@ svg {
 
 .preview video {
   object-fit: cover;
-  transform: scaleX(-1);
 }
 
 .prejoin-side {
@@ -2324,8 +2324,7 @@ svg {
   white-space: pre-wrap;
 }
 
-.call-tile.local video,
-#mini-call.local video {
+video.mirrored {
   transform: scaleX(-1);
 }
 
@@ -2462,6 +2461,12 @@ svg {
 
 .call-share,
 .call-share details,
+.call-device,
+.call-device details,
+.call-react,
+.call-react details,
+.call-more,
+.call-more details,
 .call-leave,
 .call-leave details {
   position: relative;
@@ -2471,6 +2476,9 @@ svg {
 }
 
 .call-share summary,
+.call-device summary,
+.call-react summary,
+.call-more summary,
 .call-leave summary {
   padding: 6px 10px;
   cursor: pointer;
@@ -2503,6 +2511,10 @@ svg {
 }
 
 .call-share details:not([open]) .share-menu,
+.call-device details:not([open]) .share-menu,
+.call-react details:not([open]) .share-menu,
+.call-more details:not([open]) .share-menu,
+.pip-controls details:not([open]) .share-menu,
 .call-layout-options:not([open]) .share-menu,
 .call-leave details:not([open]) .share-menu {
   display: none;
@@ -2523,4 +2535,246 @@ svg {
   --lane-6: #c4531f;
   --lane-7: #a39512;
   --lane-gray: #8b938e;
+}
+
+.react-menu {
+  grid-auto-flow: column;
+}
+
+.call-hand-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--light);
+}
+
+.call-hand-badge.hidden {
+  display: none;
+}
+
+.roster-hand {
+  margin: 0 8px;
+}
+
+.call-reaction {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  z-index: 3;
+  font-size: 40px;
+  pointer-events: none;
+  animation: reaction-float 3s ease-out forwards;
+}
+
+@keyframes reaction-float {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -160px);
+  }
+}
+
+.call-pip-note:empty {
+  display: none;
+}
+
+.call-keys {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.call-keys dt {
+  color: var(--text);
+}
+
+.call-keys dd {
+  margin: 0;
+}
+
+#pip-call {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--panel);
+}
+
+#pip-call video {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+  background: var(--surface);
+}
+
+#pip-call .avatar-wrap {
+  flex: 1;
+}
+
+#pip-call.speaking::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+  background: #44d47a;
+  pointer-events: none;
+}
+
+.pip-name {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--light);
+}
+
+.pip-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  background: var(--surface);
+}
+
+.call-device .share-menu {
+  left: 0;
+  right: auto;
+}
+
+.call-device-fields,
+.join-defaults,
+.record-defaults {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.call-device-fields [hidden],
+.close-call-chat,
+[data-action='close-sheet'],
+.call-topbar [data-action='people'],
+.call-topbar [data-action='chat'],
+[data-action='switch-camera'] {
+  display: none;
+}
+
+.app:is(
+    [data-call='prejoin'],
+    [data-call='lobby'],
+    [data-call='call']
+  )[data-panel='calls']
+  > .panel {
+  display: flex;
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 35;
+  width: min(400px, 100%);
+  background: var(--surface);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#call-toast {
+  position: fixed;
+  z-index: 36;
+  top: calc(50px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  background: var(--raised);
+  color: var(--light);
+  pointer-events: none;
+}
+
+.phone-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.phone-strip .call-tile {
+  position: absolute;
+}
+
+@media (max-width: 600px), (pointer: coarse) and (max-width: 900px) {
+  .app[data-call='call'] .call-stage,
+  .app[data-call='lobby'] .call-stage,
+  .app[data-call='prejoin'] .call-stage {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+  }
+
+  #prejoin {
+    overflow: auto;
+  }
+
+  .app[data-call='call'] > .sidebar,
+  .app[data-call='call'] .chat-view,
+  .app[data-call='call'] .call-people {
+    display: none;
+  }
+
+  .call-topbar [data-action='people'],
+  .call-topbar [data-action='chat'],
+  [data-action='close-sheet'],
+  [data-action='switch-camera'],
+  .close-call-chat {
+    display: inline-block;
+  }
+
+  .app[data-call='call'][data-call-sheet='people'] .call-people,
+  .app[data-call='call'][data-call-sheet='chat'] .chat-view,
+  .app[data-call='call'][data-panel='calls'] > .panel {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: auto 0 0;
+    height: min(80dvh, 680px);
+    width: 100%;
+    z-index: 32;
+    padding-bottom: var(--safe-bottom);
+    box-shadow: var(--shadow);
+    background: var(--panel);
+  }
+
+  .app:not([data-call-sheet='chat']) .close-call-chat {
+    display: none;
+  }
+
+  .call-controls {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .call-controls .share-menu {
+    position: fixed;
+    inset: auto 8px calc(var(--safe-bottom) + 100px);
+    width: auto;
+    max-height: 60dvh;
+    overflow: auto;
+    z-index: 15;
+  }
 }

@@ -1,12 +1,35 @@
 import { ParticipantVolume } from './call-volume.js';
 import { TileMenu } from './call-tile-menu.js';
 import { statsText } from './call-stats.js';
-import { MediaCapture, CallLevels } from './media.js';
+import { MediaCapture, CallLevels, isMobile } from './media.js';
+import { pausesCameraInBackground } from './media.js';
 import { requestCallNotifications } from './notifications.js';
 import { notificationClient } from './notifications.js';
 import { ViewHints } from './view-hints.js';
 import { CALL_LAYOUTS, STRIP_POSITIONS } from './call-layout.js';
 import { tileId, callLayout } from './call-layout.js';
+import { REACTIONS, REACTION_SHOW_MS, isReaction } from './call-hands.js';
+import { orderOf, rosterOf, createLimiter } from './call-hands.js';
+import { takeReaction, createAutoLower, stepAutoLower } from './call-hands.js';
+import { shortcutOf, isTalkKey, createTalk, stepTalk } from './call-keys.js';
+import { helpOf } from './call-keys.js';
+import {
+  syncFields,
+  settingField,
+  deviceField,
+  fillDevice,
+} from './call-preferences.js';
+import {
+  DEFAULTS,
+  createToast,
+  addToast,
+  showsToast,
+  toastText,
+  TOAST_SHOW_MS,
+} from './call-settings.js';
+
+const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
+const phoneView = () => matchMedia(PHONE).matches;
 
 const LOBBY = 'waiting for an admin to let you in';
 const LOCKED = 'Call is locked';
@@ -19,6 +42,15 @@ const ADMISSION = {
 const TONE_HZ = 440;
 const RING_MS = 1600;
 const RING_PATTERN = [280, 120, 280, 920];
+const PIP_SIZE = { width: 360, height: 300 };
+const PIP_MISSING = 'Picture-in-picture is not available in this browser';
+const HINTS = {
+  mic: 'Mute and unmute (Ctrl D, hold Space to talk)',
+  camera: 'Camera on and off (Ctrl E)',
+  share: 'Share screen and stop (Ctrl Alt S)',
+  hand: 'Raise and lower hand (Ctrl Alt H)',
+  fullscreen: 'Full screen stage (F)',
+};
 
 const ACTIONS = {
   mic: (stage) => stage.toggle('mic'),
@@ -36,6 +68,19 @@ const ACTIONS = {
   'stats-overlay': (stage) => stage.toggleStats(),
   'hide-self': (stage) => stage.toggleView('hideSelf'),
   'hide-no-video': (stage) => stage.toggleView('hideNoVideo'),
+  hand: (stage) => stage.toggleHand(),
+  layout: (stage) => stage.nextLayout(),
+  pip: (stage) => stage.openPip(),
+  'pip-back': (stage) => stage.closePip(true),
+  expand: (stage) => stage.expand(),
+  'switch-camera': (stage) => stage.media?.switchCamera(),
+  people: (stage) => stage.openSheet('people'),
+  chat: (stage) => stage.openSheet('chat'),
+  'close-sheet': (stage) => stage.closeSheet(),
+  settings: (stage) => {
+    stage.closeMenus();
+    stage.hooks.settings();
+  },
 };
 
 const HOST_ACTIONS = {
@@ -55,6 +100,8 @@ const HOST_ACTIONS = {
   demote: (stage, endpoint) => stage.command('demote', endpoint),
   remove: (stage, endpoint) => stage.command('remove', endpoint),
   'mute-all': (stage) => stage.command('muteAll'),
+  'lower-hand': (stage, endpoint) => stage.command('lowerHand', endpoint),
+  'lower-hands': (stage) => stage.command('lowerHands'),
   lock: (stage) => stage.command(stage.locked ? 'unlock' : 'lock'),
   end: (stage) => stage.endForAll(),
   'accept-unmute': (stage) => stage.acceptUnmute(),
@@ -146,26 +193,19 @@ const showTrack = (video, track, mirrored) => {
   if (track) video.play().catch(() => undefined);
 };
 
-const paintPerson = (root, track, name, color) => {
+const paintPerson = (root, track, name, color, mirror) => {
   const video = root.querySelector('video');
   const wrap = root.querySelector('.avatar-wrap');
   const avatar = wrap?.querySelector('.avatar');
   const live = Boolean(track);
   if (video) {
     video.classList.toggle('hidden', !live);
-    showTrack(video, track, root.classList.contains('local'));
+    showTrack(video, track, mirror && root.classList.contains('local'));
   }
   wrap?.classList.toggle('hidden', live);
   if (!avatar || live) return;
   avatar.style.background = color;
   avatar.textContent = initialsOf(name);
-};
-
-const hasOption = (select, value) => {
-  for (const option of select.options) {
-    if (option.value === value) return true;
-  }
-  return false;
 };
 
 const admissionOf = (preview, token) => {
@@ -178,27 +218,6 @@ const admissionOf = (preview, token) => {
   const blocked = action === 'join' && preview.full === true;
   if (blocked) return { action: 'full', reason: FULL };
   return { action, reason: '' };
-};
-
-const fillSelect = (select, devices, selected, noun) => {
-  if (!select) return;
-  select.replaceChildren();
-  const blank = document.createElement('option');
-  blank.value = '';
-  blank.textContent = 'default';
-  select.append(blank);
-  let index = 0;
-  for (const device of devices) {
-    if (device.deviceId === '') continue;
-    const option = document.createElement('option');
-    option.value = device.deviceId;
-    const label = device.label || `${noun} ${index + 1}`;
-    option.textContent = label;
-    select.append(option);
-    index += 1;
-  }
-  const known = selected === '' || hasOption(select, selected);
-  select.value = known ? selected : '';
 };
 
 const createPrejoin = (title, hasNick) => {
@@ -322,7 +341,8 @@ const createHostControls = () => {
   }
   const muteAll = createButton('mute-all', 'Mute all');
   const lock = createButton('lock', 'Lock');
-  box.append(muteAll, lock, policy);
+  const lower = createButton('lower-hands', 'Lower all hands');
+  box.append(muteAll, lower, lock, policy);
   return box;
 };
 
@@ -335,8 +355,100 @@ const createPeople = () => {
   roster.className = 'call-roster';
   const copy = createButton('copy-link', 'copy link');
   copy.classList.add('hidden');
-  aside.append(lobby, roster, createHostControls(), copy);
+  aside.append(
+    createButton('close-sheet', 'close people'),
+    lobby,
+    roster,
+    createHostControls(),
+    copy,
+  );
   return aside;
+};
+
+const createCaptureControl = (name) => {
+  const wrap = document.createElement('div');
+  wrap.className = 'call-device';
+  wrap.append(createButton(name, `${name} on`));
+  const menu = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = '▾';
+  summary.setAttribute('aria-label', `${name} options`);
+  const choices = document.createElement('div');
+  choices.className = 'share-menu';
+  choices.append(deviceField(name));
+  if (name === 'mic') {
+    choices.append(settingField('noise'), settingField('pushToTalk'));
+  } else {
+    choices.append(
+      settingField('mirror'),
+      createButton('switch-camera', 'switch front/back camera'),
+    );
+  }
+  menu.append(summary, choices);
+  wrap.append(menu);
+  return wrap;
+};
+
+const createHand = () => createButton('hand', 'raise hand');
+
+const isControl = (element) =>
+  Boolean(element?.closest?.('button, summary, select, a'));
+
+const pipSupported = () => {
+  const api = globalThis.documentPictureInPicture;
+  return typeof api?.requestWindow === 'function';
+};
+
+const createMore = () => {
+  const wrap = document.createElement('div');
+  wrap.className = 'call-more';
+  const menu = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = 'more';
+  summary.setAttribute('aria-label', 'more options');
+  const choices = document.createElement('div');
+  choices.className = 'share-menu';
+  const pip = createButton('pip', 'picture-in-picture');
+  const note = document.createElement('p');
+  note.className = 'call-pip-note';
+  note.setAttribute('role', 'status');
+  if (!pipSupported()) {
+    pip.disabled = true;
+    note.textContent = PIP_MISSING;
+  }
+  const keys = document.createElement('dl');
+  keys.className = 'call-keys';
+  for (const row of helpOf()) {
+    const name = document.createElement('dt');
+    name.textContent = row.keys;
+    const text = document.createElement('dd');
+    text.textContent = row.label;
+    keys.append(name, text);
+  }
+  choices.append(pip, createButton('settings', 'call settings'), note, keys);
+  menu.append(summary, choices);
+  wrap.append(menu);
+  return wrap;
+};
+
+const createReact = () => {
+  const wrap = document.createElement('div');
+  wrap.className = 'call-react';
+  const menu = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = 'react';
+  summary.setAttribute('aria-label', 'reactions');
+  const choices = document.createElement('div');
+  choices.className = 'share-menu react-menu';
+  for (const emoji of REACTIONS) {
+    const button = createButton('react', emoji);
+    button.dataset.emoji = emoji;
+    button.setAttribute('aria-label', `react ${emoji}`);
+    choices.append(button);
+  }
+  menu.append(summary, choices);
+  wrap.append(menu);
+  return wrap;
 };
 
 const createLeave = () => {
@@ -390,24 +502,45 @@ const createCall = (title) => {
   const heading = document.createElement('span');
   heading.className = 'chat-title';
   heading.textContent = title;
-  bar.append(back, heading, createLayoutControls());
+  bar.append(
+    back,
+    heading,
+    createButton('people', 'people'),
+    createButton('chat', 'chat'),
+    createLayoutControls(),
+  );
   const grid = document.createElement('div');
   grid.className = 'call-grid';
+  const strip = document.createElement('div');
+  strip.className = 'phone-strip';
+  strip.tabIndex = 0;
+  strip.setAttribute('aria-label', 'Other call tiles');
+  strip.setAttribute('role', 'region');
+  strip.hidden = true;
+  grid.append(strip);
   const body = document.createElement('div');
   body.className = 'call-body';
   body.append(grid, createPeople());
   const controls = document.createElement('footer');
   controls.className = 'call-controls';
   controls.append(
-    createButton('mic', 'mic on'),
-    createButton('camera', 'camera on'),
+    createCaptureControl('mic'),
+    createCaptureControl('camera'),
     createLeave(),
   );
-  controls.insertBefore(createShare(), controls.lastElementChild);
+  const leave = controls.lastElementChild;
+  controls.insertBefore(createShare(), leave);
+  controls.insertBefore(createHand(), leave);
+  controls.insertBefore(createReact(), leave);
+  controls.insertBefore(createMore(), leave);
   const note = document.createElement('p');
   note.className = 'call-note hidden';
   note.setAttribute('role', 'status');
   section.append(bar, note, createPrompt(), body, controls);
+  for (const action of Object.keys(HINTS)) {
+    const button = section.querySelector(`[data-action="${action}"]`);
+    if (button) button.title = HINTS[action];
+  }
   return section;
 };
 
@@ -420,9 +553,48 @@ const createMini = () => {
     createButton('mic', 'mic on'),
     createButton('camera', 'camera on'),
     createButton('leave', 'leave'),
+    createButton('expand', 'expand'),
   );
   tile.append(createVideo(true), createAvatar(), controls);
   return tile;
+};
+
+const createPip = () => {
+  const root = document.createElement('div');
+  root.id = 'pip-call';
+  const name = document.createElement('span');
+  name.className = 'pip-name';
+  const controls = document.createElement('div');
+  controls.className = 'pip-controls';
+  const back = createButton('pip-back', '‹');
+  back.setAttribute('aria-label', 'back to the call');
+  const mic = createButton('mic', 'mic on');
+  const camera = createButton('camera', 'camera on');
+  mic.title = HINTS.mic;
+  camera.title = HINTS.camera;
+  controls.append(back, mic, camera, createHand(), createReact());
+  controls.append(createButton('leave', 'leave'));
+  root.append(createVideo(true), createAvatar(), name, controls);
+  return root;
+};
+
+const copyStyles = (target) => {
+  const theme = document.documentElement.dataset.theme;
+  if (theme) target.documentElement.dataset.theme = theme;
+  for (const sheet of document.styleSheets) {
+    try {
+      const rules = Array.from(sheet.cssRules, (rule) => rule.cssText);
+      const style = target.createElement('style');
+      style.textContent = rules.join('\n');
+      target.head.append(style);
+    } catch {
+      if (!sheet.href) continue;
+      const link = target.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = sheet.href;
+      target.head.append(link);
+    }
+  }
 };
 
 const createTile = (endpoint) => {
@@ -442,7 +614,10 @@ const createTile = (endpoint) => {
   stats.className = 'tile-stats hidden';
   const poor = createButton('audio-only', 'Poor connection · try audio only');
   poor.classList.add('call-poor', 'hidden');
+  const hand = document.createElement('span');
+  hand.className = 'call-hand-badge hidden';
   tile.append(createVideo(true), createAvatar(), name, bars, menu, stats, poor);
+  tile.append(hand);
   return tile;
 };
 
@@ -747,6 +922,11 @@ class CallStage {
   #onDenied = null;
   #onRequest = null;
   #onRemoved = null;
+  #onMessage = null;
+  #onKeyUp = null;
+  #onBlur = null;
+  #onClick = null;
+  #onPipClose = null;
 
   constructor(root, hooks) {
     this.root = root;
@@ -792,6 +972,23 @@ class CallStage {
     this.resizeObserver = null;
     this.resizeTimer = null;
     this.trackListeners = new Map();
+    this.hands = new Map();
+    this.preferences = DEFAULTS;
+    this.sheet = '';
+    this.wakeRequest = null;
+    this.wakeLock = null;
+    this.toast = createToast();
+    this.toastTimer = null;
+    this.announcements = null;
+    this.onVisibility = () => this.updateVisibility();
+    this.phone = null;
+    this.onPhone = () => this.updatePhone();
+    this.lowerState = createAutoLower();
+    this.sendLimiter = createLimiter();
+    this.limiters = new Map();
+    this.floats = new Set();
+    this.pip = null;
+    this.talk = createTalk();
     this.#onKey = (event) => this.onKey(event);
     this.#onPhase = (phase) => this.onPhase(phase);
     this.#onTrack = (payload) => this.onRemoteTrack(payload);
@@ -813,6 +1010,11 @@ class CallStage {
       this.onRequest(data).catch((error) => this.hooks.fail(error));
     };
     this.#onRemoved = (data) => this.onRemoved(data);
+    this.#onMessage = (payload) => this.onPeerMessage(payload);
+    this.#onKeyUp = (event) => this.onKeyUp(event);
+    this.#onBlur = () => this.talkStep('blur');
+    this.#onClick = (event) => this.onClick(event);
+    this.#onPipClose = () => this.closePip(false);
   }
 
   attach(session, token, camera = true) {
@@ -835,11 +1037,19 @@ class CallStage {
     this.volume = new ParticipantVolume(this.#onNotice);
     this.tileMenu = new TileMenu(this);
     this.media = new MediaCapture();
-    this.media.cameraOn = camera;
+    this.announcements = document.getElementById('call-announcements');
+    this.phone = matchMedia(PHONE);
+    this.preferences = this.hooks.preferences.settings;
+    this.media.cameraOn = camera && !this.preferences.joinCameraOff;
+    this.media.micOn = !this.preferences.joinMicOff;
+    this.media.noise = this.preferences.noise;
     this.media.onChange = () => this.onMedia();
     this.media.onLevel = (level) => this.paintLevel(level);
     this.levels = new CallLevels(session, this.media, () => this.people);
-    this.levels.on('levels', () => this.paintSpeaking());
+    this.levels.on('levels', () => {
+      this.paintSpeaking();
+      this.checkAutoLower();
+    });
     this.levels.on('speaker', () => this.renderTiles());
     this.levels.on('notice', this.#onNotice);
     session.on('state', this.#onPhase);
@@ -850,12 +1060,22 @@ class CallStage {
     session.on('denied', this.#onDenied);
     session.on('request', this.#onRequest);
     session.on('removed', this.#onRemoved);
+    session.on('message', this.#onMessage);
+    this.hands = new Map();
+    this.lowerState = createAutoLower();
+    this.sendLimiter = createLimiter();
+    this.limiters = new Map();
     this.viewHints = new ViewHints(
       (endpoint, hint) => session.setViewHint(endpoint, hint),
       this.#onNotice,
     );
     this.hooks.listen(this.#onCall);
+    this.talk = createTalk();
     document.addEventListener('keydown', this.#onKey, true);
+    document.addEventListener('keyup', this.#onKeyUp, true);
+    document.addEventListener('visibilitychange', this.onVisibility);
+    this.phone.addEventListener?.('change', this.onPhone);
+    window.addEventListener('blur', this.#onBlur);
     this.#listening = true;
     this.mount('prejoin');
     this.media.openPreview().catch((error) => this.hooks.fail(error));
@@ -863,6 +1083,13 @@ class CallStage {
 
   detach() {
     const session = this.session;
+    this.releaseWake();
+    this.closeSheet();
+    this.hooks.popLayer('call');
+    clearTimeout(this.toastTimer);
+    this.toast = createToast();
+    document.getElementById('call-toast').hidden = true;
+    this.closePip(false);
     if (session) {
       session.off('state', this.#onPhase);
       session.off('track', this.#onTrack);
@@ -872,7 +1099,10 @@ class CallStage {
       session.off('denied', this.#onDenied);
       session.off('request', this.#onRequest);
       session.off('removed', this.#onRemoved);
+      session.off('message', this.#onMessage);
     }
+    for (const timer of this.floats) clearTimeout(timer);
+    this.floats.clear();
     this.tileMenu?.stop();
     this.tileMenu = null;
     this.volume?.stop();
@@ -897,8 +1127,13 @@ class CallStage {
     if (this.#listening) {
       this.hooks.unlisten(this.#onCall);
       document.removeEventListener('keydown', this.#onKey, true);
+      document.removeEventListener('keyup', this.#onKeyUp, true);
+      document.removeEventListener('visibilitychange', this.onVisibility);
+      this.phone.removeEventListener?.('change', this.onPhone);
+      window.removeEventListener('blur', this.#onBlur);
       this.#listening = false;
     }
+    this.talkStep('cancel');
     if (this.media) this.media.stop();
     this.media = null;
     this.session = null;
@@ -939,11 +1174,15 @@ class CallStage {
     this.resizeTimer = null;
     this.host.replaceChildren(view);
     this.root.dataset.call = mode;
+    this.closePip(false);
     this.mini?.remove();
     this.mini = null;
     this.parkAudios();
     if (mode === 'prejoin') this.onMedia();
     if (mode === 'call') {
+      this.updatePhone();
+      this.updateVisibility();
+      this.fillSelects();
       this.levels?.start();
       this.observeLayout();
       this.syncControls();
@@ -970,6 +1209,8 @@ class CallStage {
   collapse() {
     if (this.mode !== 'call') return;
     this.tileMenu?.close(false);
+    this.closeSheet();
+    this.hooks.popLayer('call');
     this.mode = 'mini';
     this.resizeObserver?.disconnect();
     clearInterval(this.resizeTimer);
@@ -987,6 +1228,87 @@ class CallStage {
     this.hooks.changed();
   }
 
+  updatePhone() {
+    if (this.mode !== 'call') return;
+    if (phoneView()) {
+      this.hooks.pushLayer('call');
+    } else {
+      this.closeSheet();
+      this.hooks.popLayer('call');
+    }
+    this.renderTiles();
+  }
+
+  openSheet(name) {
+    if (!phoneView() || this.mode !== 'call') return;
+    this.sheet = name;
+    this.root.dataset.callSheet = name;
+    this.hooks.pushLayer('callSheet');
+    const close =
+      name === 'people'
+        ? this.host.querySelector('.call-people button')
+        : this.root.querySelector('.close-call-chat');
+    close?.focus();
+  }
+
+  hideSheet() {
+    if (!this.sheet) return;
+    const trigger = this.host?.querySelector(`[data-action="${this.sheet}"]`);
+    this.sheet = '';
+    delete this.root.dataset.callSheet;
+    trigger?.focus();
+  }
+
+  closeSheet() {
+    if (!this.sheet) return;
+    this.hideSheet();
+    this.hooks.popLayer('callSheet');
+  }
+
+  releaseWake() {
+    this.wakeRequest = null;
+    if (this.wakeLock) this.wakeLock.release().catch(() => undefined);
+    this.wakeLock = null;
+  }
+
+  async updateVisibility() {
+    if (document.hidden) this.talkStep('blur');
+    const active = this.mode === 'call' || this.mode === 'mini';
+    if (!active) return;
+    if (pausesCameraInBackground()) {
+      this.media
+        ?.setCameraPaused(document.hidden)
+        .catch((error) => this.hooks.fail(error));
+    }
+    if (document.hidden || !(isMobile() || phoneView())) {
+      return void this.releaseWake();
+    }
+    if (this.wakeRequest || this.wakeLock) return;
+    if (!navigator.wakeLock?.request) {
+      this.#onNotice('Screen wake lock unavailable in this browser.');
+      return;
+    }
+    const request = navigator.wakeLock.request('screen');
+    this.wakeRequest = request;
+    try {
+      const lock = await request;
+      if (request !== this.wakeRequest) {
+        await lock.release();
+        return;
+      }
+      this.wakeLock = lock;
+      lock.addEventListener('release', () => {
+        if (this.wakeLock === lock) this.wakeLock = null;
+      });
+    } catch {
+      if (this.wakeRequest === request) {
+        this.#onNotice('Could not keep the screen awake.');
+      }
+    } finally {
+      if (this.wakeRequest === request) this.wakeRequest = null;
+    }
+  }
+
   expand() {
     if (this.mode !== 'mini') return;
     this.showCall();
@@ -994,6 +1316,7 @@ class CallStage {
 
   onMiniClick(event) {
     const button = event.target.closest('[data-action]');
+    if (button && event.detail > 0) button.blur();
     if (button) return void this.onAction(button.dataset.action);
     this.expand();
   }
@@ -1028,23 +1351,65 @@ class CallStage {
 
   onKey(event) {
     if (event.isComposing) return;
+    if (event.key === 'Escape' && this.root.dataset.panel === 'calls') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.hooks.closeSettings();
+      return;
+    }
     if (event.key === 'Escape' && this.tileMenu?.menu.isOpen) {
       event.preventDefault();
       event.stopImmediatePropagation();
       this.tileMenu.close();
       return;
     }
+    if (event.key === 'Escape' && this.closeMenus()) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    if (event.key === 'Escape' && this.sheet) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.closeSheet();
+      return;
+    }
     if (this.tileMenu?.menu.contains(event.target)) return;
+    if (this.mode === 'prejoin' && event.target.closest?.('#panel')) return;
     if (this.mode === 'prejoin') return void this.onPrejoinKey(event);
-    if (this.mode !== 'call') return;
-    if (this.hooks.isText(event.target)) return;
+    if (this.mode !== 'call' && this.mode !== 'mini') return;
     this.onCallKey(event);
+  }
+
+  onKeyUp(event) {
+    const isSpace = event.code === 'Space' || event.key === ' ';
+    if (!isSpace || !this.talk.held) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.talkStep('up');
+  }
+
+  closeMenus() {
+    const roots = [this.host, this.mini, this.pip?.root];
+    let closed = false;
+    for (const root of roots) {
+      const open = root ? root.querySelectorAll('details[open]') : [];
+      for (const menu of open) {
+        const summary = menu.querySelector('summary');
+        const inside = menu.contains(menu.ownerDocument.activeElement);
+        menu.open = false;
+        closed = true;
+        if (inside) summary?.focus();
+      }
+    }
+    return closed;
   }
 
   onPrejoinKey(event) {
     const isEsc = event.key === 'Escape';
     const isEnter = event.key === 'Enter' && !event.isComposing;
     if (!isEsc && !isEnter) return;
+    if (isEnter && isControl(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     if (isEsc) this.cancel();
@@ -1052,23 +1417,40 @@ class CallStage {
   }
 
   onCallKey(event) {
-    const command = event.ctrlKey || event.metaKey;
-    const key = event.key.toLowerCase();
-    const isFullscreen = key === 'f' && !command && !event.altKey;
-    const isLayout = key === 'l' && event.ctrlKey && event.altKey;
-    if (isFullscreen || isLayout) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (isFullscreen) this.fullscreen();
-      else this.nextLayout();
+    const typing = this.hooks.isText(event.target);
+    if (isTalkKey(event)) return void this.onTalkKey(event, typing);
+    const row = shortcutOf(event);
+    if (!row || (typing && !row.command)) return;
+    const stage = this.mode === 'call';
+    if (!stage && (row.action === 'fullscreen' || row.action === 'layout')) {
       return;
     }
-    if (!command || event.altKey) return;
-    if (key !== 'd' && key !== 'e') return;
     event.preventDefault();
     event.stopPropagation();
-    const kind = key === 'd' ? 'mic' : 'camera';
-    this.toggle(kind);
+    this.onAction(row.action);
+  }
+
+  onTalkKey(event, typing) {
+    if (!this.preferences.pushToTalk || typing || isControl(event.target)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+    this.talkStep('down');
+  }
+
+  talkStep(kind) {
+    const media = this.media;
+    if (!media) {
+      this.talk = createTalk();
+      return;
+    }
+    const step = stepTalk(this.talk, kind, media.micOn);
+    this.talk = step.state;
+    if (!step.unmute && !step.mute) return;
+    media.resume();
+    media.toggleMic().catch((error) => this.hooks.fail(error));
   }
 
   async join() {
@@ -1131,6 +1513,7 @@ class CallStage {
   async toggle(kind) {
     const media = this.media;
     if (!media) return;
+    if (kind === 'mic') this.talkStep('cancel');
     media.resume();
     if (kind === 'mic') await media.toggleMic();
     else await media.toggleCamera();
@@ -1162,10 +1545,21 @@ class CallStage {
       const screen = item.screen === true;
       const mic = item.mic !== false;
       const admin = item.admin === true;
+      const hand = item.hand > 0 ? item.hand : 0;
       if (endpoint === this.session.endpoint) isAdmin = admin;
-      people.push({ endpoint, nick, peer, camera, screen, mic, admin });
+      const person = { endpoint, nick, peer, camera, screen, mic };
+      people.push({
+        ...person,
+        admin,
+        hand,
+        recording: item.recording === true,
+      });
+    }
+    if (this.mode === 'call' || this.mode === 'mini') {
+      this.announceChanges(people);
     }
     this.people = people;
+    this.hands = orderOf(people);
     this.isAdmin = isAdmin;
     this.hostPeer = typeof state.host === 'string' ? state.host : '';
     this.policy = typeof state.policy === 'string' ? state.policy : '';
@@ -1179,6 +1573,7 @@ class CallStage {
       const tracks = this.remote.get(endpoint);
       for (const track of Object.values(tracks)) this.unwatchTrack(track);
       this.remote.delete(endpoint);
+      this.limiters.delete(endpoint);
       this.quality.delete(endpoint);
       this.stats.delete(endpoint);
       this.statsShown.delete(endpoint);
@@ -1202,6 +1597,54 @@ class CallStage {
     }
     this.paintPeople();
     this.paintKnocks();
+  }
+
+  announceChanges(people) {
+    const previous = new Map(
+      this.people.map((person) => [person.endpoint, person]),
+    );
+    const membership = [];
+    const lines = [];
+    for (const person of people) {
+      const { endpoint, hand, recording, admin } = person;
+      const nick = person.nick || 'guest';
+      const before = previous.get(endpoint);
+      previous.delete(endpoint);
+      const local = endpoint === this.session.endpoint;
+      if (!before && !local) membership.push({ kind: 'join', nick });
+      if (hand && !before?.hand) lines.push(`${nick} raised a hand`);
+      if (before?.hand && !hand && local) lines.push('Your hand was lowered');
+      if (before && local && before.admin !== admin) {
+        lines.push(
+          admin ? 'You are now a call admin' : 'You are no longer a call admin',
+        );
+      }
+      if (recording !== Boolean(before?.recording)) {
+        lines.push(`${nick} ${recording ? 'started' : 'stopped'} recording`);
+      }
+    }
+    for (const person of previous.values()) {
+      if (person.endpoint === this.session.endpoint) continue;
+      membership.push({ kind: 'leave', nick: person.nick });
+      if (person.recording) lines.push(`${person.nick} stopped recording`);
+    }
+    if (membership.length) {
+      let recent = createToast();
+      const now = performance.now();
+      for (const event of membership) {
+        recent = addToast(recent, event, now);
+        this.toast = addToast(this.toast, event, now);
+      }
+      lines.unshift(toastText(recent));
+      const toast = document.getElementById('call-toast');
+      toast.hidden = !showsToast(Math.max(this.people.length, people.length));
+      toast.textContent = toastText(this.toast);
+      clearTimeout(this.toastTimer);
+      this.toastTimer = setTimeout(() => {
+        toast.hidden = true;
+      }, TOAST_SHOW_MS);
+    }
+    if (lines.length) this.announcements.textContent = lines.join('. ');
   }
 
   restoreRemote() {
@@ -1326,7 +1769,7 @@ class CallStage {
     const live = session.phase === 'joined' || session.phase === 'reconnecting';
     if (!live) return;
     const mic = media.micOn;
-    const camera = media.cameraOn;
+    const camera = media.cameraOn && !media.cameraPaused;
     const screen = media.screenShared && Boolean(media.screenTrack);
     await this.hooks.update({ mic, camera, screen });
   }
@@ -1336,19 +1779,7 @@ class CallStage {
     const host = document.createElement('div');
     host.className = 'call-stage';
     this.hooks.before(host);
-    host.addEventListener('click', (event) => {
-      if (this.soundBlocked) this.resumeAudio();
-      const button = event.target.closest('[data-action]');
-      if (!button) return;
-      if (button.dataset.action === 'tile-menu') {
-        const tile = button.closest('.call-tile');
-        this.tileMenu?.toggle(tile, button);
-        return;
-      }
-      const endpoint = button.closest('[data-endpoint]')?.dataset.endpoint;
-      const slot = button.closest('[data-slot]')?.dataset.slot ?? 'camera';
-      this.onAction(button.dataset.action, endpoint, slot);
-    });
+    host.addEventListener('click', this.#onClick);
     host.addEventListener(
       'click',
       (event) => {
@@ -1373,6 +1804,27 @@ class CallStage {
     this.host = host;
   }
 
+  onClick(event) {
+    if (this.soundBlocked) this.resumeAudio();
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    if (button.dataset.action === 'tile-menu') {
+      const tile = button.closest('.call-tile');
+      this.tileMenu?.toggle(tile, button);
+      return;
+    }
+    if (event.detail > 0) button.blur();
+    if (button.dataset.action === 'react') {
+      this.react(button.dataset.emoji);
+      const menu = button.closest('details');
+      if (menu) menu.open = false;
+      return;
+    }
+    const endpoint = button.closest('[data-endpoint]')?.dataset.endpoint;
+    const slot = button.closest('[data-slot]')?.dataset.slot ?? 'camera';
+    this.onAction(button.dataset.action, endpoint, slot);
+  }
+
   viewOf(mode, title) {
     if (mode === 'prejoin') return createPrejoin(title, this.hooks.hasNick());
     if (mode === 'lobby') return createLobby();
@@ -1381,6 +1833,10 @@ class CallStage {
 
   onDevice(event) {
     const select = event.target;
+    if (select.dataset.setting || select.dataset.device) {
+      this.hooks.preferences.change(select);
+      return;
+    }
     if (select.id === 'call-policy') {
       this.command('policy', '', select.value);
       return;
@@ -1401,11 +1857,23 @@ class CallStage {
     const media = this.media;
     const host = this.host;
     if (!media || !host) return;
+    fillDevice(
+      host.querySelector('[data-device="camera"]'),
+      media.cameras,
+      media.cameraId,
+      'camera',
+    );
+    fillDevice(
+      host.querySelector('[data-device="mic"]'),
+      media.mics,
+      media.micId,
+      'mic',
+    );
     const camera = host.querySelector('#prejoin-camera');
     const mic = host.querySelector('#prejoin-mic');
-    fillSelect(camera, media.cameras, media.cameraId, 'camera');
-    fillSelect(mic, media.mics, media.micId, 'microphone');
-    fillSelect(
+    fillDevice(camera, media.cameras, media.cameraId, 'camera');
+    fillDevice(mic, media.mics, media.micId, 'microphone');
+    fillDevice(
       host.querySelector('#prejoin-speaker'),
       media.speakers,
       media.speakerId,
@@ -1416,7 +1884,7 @@ class CallStage {
   }
 
   syncControls() {
-    const roots = [this.host, this.mini];
+    const roots = [this.host, this.mini, this.pip?.root];
     for (const root of roots) {
       if (root) this.paintButtons(root);
     }
@@ -1451,6 +1919,13 @@ class CallStage {
       button.classList.toggle('off', !media.micOn);
       button.classList.toggle('warn', media.micMissing);
     }
+    const raised = this.isHandRaised();
+    for (const button of root.querySelectorAll('[data-action="hand"]')) {
+      button.textContent = raised ? 'lower hand' : 'raise hand';
+      button.classList.toggle('off', !raised);
+      button.setAttribute('aria-pressed', raised ? 'true' : 'false');
+    }
+    syncFields(root, this.preferences);
     const cameras = root.querySelectorAll('[data-action="camera"]');
     for (const button of cameras) {
       button.textContent = media.cameraOn ? 'camera on' : 'camera off';
@@ -1506,7 +1981,7 @@ class CallStage {
     preview.classList.toggle('local', true);
     const nick = this.hooks.nick() || 'you';
     const color = colorOf(this.session?.endpoint);
-    paintPerson(preview, live, nick, color);
+    paintPerson(preview, live, nick, color, this.preferences.mirror);
   }
 
   showNote(text) {
@@ -1522,6 +1997,11 @@ class CallStage {
     const unavailable = this.media && !this.media.canScreen;
     const message = unavailable ? 'Screen capture is unavailable.' : '';
     const notices = [...this.qualityNotices];
+    const strong = this.preferences.noise === 'strong';
+    const supported = navigator.mediaDevices?.getSupportedConstraints?.();
+    if (strong && !supported?.voiceIsolation) {
+      notices.push('Strong noise suppression unavailable. Using standard.');
+    }
     const parts = [reason, this.mediaNote, message, ...notices];
     const value = parts.filter(Boolean).join(' ');
     note.textContent = value;
@@ -1588,6 +2068,102 @@ class CallStage {
     }
   }
 
+  isHandRaised() {
+    const endpoint = this.session?.endpoint;
+    return this.personOf(endpoint)?.hand > 0;
+  }
+
+  async setHand(value) {
+    const session = this.session;
+    if (!session) return;
+    await this.hooks.update({ hand: value });
+  }
+
+  toggleHand() {
+    return this.setHand(!this.isHandRaised());
+  }
+
+  applyPreferences(settings) {
+    if (!settings.pushToTalk) this.talkStep('up');
+    this.preferences = settings;
+    this.lowerState = createAutoLower();
+    this.media
+      ?.setNoise(settings.noise)
+      .catch((error) => this.hooks.fail(error));
+    this.syncControls();
+    this.paintPreview();
+    this.paintNote();
+    this.renderTiles();
+  }
+
+  checkAutoLower() {
+    const endpoint = this.session?.endpoint;
+    if (!endpoint) return;
+    const entry = this.levels?.state.participants.get(endpoint);
+    const speaking = entry?.speaking === true;
+    const raised = this.isHandRaised();
+    const input = { enabled: this.preferences.autoLower, raised, speaking };
+    const step = stepAutoLower(this.lowerState, input, performance.now());
+    this.lowerState = step.state;
+    if (!step.lower) return;
+    this.setHand(false).catch((error) => this.hooks.fail(error));
+  }
+
+  react(emoji) {
+    const session = this.session;
+    if (!session || !isReaction(emoji)) return false;
+    if (!takeReaction(this.sendLimiter, performance.now())) return false;
+    this.showReaction(session.endpoint, emoji);
+    const message = { type: 'reaction', emoji };
+    for (const person of this.people) {
+      if (person.endpoint !== session.endpoint) {
+        session.send(person.endpoint, message);
+      }
+    }
+    return true;
+  }
+
+  onPeerMessage(payload) {
+    const endpoint = payload?.endpoint;
+    const message = payload?.message;
+    if (message?.type !== 'reaction' || !isReaction(message.emoji)) return;
+    if (!this.personOf(endpoint)) return;
+    let limiter = this.limiters.get(endpoint);
+    if (!limiter) {
+      limiter = createLimiter();
+      this.limiters.set(endpoint, limiter);
+    }
+    if (!takeReaction(limiter, performance.now())) return;
+    this.showReaction(endpoint, message.emoji);
+  }
+
+  floatOn(target, text) {
+    const float = document.createElement('span');
+    float.className = 'call-reaction';
+    float.textContent = text;
+    float.setAttribute('aria-hidden', 'true');
+    target.append(float);
+    const timer = setTimeout(() => {
+      this.floats.delete(timer);
+      float.remove();
+    }, REACTION_SHOW_MS);
+    this.floats.add(timer);
+  }
+
+  showReaction(endpoint, emoji) {
+    if (this.mode === 'mini') {
+      const root = this.pip ? this.pip.root : this.mini;
+      if (!root) return;
+      const own = root.dataset.endpoint === endpoint;
+      const text = own ? emoji : `${emoji} ${this.nameOf(endpoint)}`;
+      return void this.floatOn(root, text);
+    }
+    const tiles = this.host?.querySelectorAll('.call-tile:not(.screen-tile)');
+    for (const tile of tiles ?? []) {
+      if (tile.dataset.endpoint === endpoint) this.floatOn(tile, emoji);
+    }
+  }
+
   async acceptUnmute() {
     this.prompt = '';
     this.paintPrompt();
@@ -1602,6 +2178,7 @@ class CallStage {
     const nick = this.nickOf(data.by);
     if (data.action === 'unmute') {
       this.prompt = `${nick} asks you to unmute`;
+      this.announcements.textContent = this.prompt;
       this.paintPrompt();
       return;
     }
@@ -1612,12 +2189,12 @@ class CallStage {
     if (data.action === 'stopScreen') this.forceStopScreen();
     this.prompt = '';
     this.paintPrompt();
-    this.hooks.notice?.(text(nick));
+    this.hooks.notice?.(text(nick), this.announcements);
   }
 
   onRemoved(data) {
     const nick = this.nickOf(data?.by);
-    this.hooks.notice?.(`removed by ${nick}`);
+    this.hooks.notice?.(`removed by ${nick}`, this.announcements);
   }
 
   async forceMute() {
@@ -1709,9 +2286,21 @@ class CallStage {
   paintRoster(aside) {
     const list = aside.querySelector('.call-roster');
     list.replaceChildren();
-    for (const person of this.people) {
+    for (const person of rosterOf(this.people)) {
       const item = document.createElement('li');
-      item.textContent = person.nick || person.endpoint;
+      item.dataset.endpoint = person.endpoint;
+      const name = document.createElement('span');
+      name.textContent = person.nick || person.endpoint;
+      item.append(name);
+      const order = this.hands.get(person.endpoint);
+      if (order) {
+        const hand = document.createElement('span');
+        hand.className = 'roster-hand';
+        hand.textContent = `✋ ${order}`;
+        hand.setAttribute('aria-label', `hand raised, number ${order}`);
+        item.append(hand);
+        if (this.isAdmin) item.append(createButton('lower-hand', 'lower'));
+      }
       list.append(item);
     }
   }
@@ -1875,6 +2464,7 @@ class CallStage {
     const result = callLayout(people, {
       width: Math.max(0, grid.clientWidth - 16),
       height: Math.max(0, grid.clientHeight - 16),
+      mobile: phoneView(),
       self: this.session?.endpoint,
       layout: this.layout,
       strip: this.strip,
@@ -1886,15 +2476,23 @@ class CallStage {
     });
     const placed = new Map(result.tiles.map((tile) => [tile.id, tile]));
     grid.dataset.layout = result.layout;
+    const tray = grid.querySelector('.phone-strip');
+    tray.hidden = !result.strip;
+    if (result.strip) {
+      tray.style.top = `${result.strip.y + 8}px`;
+      tray.style.height = `${result.strip.height}px`;
+    }
     for (const tile of grid.querySelectorAll('.call-tile')) {
       const id = tileId(tile.dataset.endpoint, tile.dataset.slot);
       const position = placed.get(id);
       tile.hidden = !position;
       tile.classList.toggle('pinned', id === this.pin);
       tile.classList.toggle('featured', position?.featured === true);
+      const parent = position?.strip ? tray : grid;
+      if (tile.parentNode !== parent) parent.append(tile);
       if (!position) continue;
       tile.style.left = `${position.x + 8}px`;
-      tile.style.top = `${position.y + 8}px`;
+      tile.style.top = `${position.y + (position.strip ? 0 : 8)}px`;
       tile.style.width = `${position.width}px`;
       tile.style.height = `${position.height}px`;
     }
@@ -1925,14 +2523,15 @@ class CallStage {
     for (const tile of tiles) {
       this.paintSpeakingTile(tile, tile.dataset.endpoint);
     }
-    if (this.mini) {
-      this.paintSpeakingTile(this.mini, this.mini.dataset.endpoint);
+    for (const root of this.miniRoots()) {
+      this.paintSpeakingTile(root, root.dataset.endpoint);
     }
   }
 
   updateViewHints() {
-    const root = this.mode === 'mini' ? this.mini : this.host;
-    const tiles = root ? [...root.querySelectorAll('.call-tile')] : [];
+    const mini = this.pip ? this.pip.root : this.mini;
+    const root = this.mode === 'mini' ? mini : this.host;
+    const tiles = root ? Array.from(root.querySelectorAll('.call-tile')) : [];
     if (this.mode === 'mini' && root) tiles.push(root);
     const remote = tiles.filter((tile) => {
       const endpoint = tile.dataset.endpoint;
@@ -1956,17 +2555,30 @@ class CallStage {
     tile.dataset.slot = 'camera';
     const name = this.nameOf(endpoint);
     const color = colorOf(endpoint);
-    paintPerson(tile, this.videoTrack(endpoint), name, color);
+    paintPerson(
+      tile,
+      this.videoTrack(endpoint),
+      name,
+      color,
+      this.preferences.mirror,
+    );
     const chip = tile.querySelector('.call-name');
     const mic = local
       ? this.media?.micOn
       : this.people.find((person) => person.endpoint === endpoint)?.mic;
-    if (chip) chip.textContent = `${name} · mic ${mic ? 'on' : 'off'}`;
+    const paused = local && this.media?.cameraOn && this.media?.cameraPaused;
+    const status = paused ? ' · camera paused' : '';
+    if (chip) chip.textContent = `${name} · mic ${mic ? 'on' : 'off'}${status}`;
     const poor =
       !local &&
       this.quality.get(endpoint)?.poor === true &&
       !this.session?.isAudioOnly(endpoint);
     tile.querySelector('.call-poor').classList.toggle('hidden', !poor);
+    const badge = tile.querySelector('.call-hand-badge');
+    const order = this.hands.get(endpoint);
+    badge.classList.toggle('hidden', !order);
+    badge.textContent = order ? `✋ ${order}` : '';
+    if (order) badge.setAttribute('aria-label', `hand raised, number ${order}`);
   }
 
   peerOf(endpoint) {
@@ -2065,17 +2677,72 @@ class CallStage {
     }
   }
 
+  miniRoots() {
+    const roots = [];
+    if (this.mini) roots.push(this.mini);
+    if (this.pip) roots.push(this.pip.root);
+    return roots;
+  }
+
   paintMini() {
-    const mini = this.mini;
-    if (!mini || !this.session) return;
+    if (!this.session) return;
     const endpoint = this.featured();
-    mini.dataset.endpoint = endpoint;
     const local = endpoint === this.session.endpoint;
-    mini.classList.toggle('local', local);
     const name = this.nameOf(endpoint);
     const color = colorOf(endpoint);
-    paintPerson(mini, this.videoTrack(endpoint), name, color);
-    this.paintSpeakingTile(mini, endpoint);
+    for (const root of this.miniRoots()) {
+      root.dataset.endpoint = endpoint;
+      root.classList.toggle('local', local);
+      paintPerson(
+        root,
+        this.videoTrack(endpoint),
+        name,
+        color,
+        this.preferences.mirror,
+      );
+      this.paintSpeakingTile(root, endpoint);
+      const chip = root.querySelector('.pip-name');
+      if (chip) chip.textContent = name;
+    }
+  }
+
+  async openPip() {
+    if (this.pip || !this.session) return;
+    const api = globalThis.documentPictureInPicture;
+    if (!pipSupported()) return void this.hooks.notice?.(PIP_MISSING);
+    const popup = await api.requestWindow(PIP_SIZE);
+    if (!this.session || this.pip) return void popup.close();
+    const root = createPip();
+    copyStyles(popup.document);
+    popup.document.body.append(root);
+    root.addEventListener('click', this.#onClick);
+    popup.document.addEventListener('keydown', this.#onKey, true);
+    popup.document.addEventListener('keyup', this.#onKeyUp, true);
+    popup.addEventListener('blur', this.#onBlur);
+    popup.addEventListener('pagehide', this.#onPipClose);
+    this.pip = { window: popup, root };
+    if (this.mode === 'call') this.collapse();
+    this.mini?.classList.add('hidden');
+    this.syncControls();
+    this.paintMini();
+    this.updateViewHints();
+  }
+
+  closePip(expand) {
+    const pip = this.pip;
+    if (!pip) return;
+    this.pip = null;
+    this.talkStep('blur');
+    const popup = pip.window;
+    popup.removeEventListener('pagehide', this.#onPipClose);
+    popup.removeEventListener('blur', this.#onBlur);
+    popup.document.removeEventListener('keydown', this.#onKey, true);
+    popup.document.removeEventListener('keyup', this.#onKeyUp, true);
+    pip.root.removeEventListener('click', this.#onClick);
+    popup.close();
+    this.mini?.classList.remove('hidden');
+    if (expand) return void this.expand();
+    this.updateViewHints();
   }
 
   tileList() {

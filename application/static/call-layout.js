@@ -2,6 +2,9 @@ const CALL_LAYOUTS = ['auto', 'grid', 'spotlight', 'sidebar'];
 const STRIP_POSITIONS = ['bottom', 'top', 'left', 'right'];
 const TILE_ASPECT = 16 / 9;
 const GAP = 8;
+const STRIP_RATIO = 0.22;
+const STRIP_MAX = 120;
+const STRIP_ASPECT = 4 / 3;
 
 const bestGrid = (count, width, height) => {
   const gap = Math.min(GAP, width / count, height / count);
@@ -50,6 +53,42 @@ const gridTiles = (tiles, bounds) => {
   return result;
 };
 
+const featuredOf = (tiles, hints) => {
+  for (const id of hints) {
+    const found = tiles.find((tile) => tile.id === id);
+    if (found) return found;
+  }
+  return tiles[0];
+};
+
+const phoneTiles = (tiles, featured, bounds) => {
+  const { width, height } = bounds;
+  const stripHeight = Math.min(height * STRIP_RATIO, STRIP_MAX);
+  const stripWidth = stripHeight * STRIP_ASPECT;
+  const mainHeight = Math.max(0, height - stripHeight - GAP);
+  const main = { x: 0, y: 0, width, height: mainHeight, featured: true };
+  const placed = [{ ...featured, ...main }];
+  const others = tiles.filter((tile) => tile !== featured);
+  for (let index = 0; index < others.length; index++) {
+    placed.push({
+      ...others[index],
+      x: index * (stripWidth + GAP),
+      y: 0,
+      width: stripWidth,
+      height: stripHeight,
+      featured: false,
+      strip: true,
+    });
+  }
+  const strip = {
+    x: 0,
+    y: mainHeight + GAP,
+    width,
+    height: stripHeight,
+  };
+  return { layout: 'phone', tiles: placed, strip };
+};
+
 const tileId = (endpoint, slot = 'camera') => `${endpoint}/${slot}`;
 
 const callLayout = (people, options = {}) => {
@@ -83,7 +122,9 @@ const callLayout = (people, options = {}) => {
     );
     layout = screens.length || hasFocus ? 'spotlight' : 'grid';
   }
-  if (layout === 'grid' || tiles.length < 2) {
+  const phone = options.mobile === true;
+  const flat = layout === 'grid' && !phone;
+  if (flat || tiles.length < 2) {
     return { layout, tiles: gridTiles(tiles, bounds) };
   }
   const hints = [
@@ -92,12 +133,8 @@ const callLayout = (people, options = {}) => {
     requested === 'auto' ? screens[0]?.id : '',
     tileId(options.speaker ?? ''),
   ];
-  let featured = null;
-  for (const id of hints) {
-    featured = tiles.find((tile) => tile.id === id) ?? null;
-    if (featured) break;
-  }
-  featured ??= tiles[0];
+  const featured = featuredOf(tiles, hints);
+  if (phone) return phoneTiles(tiles, featured, bounds);
   const others = tiles.filter((tile) => tile !== featured);
   const position = STRIP_POSITIONS.includes(options.strip)
     ? options.strip
