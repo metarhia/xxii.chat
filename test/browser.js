@@ -164,7 +164,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await wait(second, badge);
   });
 
-  await t.test('replies quote in place and open a thread', async () => {
+  await t.test('replies quote in place and focus a conversation', async () => {
     await focus(first);
     const id = await run(first, `return ${findText('in dev chat')};`);
     const message = `.message[data-id="${id}"]`;
@@ -196,18 +196,24 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
         && quote?.querySelector('.quote-text').textContent === 'in dev chat';`;
     await wait(first, quoted);
     const count = `return document.querySelector('${message} .replies .count')
-      ?.textContent === '1 reply';`;
+      ?.textContent === '1';`;
     await wait(first, count);
     await run(first, `document.querySelector('${message} .replies').click();`);
     const opened = `const items = app.messageList.querySelectorAll('.message');
-      return app.thread === '${id}' && items.length === 2
-        && !app.backBtn.classList.contains('hidden')
-        && app.chatInfo.textContent === 'thread · 1 reply'
-        && document.querySelector('${reply} .quote').classList
+      const dim = app.messageList.querySelectorAll('.dim').length;
+      return app.focus?.root === '${id}' && app.chatInfo.textContent !== ''
+        && app.focusPosition.textContent === '2 of 2'
+        && app.backBtn.classList.contains('hidden')
+        && items.length === 2 && dim === 0
+        && !document.querySelector('${reply} .quote').classList
           .contains('hidden');`;
     await wait(first, opened);
     await run(first, `${press('Escape')} return true;`);
-    await wait(first, `return app.thread === '';`);
+    await wait(
+      first,
+      `return app.focus === null
+      && !document.querySelector('.dim');`,
+    );
     await run(first, `app.togglePanel('pins'); return true;`);
     await wait(
       first,
@@ -263,7 +269,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
       const details = `const links = document.querySelectorAll(
         '.post-article .outline button');
       const outline = [...links].map((item) => item.textContent).join('|');
-      return app.thread === '${postId}'
+      return app.article === '${postId}'
         && app.chatInfo.textContent === 'post · 0 replies'
         && outline === '→ Intro|→ Next steps';`;
       await wait(second, details);
@@ -287,7 +293,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
       app.saveDescription();
       return true;`,
       );
-      await run(second, 'app.closeThread(); return true;');
+      await run(second, 'app.closeArticle(); return true;');
       await wait(
         second,
         'app.render(); return app.chatInfo.textContent === "team news";',
@@ -369,7 +375,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     );
   });
 
-  await t.test('touch: swipe replies, long press lifts the menu', async () => {
+  await t.test('touch: swipe right replies, long press lifts', async () => {
     await focus(first);
     const lastMessage = `const list = app.messageList;
       const items = list.querySelectorAll('.message');
@@ -379,10 +385,10 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await run(
       first,
       `${lastMessage}
-      ${touch('pointerdown', 300, 'y')}
-      ${touch('pointermove', 280, 'y')}
-      ${touch('pointermove', 200, 'y')}
-      ${touch('pointerup', 200, 'y')}
+      ${touch('pointerdown', 100, 'y')}
+      ${touch('pointermove', 120, 'y')}
+      ${touch('pointermove', 180, 'y')}
+      ${touch('pointerup', 180, 'y')}
       return true;`,
     );
     const quote = `return !app.replyBar.classList.contains('hidden')

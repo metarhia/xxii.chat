@@ -217,3 +217,30 @@ test('activityOf uses the call timestamp', async () => {
   assert.equal(activity.get('room'), 40);
   assert.equal(activity.get('lobby'), 70);
 });
+
+test('validate accepts quote only with replyTo, 300 chars', async () => {
+  const { validate, createMessage } = await load();
+  const base = {
+    chat: lww('room'),
+    author: lww('ada'),
+    nick: lww('Ada'),
+    content: lww('hi'),
+    timestamp: lww(10),
+  };
+  const check = (data) => validate({ entity: 'message', data });
+  const replyTo = lww('m1');
+  assert.equal(check({ ...base, replyTo, quote: lww('part') }), true);
+  assert.equal(check({ ...base, quote: lww('part') }), false);
+  assert.equal(check({ ...base, replyTo, quote: lww('x'.repeat(300)) }), true);
+  assert.equal(check({ ...base, replyTo, quote: lww('x'.repeat(301)) }), false);
+  assert.equal(check({ ...base, replyTo }), true);
+  const store = replica();
+  const message = { id: 'm2', chat: 'room', author: 'a', nick: 'A' };
+  const fields = { ...message, content: 'x', timestamp: 1, replyTo: 'm1' };
+  createMessage(store, fields);
+  assert.equal(Object.hasOwn(store.get('m2'), 'quote'), false);
+  createMessage(store, { ...fields, id: 'm3', quote: 'part' });
+  assert.equal(store.get('m3').quote, 'part');
+  createMessage(store, { ...fields, id: 'm4', replyTo: '', quote: 'part' });
+  assert.equal(Object.hasOwn(store.get('m4'), 'quote'), false);
+});

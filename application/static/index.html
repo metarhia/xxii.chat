@@ -144,6 +144,13 @@
               ‹
             </button>
             <span id="chat-title" class="chat-title">!general</span>
+            <button
+              id="mine-btn"
+              class="link-btn mine hidden"
+              type="button"
+              data-action="mine"
+              title="Next unread reply to you"
+            ></button>
             <span id="chat-info" class="description"></span>
             <form id="topic-form" class="topic-form hidden">
               <input
@@ -196,6 +203,44 @@
             <span id="jump-count" class="jump-count hidden"></span>
           </button>
         </div>
+        <button
+          id="back-pill"
+          class="jump back hidden"
+          type="button"
+          title="Back to the reply"
+        >
+          ↓ back
+        </button>
+        <div id="focus-bar" class="focus-bar hidden">
+          <button
+            id="focus-prev"
+            class="link-btn"
+            type="button"
+            title="Previous message of the conversation ([)"
+            aria-label="Previous message of the conversation"
+          >
+            ‹
+          </button>
+          <span id="focus-position" class="focus-position"></span>
+          <button
+            id="focus-next"
+            class="link-btn"
+            type="button"
+            title="Next message of the conversation (])"
+            aria-label="Next message of the conversation"
+          >
+            ›
+          </button>
+          <button
+            id="focus-close"
+            class="link-btn focus-close"
+            type="button"
+            title="End focus (Esc)"
+            aria-label="End focus"
+          >
+            ✕
+          </button>
+        </div>
         <form id="composer" class="composer">
           <div id="reply-bar" class="reply-bar hidden">
             <button
@@ -205,7 +250,8 @@
               title="Show the message"
             >
               <span class="reply-label"
-                >reply to <span class="reply-author"></span
+                ><span class="reply-prefix">reply to</span>
+                <span class="reply-author"></span
               ></span>
               <span class="reply-text"></span>
             </button>
@@ -378,6 +424,12 @@
         <span class="dot"></span>
         <span class="name"></span>
         <span class="call-mark hidden"></span>
+        <button
+          class="link-btn mine hidden"
+          type="button"
+          data-action="mine"
+          title="Next unread reply to you"
+        ></button>
         <span class="badge hidden"></span>
         <span class="time"></span>
       </li>
@@ -396,6 +448,12 @@
           ×
         </button>
         <span class="call-mark hidden"></span>
+        <button
+          class="link-btn mine hidden"
+          type="button"
+          data-action="mine"
+          title="Next unread reply to you"
+        ></button>
         <span class="badge hidden"></span>
         <span class="time"></span>
       </li>
@@ -433,6 +491,7 @@
     <template id="message-template">
       <div class="message">
         <span class="time"></span>
+        <div class="lanes" aria-hidden="true"></div>
         <div class="body">
           <button class="quote hidden" type="button" data-action="quote">
             <span class="quote-author"></span><span class="quote-text"></span>
@@ -442,11 +501,12 @@
           </div>
           <div class="attachments"></div>
           <div class="reactions"></div>
-          <button class="replies hidden" data-action="thread">
+          <button class="replies hidden" data-action="counter">
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" />
             </svg>
             <span class="count"></span>
+            <span class="initials"></span>
           </button>
         </div>
         <button
@@ -458,6 +518,16 @@
           aria-label="Message actions"
         >
           ⋯
+        </button>
+        <button
+          class="reply-btn"
+          type="button"
+          data-action="reply-hover"
+          tabindex="-1"
+          title="Reply"
+          aria-label="Reply"
+        >
+          ↩
         </button>
       </div>
     </template>
@@ -472,7 +542,7 @@
         <p class="excerpt"></p>
         <div class="attachments"></div>
         <div class="post-footer">
-          <button class="replies" data-action="thread">
+          <button class="replies" data-action="article">
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" />
             </svg>
