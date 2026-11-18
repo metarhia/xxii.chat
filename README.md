@@ -280,6 +280,11 @@ server) with `files/have`, `get`, and `put`.
   that both sides select a relay pair while audio and video flow
   (scenario 9), and again through TURN over TLS on a port that also
   offers HTTP;
+  `test/call-link.js` checks link policy: without a token the visitor
+  waits in the lobby until an admin admits them, a token joins, and a
+  lock denies (scenario 10);
+  `test/call-host.js` checks ask to mute, remove, and end for everyone
+  (scenario 11);
   `npm run test:app` reserves two different free ports and passes them as
   `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so
   it does not bind `8000` or `3478`. The browser harness picks free

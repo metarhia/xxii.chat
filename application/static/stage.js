@@ -9,6 +9,13 @@ import { CALL_LAYOUTS, STRIP_POSITIONS } from './call-layout.js';
 import { tileId, callLayout } from './call-layout.js';
 
 const LOBBY = 'waiting for an admin to let you in';
+const LOCKED = 'Call is locked';
+const FULL = 'Call is full';
+const ADMISSION = {
+  open: { token: 'join', other: 'join' },
+  link: { token: 'join', other: 'lobby' },
+  approval: { token: 'lobby', other: 'lobby' },
+};
 const TONE_HZ = 440;
 const RING_MS = 1600;
 const RING_PATTERN = [280, 120, 280, 920];
@@ -30,6 +37,36 @@ const ACTIONS = {
   'hide-self': (stage) => stage.toggleView('hideSelf'),
   'hide-no-video': (stage) => stage.toggleView('hideNoVideo'),
 };
+
+const HOST_ACTIONS = {
+  'ask-mute': (stage, endpoint) => {
+    const person = stage.personOf(endpoint);
+    const action = person?.mic === false ? 'unmute' : 'mute';
+    return stage.command(action, endpoint);
+  },
+  'stop-camera': (stage, endpoint) => stage.command('stopCamera', endpoint),
+  'stop-remote-screen': (stage, endpoint) =>
+    stage.command('stopScreen', endpoint),
+  spotlight: (stage, endpoint) => {
+    const value = stage.spotlight === endpoint ? '' : endpoint;
+    return stage.command('spotlight', '', value);
+  },
+  promote: (stage, endpoint) => stage.command('promote', endpoint),
+  demote: (stage, endpoint) => stage.command('demote', endpoint),
+  remove: (stage, endpoint) => stage.command('remove', endpoint),
+  'mute-all': (stage) => stage.command('muteAll'),
+  lock: (stage) => stage.command(stage.locked ? 'unlock' : 'lock'),
+  end: (stage) => stage.endForAll(),
+  'accept-unmute': (stage) => stage.acceptUnmute(),
+};
+
+const REMOTE_REQUEST = {
+  mute: (nick) => `${nick} muted you`,
+  stopCamera: (nick) => `${nick} stopped your camera`,
+  stopScreen: (nick) => `${nick} stopped your screen`,
+};
+
+const POLICIES = ['open', 'link', 'approval'];
 
 const hueOf = (id) => {
   let hash = 0;
@@ -129,6 +166,18 @@ const hasOption = (select, value) => {
     if (option.value === value) return true;
   }
   return false;
+};
+
+const admissionOf = (preview, token) => {
+  if (!preview) return { action: 'join', reason: '' };
+  const direct = preview.kind === 'direct';
+  if (direct || preview.admin === true) return { action: 'join', reason: '' };
+  if (preview.locked === true) return { action: 'locked', reason: LOCKED };
+  const rule = ADMISSION[preview.policy] ?? ADMISSION.link;
+  const action = token ? rule.token : rule.other;
+  const blocked = action === 'join' && preview.full === true;
+  if (blocked) return { action: 'full', reason: FULL };
+  return { action, reason: '' };
 };
 
 const fillSelect = (select, devices, selected, noun) => {
@@ -260,6 +309,77 @@ const createLayoutControls = () => {
   return choices;
 };
 
+const createHostControls = () => {
+  const box = document.createElement('div');
+  box.className = 'call-host hidden';
+  const policy = createField('call-policy', 'policy');
+  const select = policy.querySelector('select');
+  for (const value of POLICIES) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.append(option);
+  }
+  const muteAll = createButton('mute-all', 'Mute all');
+  const lock = createButton('lock', 'Lock');
+  box.append(muteAll, lock, policy);
+  return box;
+};
+
+const createPeople = () => {
+  const aside = document.createElement('aside');
+  aside.className = 'call-people';
+  const lobby = document.createElement('div');
+  lobby.className = 'call-lobby hidden';
+  const roster = document.createElement('ul');
+  roster.className = 'call-roster';
+  const copy = createButton('copy-link', 'copy link');
+  copy.classList.add('hidden');
+  aside.append(lobby, roster, createHostControls(), copy);
+  return aside;
+};
+
+const createLeave = () => {
+  const wrap = document.createElement('div');
+  wrap.className = 'call-leave';
+  wrap.append(createButton('leave', 'leave'));
+  const menu = document.createElement('details');
+  menu.className = 'leave-menu hidden';
+  const summary = document.createElement('summary');
+  summary.textContent = '▾';
+  summary.setAttribute('aria-label', 'leave options');
+  const choices = document.createElement('div');
+  choices.className = 'share-menu';
+  choices.append(createButton('end', 'End for everyone'));
+  menu.append(summary, choices);
+  wrap.append(menu);
+  return wrap;
+};
+
+const createPrompt = () => {
+  const row = document.createElement('div');
+  row.className = 'call-prompt hidden';
+  const text = document.createElement('span');
+  row.append(text, createButton('accept-unmute', 'unmute'));
+  return row;
+};
+
+const createKnock = (item) => {
+  const toast = document.createElement('aside');
+  toast.className = 'knock';
+  toast.dataset.endpoint = item.endpoint;
+  const text = document.createElement('p');
+  const nick = item.nick || 'someone';
+  text.textContent = `${nick} wants to join`;
+  const actions = document.createElement('div');
+  actions.className = 'knock-actions';
+  const admit = createButton('admit', 'admit');
+  const deny = createButton('deny', 'deny');
+  actions.append(admit, deny);
+  toast.append(text, actions);
+  return toast;
+};
+
 const createCall = (title) => {
   const section = document.createElement('section');
   section.id = 'call-view';
@@ -273,18 +393,21 @@ const createCall = (title) => {
   bar.append(back, heading, createLayoutControls());
   const grid = document.createElement('div');
   grid.className = 'call-grid';
+  const body = document.createElement('div');
+  body.className = 'call-body';
+  body.append(grid, createPeople());
   const controls = document.createElement('footer');
   controls.className = 'call-controls';
   controls.append(
     createButton('mic', 'mic on'),
     createButton('camera', 'camera on'),
-    createButton('leave', 'leave'),
+    createLeave(),
   );
   controls.insertBefore(createShare(), controls.lastElementChild);
   const note = document.createElement('p');
   note.className = 'call-note hidden';
   note.setAttribute('role', 'status');
-  section.append(bar, note, grid, controls);
+  section.append(bar, note, createPrompt(), body, controls);
   return section;
 };
 
@@ -621,6 +744,9 @@ class CallStage {
   #onNotice = null;
   #onQuality = null;
   #onStats = null;
+  #onDenied = null;
+  #onRequest = null;
+  #onRemoved = null;
 
   constructor(root, hooks) {
     this.root = root;
@@ -634,6 +760,16 @@ class CallStage {
     this.host = null;
     this.mini = null;
     this.people = [];
+    this.lobby = [];
+    this.preview = null;
+    this.isAdmin = false;
+    this.hostPeer = '';
+    this.policy = '';
+    this.locked = false;
+    this.prompt = '';
+    this.kind = '';
+    this.mediaNote = '';
+    this.knocks = null;
     this.remote = new Map();
     this.audios = new Map();
     this.soundBlocked = false;
@@ -670,6 +806,13 @@ class CallStage {
       this.stats.set(endpoint, stats);
       this.paintStats();
     };
+    this.#onDenied = () => {
+      this.hooks.notice?.('The admin did not let you in');
+    };
+    this.#onRequest = (data) => {
+      this.onRequest(data).catch((error) => this.hooks.fail(error));
+    };
+    this.#onRemoved = (data) => this.onRemoved(data);
   }
 
   attach(session, token, camera = true) {
@@ -679,6 +822,15 @@ class CallStage {
     this.chat = session.chat;
     this.joining = false;
     this.people = [];
+    this.lobby = [];
+    this.preview = null;
+    this.isAdmin = false;
+    this.hostPeer = '';
+    this.policy = '';
+    this.locked = false;
+    this.prompt = '';
+    this.kind = '';
+    this.mediaNote = '';
     this.remote = new Map();
     this.volume = new ParticipantVolume(this.#onNotice);
     this.tileMenu = new TileMenu(this);
@@ -695,6 +847,9 @@ class CallStage {
     session.on('notice', this.#onNotice);
     session.on('quality', this.#onQuality);
     session.on('stats', this.#onStats);
+    session.on('denied', this.#onDenied);
+    session.on('request', this.#onRequest);
+    session.on('removed', this.#onRemoved);
     this.viewHints = new ViewHints(
       (endpoint, hint) => session.setViewHint(endpoint, hint),
       this.#onNotice,
@@ -714,6 +869,9 @@ class CallStage {
       session.off('notice', this.#onNotice);
       session.off('quality', this.#onQuality);
       session.off('stats', this.#onStats);
+      session.off('denied', this.#onDenied);
+      session.off('request', this.#onRequest);
+      session.off('removed', this.#onRemoved);
     }
     this.tileMenu?.stop();
     this.tileMenu = null;
@@ -752,6 +910,17 @@ class CallStage {
     this.mini = null;
     this.stopAudios();
     this.people = [];
+    this.lobby = [];
+    this.preview = null;
+    this.isAdmin = false;
+    this.hostPeer = '';
+    this.policy = '';
+    this.locked = false;
+    this.prompt = '';
+    this.kind = '';
+    this.mediaNote = '';
+    this.knocks?.remove();
+    this.knocks = null;
     this.remote = new Map();
     this.root.removeAttribute('data-call');
     this.hooks.closed();
@@ -778,8 +947,10 @@ class CallStage {
       this.levels?.start();
       this.observeLayout();
       this.syncControls();
+      this.paintPrompt();
       this.showNote(this.media?.message || this.media?.notice || '');
       this.renderTiles();
+      this.paintPeople();
       this.hooks.focusChat(this.chat);
       this.hooks.changed();
     }
@@ -832,6 +1003,16 @@ class CallStage {
     if (action === 'pin') return void this.togglePin(endpoint, slot);
     if (action === 'tile-fullscreen') {
       return void this.fullscreen(endpoint, slot);
+    }
+    if (action === 'admit') return void this.admit(endpoint);
+    if (action === 'deny') return void this.deny(endpoint);
+    if (action === 'admit-all') return void this.admitAll();
+    if (action === 'copy-link') return void this.copyLink();
+    const hostAction = HOST_ACTIONS[action];
+    if (hostAction) {
+      const result = hostAction(this, endpoint);
+      if (result?.catch) result.catch((error) => this.hooks.fail(error));
+      return;
     }
     if (action === 'audio-only' && endpoint && this.session) {
       const enabled = !this.session.isAudioOnly(endpoint);
@@ -892,15 +1073,28 @@ class CallStage {
 
   async join() {
     if (this.mode !== 'prejoin' || this.joining || !this.session) return;
+    const admission = admissionOf(this.preview, this.token);
+    const blocked =
+      admission.action === 'locked' || admission.action === 'full';
+    if (blocked) return;
     requestCallNotifications();
     this.joining = true;
     this.syncControls();
-    this.media?.resume();
     const nick = this.readNick();
-    this.pushTracks();
-    const input = { nick };
-    if (this.token) input.token = this.token;
     try {
+      if (this.hooks.ready) await this.hooks.ready();
+      if (this.mode !== 'prejoin' || !this.session) return;
+      const next = admissionOf(this.preview, this.token);
+      const stopped = next.action === 'locked' || next.action === 'full';
+      if (stopped) {
+        this.joining = false;
+        this.syncControls();
+        return;
+      }
+      this.media?.resume();
+      this.pushTracks();
+      const input = { nick };
+      if (this.token) input.token = this.token;
       const result = await this.session.join(input);
       const status = result?.status;
       if (status === 'lobby') {
@@ -958,6 +1152,7 @@ class CallStage {
     if (!this.session || state?.call !== this.session.call) return;
     const list = Array.isArray(state.participants) ? state.participants : [];
     const people = [];
+    let isAdmin = false;
     for (const item of list) {
       const endpoint = item.endpoint;
       if (!endpoint) continue;
@@ -966,9 +1161,17 @@ class CallStage {
       const camera = item.camera === true;
       const screen = item.screen === true;
       const mic = item.mic !== false;
-      people.push({ endpoint, nick, peer, camera, screen, mic });
+      const admin = item.admin === true;
+      if (endpoint === this.session.endpoint) isAdmin = admin;
+      people.push({ endpoint, nick, peer, camera, screen, mic, admin });
     }
     this.people = people;
+    this.isAdmin = isAdmin;
+    this.hostPeer = typeof state.host === 'string' ? state.host : '';
+    this.policy = typeof state.policy === 'string' ? state.policy : '';
+    this.locked = state.locked === true;
+    this.kind = typeof state.kind === 'string' ? state.kind : '';
+    this.lobby = Array.isArray(state.lobby) ? state.lobby : [];
     this.spotlight = typeof state.spotlight === 'string' ? state.spotlight : '';
     const present = new Set(people.map((person) => person.endpoint));
     for (const endpoint of this.remote.keys()) {
@@ -993,7 +1196,12 @@ class CallStage {
       const audio = screen ? this.remote.get(endpoint)?.screenAudio : null;
       this.attachAudio(endpoint, audio, 'screenAudio');
     }
-    if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
+    if (this.mode === 'call' || this.mode === 'mini') {
+      this.renderTiles();
+      this.syncControls();
+    }
+    this.paintPeople();
+    this.paintKnocks();
   }
 
   restoreRemote() {
@@ -1173,6 +1381,10 @@ class CallStage {
 
   onDevice(event) {
     const select = event.target;
+    if (select.id === 'call-policy') {
+      this.command('policy', '', select.value);
+      return;
+    }
     if (select.id === 'call-layout') this.setLayout(select.value);
     if (select.id === 'call-strip') {
       this.strip = select.value;
@@ -1218,13 +1430,21 @@ class CallStage {
     camera?.classList.toggle('warn', media.cameraMissing);
     mic?.classList.toggle('warn', media.micMissing);
     const join = host.querySelector('[data-action="join"]');
-    if (join) join.disabled = this.joining;
+    if (!join) return;
+    const admission = admissionOf(this.preview, this.token);
+    const blocked =
+      admission.action === 'locked' || admission.action === 'full';
+    join.disabled = this.joining || blocked;
+    const asking = admission.action === 'lobby';
+    join.textContent = asking ? 'ask to join' : 'join';
+    this.paintNote();
   }
 
   paintButtons(root) {
     const media = this.media;
     if (!media) return;
     this.paintShare(root);
+    this.paintLeave(root);
     const mics = root.querySelectorAll('[data-action="mic"]');
     for (const button of mics) {
       button.textContent = media.micOn ? 'mic on' : 'mic off';
@@ -1237,6 +1457,11 @@ class CallStage {
       button.classList.toggle('off', !media.cameraOn);
       button.classList.toggle('warn', media.cameraMissing);
     }
+  }
+
+  paintLeave(root) {
+    const menu = root.querySelector('.leave-menu');
+    menu?.classList.toggle('hidden', !this.isAdmin);
   }
 
   paintShare(root) {
@@ -1285,14 +1510,254 @@ class CallStage {
   }
 
   showNote(text) {
+    this.mediaNote = typeof text === 'string' ? text : '';
+    this.paintNote();
+  }
+
+  paintNote() {
     const note = this.host?.querySelector('.call-note');
     if (!note) return;
+    const admission = admissionOf(this.preview, this.token);
+    const reason = this.mode === 'prejoin' ? admission.reason : '';
     const unavailable = this.media && !this.media.canScreen;
     const message = unavailable ? 'Screen capture is unavailable.' : '';
     const notices = [...this.qualityNotices];
-    const value = [text, message, ...notices].filter(Boolean).join(' ');
+    const parts = [reason, this.mediaNote, message, ...notices];
+    const value = parts.filter(Boolean).join(' ');
     note.textContent = value;
     note.classList.toggle('hidden', value === '');
+  }
+
+  applyPreview(preview) {
+    this.preview = preview ?? null;
+    const kind = preview?.kind;
+    if (typeof kind === 'string') this.kind = kind;
+    this.syncControls();
+    if (this.mode !== 'prejoin') return;
+    const chat = typeof preview?.chat === 'string' ? preview.chat : '';
+    const title = this.host?.querySelector('#prejoin .chat-title');
+    if (title && chat) title.textContent = this.hooks.titleOf(chat);
+  }
+
+  async admit(endpoint) {
+    const call = this.session?.call;
+    if (!call || !endpoint || !this.isAdmin) return;
+    await this.hooks.admit(call, endpoint);
+  }
+
+  async deny(endpoint) {
+    const call = this.session?.call;
+    if (!call || !endpoint || !this.isAdmin) return;
+    await this.hooks.deny(call, endpoint);
+  }
+
+  async admitAll() {
+    const call = this.session?.call;
+    if (!call || !this.isAdmin) return;
+    const endpoints = this.lobby.map((item) => item.endpoint);
+    for (const endpoint of endpoints) await this.hooks.admit(call, endpoint);
+  }
+
+  copyLink() {
+    const call = this.session?.call;
+    if (!call || !this.isAdmin || this.kind === 'direct') return;
+    const copying = this.hooks.copyLink(call);
+    if (copying?.catch) copying.catch((error) => this.hooks.fail(error));
+  }
+
+  async command(action, target = '', value) {
+    const call = this.session?.call;
+    if (!call || !this.isAdmin) return;
+    const args = { call, action };
+    if (target !== '') args.target = target;
+    if (value !== undefined) args.value = value;
+    try {
+      await this.hooks.host(args);
+    } catch (error) {
+      this.hooks.fail(error);
+    }
+  }
+
+  async endForAll() {
+    const call = this.session?.call;
+    if (!call || !this.isAdmin) return;
+    try {
+      await this.hooks.end(call);
+    } catch (error) {
+      this.hooks.fail(error);
+    }
+  }
+
+  async acceptUnmute() {
+    this.prompt = '';
+    this.paintPrompt();
+    const media = this.media;
+    if (!media || media.micOn) return;
+    await media.toggleMic();
+  }
+
+  async onRequest(data) {
+    const mine = this.session?.endpoint;
+    if (!data || !mine || data.endpoint !== mine) return;
+    const nick = this.nickOf(data.by);
+    if (data.action === 'unmute') {
+      this.prompt = `${nick} asks you to unmute`;
+      this.paintPrompt();
+      return;
+    }
+    const text = REMOTE_REQUEST[data.action];
+    if (!text) return;
+    if (data.action === 'mute') await this.forceMute();
+    if (data.action === 'stopCamera') await this.forceStopCamera();
+    if (data.action === 'stopScreen') this.forceStopScreen();
+    this.prompt = '';
+    this.paintPrompt();
+    this.hooks.notice?.(text(nick));
+  }
+
+  onRemoved(data) {
+    const nick = this.nickOf(data?.by);
+    this.hooks.notice?.(`removed by ${nick}`);
+  }
+
+  async forceMute() {
+    const media = this.media;
+    if (!media?.micOn) return;
+    await media.toggleMic();
+  }
+
+  async forceStopCamera() {
+    const media = this.media;
+    if (!media?.cameraOn) return;
+    await media.toggleCamera();
+  }
+
+  forceStopScreen() {
+    const media = this.media;
+    const sharing = Boolean(media?.screenTrack || media?.screenShared);
+    if (!sharing) return;
+    media.stopScreen();
+  }
+
+  personOf(endpoint) {
+    for (const person of this.people) {
+      if (person.endpoint === endpoint) return person;
+    }
+    return null;
+  }
+
+  nickOf(peer) {
+    if (typeof peer !== 'string' || peer === '') return 'someone';
+    for (const person of this.people) {
+      if (person.peer === peer && person.nick !== '') return person.nick;
+    }
+    return peer;
+  }
+
+  paintPrompt() {
+    const row = this.host?.querySelector('.call-prompt');
+    if (!row) return;
+    const label = row.querySelector('span');
+    if (label) label.textContent = this.prompt;
+    row.classList.toggle('hidden', this.prompt === '');
+  }
+
+  paintPeople() {
+    const aside = this.host?.querySelector('.call-people');
+    if (!aside) return;
+    this.paintLobby(aside);
+    this.paintRoster(aside);
+    this.paintHost(aside);
+    const copy = aside.querySelector('[data-action="copy-link"]');
+    const showCopy = this.isAdmin && this.kind !== 'direct';
+    copy?.classList.toggle('hidden', !showCopy);
+  }
+
+  paintHost(aside) {
+    const box = aside.querySelector('.call-host');
+    if (!box) return;
+    box.classList.toggle('hidden', !this.isAdmin);
+    if (!this.isAdmin) return;
+    const lock = box.querySelector('[data-action="lock"]');
+    if (lock) lock.textContent = this.locked ? 'Unlock' : 'Lock';
+    const select = box.querySelector('#call-policy');
+    const current = POLICIES.includes(this.policy) ? this.policy : 'link';
+    if (select && document.activeElement !== select) select.value = current;
+  }
+
+  paintLobby(aside) {
+    const box = aside.querySelector('.call-lobby');
+    box.replaceChildren();
+    const show = this.isAdmin && this.lobby.length > 0;
+    box.classList.toggle('hidden', !show);
+    if (!show) return;
+    box.append(createButton('admit-all', 'admit all'));
+    for (const item of this.lobby) {
+      const row = document.createElement('div');
+      row.className = 'lobby-row';
+      row.dataset.endpoint = item.endpoint;
+      const name = document.createElement('span');
+      const nick = item.nick || 'someone';
+      name.textContent = nick;
+      const admit = createButton('admit', 'admit');
+      const deny = createButton('deny', 'deny');
+      row.append(name, admit, deny);
+      box.append(row);
+    }
+  }
+
+  paintRoster(aside) {
+    const list = aside.querySelector('.call-roster');
+    list.replaceChildren();
+    for (const person of this.people) {
+      const item = document.createElement('li');
+      item.textContent = person.nick || person.endpoint;
+      list.append(item);
+    }
+  }
+
+  ensureKnocks() {
+    if (this.knocks) return;
+    const root = document.createElement('div');
+    root.id = 'knock-toasts';
+    root.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-action]');
+      if (!button) return;
+      const endpoint = button.closest('[data-endpoint]')?.dataset.endpoint;
+      this.onAction(button.dataset.action, endpoint ?? '');
+    });
+    document.body.append(root);
+    this.knocks = root;
+  }
+
+  paintKnocks() {
+    if (!this.isAdmin) {
+      this.knocks?.replaceChildren();
+      return;
+    }
+    this.ensureKnocks();
+    const root = this.knocks;
+    const seen = new Set();
+    for (const item of this.lobby) {
+      seen.add(item.endpoint);
+      let toast = null;
+      for (const node of root.children) {
+        if (node.dataset.endpoint === item.endpoint) toast = node;
+      }
+      const nick = item.nick || 'someone';
+      const text = `${nick} wants to join`;
+      if (!toast) {
+        root.append(createKnock(item));
+        continue;
+      }
+      const label = toast.querySelector('p');
+      if (label) label.textContent = text;
+    }
+    const stale = [];
+    for (const node of root.children) {
+      if (!seen.has(node.dataset.endpoint)) stale.push(node);
+    }
+    for (const node of stale) node.remove();
   }
 
   renderTiles() {

@@ -617,6 +617,7 @@ const promote = async (state, endpoint) => {
 const demote = async (state, endpoint) => {
   const target = state.participants.get(endpoint);
   if (!target) return true;
+  if (target.peer === state.host) return fail('call/bad-action');
   state.cohosts.delete(target.peer);
   await publish(state);
   return true;
@@ -911,14 +912,23 @@ const sweepAll = async () => {
     return true;
   },
 
-  active() {
+  active(client) {
+    const peer = client ? peerOf(client) : '';
     const list = [];
     for (const state of domain.call.calls.values()) {
+      const owner = ownerOf(state.chat);
+      const count = state.participants.size;
+      const full = count >= config.call.maxParticipants;
       list.push({
         call: state.id,
         chat: state.chat,
-        count: state.participants.size,
+        count,
         started: state.started,
+        policy: state.policy,
+        locked: state.locked,
+        kind: state.kind,
+        full,
+        admin: isAdmin(state, peer, owner),
       });
     }
     return list;

@@ -61,6 +61,20 @@ const beginCall = (app) => {
   app.startCall(app.chat).catch((error) => app.report(error));
 };
 
+const callUrl = (id, token) => {
+  const call = encodeURIComponent(id);
+  const base = `${location.origin}/?call=${call}`;
+  if (!token) return base;
+  return `${base}&t=${encodeURIComponent(token)}`;
+};
+
+const readCallLink = () => {
+  const params = new URLSearchParams(location.search);
+  const call = params.get('call') ?? '';
+  if (call === '') return null;
+  return { call, token: params.get('t') ?? '' };
+};
+
 const MESSAGE_ACTIONS = {
   react: (app, id, { dataset }) => app.toggleReaction(id, dataset.reaction),
   reply: (app, id) => app.startReply(id),
@@ -403,6 +417,8 @@ class ChatApplication extends Application {
     this.callBound = false;
     this.callBinding = null;
     this.callLost = false;
+    this.linkReady = null;
+    this.synced = false;
     this.ring = new RingAlert({
       answer: (kind) => {
         this.answerRing(kind).catch((error) => this.report(error));
@@ -669,6 +685,8 @@ class ChatApplication extends Application {
     });
 
     this.on('ready', () => {
+      const link = readCallLink();
+      if (link) this.presentCallLink(link);
       this.startSync();
       this.bindCalls().catch((error) => this.report(error));
     });
@@ -702,6 +720,8 @@ class ChatApplication extends Application {
   }
 
   async startSync() {
+    const gate = globalThis.__xxiiSyncGate;
+    if (gate && typeof gate.then === 'function') await gate;
     const options = { unit: 'chat', name: 'worker', clear: 'follow' };
     this.uplink = new Uplink(this.replica, this.metacom, options);
     this.uplink.on('error', (error) => {
@@ -713,6 +733,7 @@ class ChatApplication extends Application {
     this.bindCalls().catch((error) => this.report(error));
     try {
       await this.uplink.sync();
+      this.synced = true;
       this.saveAuthor();
       const pairs = await this.api.chat.directs();
       for (const pair of pairs) this.restoreDirect(pair);
@@ -2704,6 +2725,13 @@ class ChatApplication extends Application {
       focusChat: (id) => this.focusCallChat(id),
       changed: () => this.scheduleRender(),
       fail: (error) => this.report(error),
+      notice: (text) => this.showNotification(text, 'warning'),
+      admit: (call, endpoint) => this.api.call.admit({ call, endpoint }),
+      deny: (call, endpoint) => this.api.call.deny({ call, endpoint }),
+      host: (args) => this.api.call.host(args),
+      end: (call) => this.api.call.end({ call }),
+      copyLink: (call) => this.copyCallLink(call),
+      ready: () => this.linkReady ?? Promise.resolve(),
       closed: () => {
         this.callSession = null;
       },
@@ -2937,6 +2965,7 @@ class ChatApplication extends Application {
   }
 
   async closeCall() {
+    this.linkReady = null;
     if (this.callLeaving) await this.callLeaving;
     const session = this.callStage?.session;
     if (!session) return;
@@ -3025,6 +3054,57 @@ class ChatApplication extends Application {
     stage.detach();
   }
 
+  presentCallLink(link) {
+    this.attachCallEvents();
+    const endpoint = `${this.peerId}:${tabId()}`;
+    const ice = () => this.iceConfiguration();
+    const session = new CallSession({
+      api: this.api,
+      endpoint,
+      call: link.call,
+      chat: '',
+      ice,
+      pagehide: false,
+    });
+    const token = link.token;
+    if (token !== '') this.callToken = token;
+    const stage = this.ensureCallStage();
+    stage.attach(session, token, true);
+    this.callSession = session;
+    session.begin();
+    this.linkReady = this.finishCallLink(session);
+  }
+
+  async finishCallLink(session) {
+    await this.mesh.greet();
+    if (this.callSession !== session) return;
+    const list = await this.api.call.active();
+    if (this.callSession !== session || !Array.isArray(list)) return;
+    const preview = list.find((item) => item.call === session.call) ?? null;
+    const chat = typeof preview?.chat === 'string' ? preview.chat : '';
+    if (chat) {
+      session.chat = chat;
+      this.prepareJoinedCall(chat, session.call);
+      this.followCall(session);
+    }
+    this.callStage?.applyPreview(preview);
+  }
+
+  async copyCallLink(call) {
+    const result = await this.api.call.link({ call });
+    const token = typeof result?.token === 'string' ? result.token : '';
+    const url = callUrl(call, token);
+    const write = navigator.clipboard?.writeText;
+    if (!write) return url;
+    try {
+      await write.call(navigator.clipboard, url);
+      this.showNotification('Link copied');
+    } catch (error) {
+      this.logger.log('Clipboard:', error.message);
+    }
+    return url;
+  }
+
   async startCall(chat, options = {}) {
     await this.closeCall();
     await this.bindCalls();
@@ -3053,6 +3133,7 @@ class ChatApplication extends Application {
     this.callSession = session;
     this.followCall(session);
     session.begin();
+    if (opened.state) stage.onCallState(opened.state);
   }
 
   focusCallChat(id) {
