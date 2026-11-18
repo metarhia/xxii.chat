@@ -169,11 +169,19 @@ menu says that it is not available. Every control is reachable with `Tab` and
 operated with `Enter` or `Space`.
 
 The sidebar’s session block and the call’s more menu open Calls settings.
-This browser remembers device choices, join defaults, self-view mirroring,
+This browser remembers device choices, join defaults, camera mirroring,
 noise suppression, push-to-talk, auto-lower, and network settings. The mic
 chevron offers a device picker, noise suppression, and push-to-talk. Recording
 defaults include layout, audio mode, quality, and a folder in browsers with
 directory access. A speaker test plays a short tone on the selected output.
+
+Mirror camera is on by default, in the camera menu and Calls settings. The
+camera is flipped once at capture, so the self view, the preview, the mini
+call, and what other people receive all show the same picture; with it off
+nothing is mirrored. Toggling it in a call swaps the camera track without
+renegotiation. Screen shares are never mirrored. If the browser cannot
+mirror, the raw camera is used with a notice, and the stats overlay on your
+own tile shows the mirror path.
 
 Phones show the active tile above a horizontally scrollable strip with the
 controls above the safe area. Chat and People open as bottom sheets. Back
@@ -362,6 +370,8 @@ server) with `files/have`, `get`, and `put`.
   keyboard menus and picture-in-picture. `test/call-settings.js` checks
   settings validation, migration and toast timing. `test/call-phone.js`
   checks saved defaults, push-to-talk, auto-lower, mobile controls and Back;
+  `test/call-mirror.js` checks the mirrored self view and remote tile, the
+  toggle without renegotiation, the stats path, and camera off (scenario 23);
   `npm run test:app` reserves two different free ports and passes them as
   `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so
   it does not bind `8000` or `3478`. The browser harness picks free

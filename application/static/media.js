@@ -1,4 +1,5 @@
 import { readCallStats } from './call-stats.js';
+import { createMirror, pathOf, capabilitiesOf } from './mirror.js';
 import { Emitter, jsonParse } from './metautil.js';
 
 const CAMERA = {
@@ -32,6 +33,10 @@ const SCREEN_MESSAGES = {
   NotReadableError: 'The selected screen could not be captured.',
   InvalidStateError: 'Click share again to choose a screen.',
 };
+
+const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
+const CLOCK_FPS = 30;
+const MIRROR_NOTICE = 'Camera mirroring is unavailable';
 
 const DEVICES_KEY = 'xxii:devices';
 const MOBILE = '(pointer: coarse)';
@@ -559,6 +564,9 @@ class MediaCapture {
   #screenGen = 0;
   #screenStream = null;
   #onScreenEnd = null;
+  #mirror = null;
+  #mirrorGen = 0;
+  #clock = null;
 
   constructor(storage = globalThis.localStorage) {
     this.storage = storage;
@@ -572,6 +580,9 @@ class MediaCapture {
     this.mics = [];
     this.speakers = [];
     this.cameraTrack = null;
+    this.cameraSource = null;
+    this.mirrorOn = false;
+    this.mirrorState = 'off';
     this.micTrack = null;
     this.screenTrack = null;
     this.screenAudioTrack = null;
@@ -769,9 +780,15 @@ class MediaCapture {
       if (generation !== this.#cameraGen || !this.cameraOn) {
         return void stopStream(stream);
       }
-      const track = stream.getVideoTracks()[0] ?? null;
+      const source = stream.getVideoTracks()[0] ?? null;
+      const wrapped = await this.#wrapCamera(source);
+      if (generation !== this.#cameraGen || !this.cameraOn) {
+        wrapped.mirror?.stop();
+        source?.stop();
+        return;
+      }
       this.message = '';
-      this.useCamera(track);
+      this.#useWrapped(source, wrapped);
     } catch (error) {
       if (generation !== this.#cameraGen) return;
       this.message = messageOf(error);
@@ -780,10 +797,85 @@ class MediaCapture {
     }
   }
 
+  async setMirror(on) {
+    if (this.mirrorOn === on) return;
+    this.mirrorOn = on;
+    const source = this.cameraSource;
+    if (!source || source.readyState !== 'live') {
+      this.mirrorState = on ? '' : 'off';
+      this.#notify();
+      return;
+    }
+    const generation = ++this.#mirrorGen;
+    const wrapped = await this.#wrapCamera(source);
+    const current = generation === this.#mirrorGen;
+    if (!current || this.cameraSource !== source) {
+      wrapped.mirror?.stop();
+      return;
+    }
+    this.#useWrapped(source, wrapped);
+  }
+
   stopCamera() {
-    const track = this.cameraTrack;
+    this.#mirrorGen++;
+    const source = this.cameraSource;
+    this.cameraSource = null;
     this.cameraTrack = null;
-    if (track) track.stop();
+    this.#stopMirror();
+    this.#releaseClock();
+    this.mirrorState = this.mirrorOn ? '' : 'off';
+    if (source) source.stop();
+  }
+
+  async #wrapCamera(source) {
+    const raw = { track: source, mirror: null, state: 'off' };
+    if (!source || !this.mirrorOn) return raw;
+    try {
+      const needClock = pathOf(capabilitiesOf()) === 'canvas';
+      const clock = needClock ? this.#clockWorker() : undefined;
+      const mirror = await createMirror(source, { clock });
+      return { track: mirror.track, mirror, state: mirror.path };
+    } catch {
+      this.notice = MIRROR_NOTICE;
+      return { track: source, mirror: null, state: 'failed' };
+    }
+  }
+
+  #useWrapped(source, wrapped) {
+    const previous = this.#mirror;
+    const old = this.cameraSource;
+    this.#mirror = wrapped.mirror;
+    this.cameraSource = source;
+    this.cameraTrack = wrapped.track;
+    this.mirrorState = wrapped.state;
+    if (wrapped.state !== 'failed' && this.notice === MIRROR_NOTICE) {
+      this.notice = '';
+    }
+    previous?.stop();
+    if (old && old !== source) old.stop();
+    this.#notify();
+  }
+
+  #stopMirror() {
+    const mirror = this.#mirror;
+    this.#mirror = null;
+    mirror?.stop();
+  }
+
+  #clockWorker() {
+    if (this.#clock) return this.#clock;
+    const worker = new Worker(CLOCK_URL);
+    worker.postMessage({ type: 'start', fps: CLOCK_FPS });
+    this.#clock = worker;
+    return worker;
+  }
+
+  #releaseClock() {
+    const worker = this.#clock;
+    this.#clock = null;
+    if (!worker) return;
+    worker.postMessage({ type: 'stop' });
+    worker.terminate();
   }
 
   async openScreen(shared = true) {
@@ -930,9 +1022,7 @@ class MediaCapture {
   }
 
   useCamera(track) {
-    const previous = this.cameraTrack;
-    if (previous && previous !== track) previous.stop();
-    this.cameraTrack = track;
+    if (!track) this.stopCamera();
     this.#notify();
   }
 
