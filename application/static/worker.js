@@ -19,6 +19,7 @@ const ASSETS = [
   '/domain.js',
   '/ice.js',
   '/chat.js',
+  '/replies.js',
   '/mesh.js',
   '/call.js',
   '/media.js',

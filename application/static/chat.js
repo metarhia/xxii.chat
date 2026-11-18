@@ -16,6 +16,7 @@ const VISIBILITY = ['unlisted', 'public'];
 const GENERAL = 'general';
 const MAX_LENGTH = 4096;
 const TEXT_LENGTH = 65536;
+const QUOTE_LENGTH = 300;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const CHECKSUM = /^[0-9a-f]{64}$/;
 const PAIR = /^[\w-]{1,64}_[\w-]{1,64}$/;
@@ -24,6 +25,7 @@ const ICON_PREFIX = /^(\p{Extended_Pictographic}\S*)\s+(.+)$/u;
 const TYPES = {
   string: (value) => typeof value === 'string' && value.length <= MAX_LENGTH,
   text: (value) => typeof value === 'string' && value.length <= TEXT_LENGTH,
+  quote: (value) => typeof value === 'string' && value.length <= QUOTE_LENGTH,
   number: (value) => typeof value === 'number',
   boolean: (value) => typeof value === 'boolean',
   checksum: (value) => typeof value === 'string' && CHECKSUM.test(value),
@@ -52,6 +54,7 @@ const FIELDS = {
     content: 'string',
     timestamp: 'number',
     replyTo: 'string',
+    quote: 'quote',
     pinned: 'boolean',
   },
   post: {
@@ -126,6 +129,9 @@ const validate = (delta) => {
   if (!Object.hasOwn(FIELDS, entity)) return false;
   const fields = FIELDS[entity];
   const hasReactions = TIMELINE.includes(entity);
+  if (Object.hasOwn(data, 'quote') && !Object.hasOwn(data, 'replyTo')) {
+    return false;
+  }
   for (const key in data) {
     const node = data[key];
     const isReaction = hasReactions && key === 'reactions';
@@ -190,6 +196,7 @@ const createMessage = (replica, message) => {
   const { id, chat, author, nick, content, timestamp } = message;
   const fields = { chat, author, nick, content, timestamp };
   if (message.replyTo) fields.replyTo = message.replyTo;
+  if (message.quote && message.replyTo) fields.quote = message.quote;
   return replica.assign('message', id, fields);
 };
 
@@ -342,22 +349,6 @@ const threadsOf = (replica, chat) => {
   return { items: shown.toSorted(byTime), records, replies };
 };
 
-const threadOf = (replies, id) => {
-  const thread = [];
-  const visited = new Set([id]);
-  const parents = [id];
-  while (parents.length > 0) {
-    const parent = parents.pop();
-    for (const reply of replies.get(parent) ?? []) {
-      if (visited.has(reply.id)) continue;
-      visited.add(reply.id);
-      thread.push(reply);
-      parents.push(reply.id);
-    }
-  }
-  return thread.sort(byTime);
-};
-
 const lineageOf = (records, id) => {
   const lineage = [];
   let record = records.get(id);
@@ -445,7 +436,7 @@ const activityOf = (replica) => {
 };
 
 export { REACTIONS, ICONS, CHANNELS, TIMELINE, GENERAL };
-export { MAX_LENGTH, TEXT_LENGTH, MAX_FILE_SIZE, validate, seed };
+export { MAX_LENGTH, TEXT_LENGTH, QUOTE_LENGTH, MAX_FILE_SIZE, validate, seed };
 export { pairOf, isPair, directUnit };
 export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
@@ -453,5 +444,5 @@ export { createFolder, setVisibility, placeItem };
 export { createMessage, createPost, startCall, endCall };
 export { attachFile, setReaction, pin };
 export { listChannels, listAuthors, folderTree, activityOf };
-export { threadsOf, threadOf, lineageOf };
+export { threadsOf, lineageOf };
 export { attachmentsOf, reactionsOf, unreadOf, filesOf };

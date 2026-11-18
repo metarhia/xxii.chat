@@ -8,6 +8,7 @@ const CLICK_MS = 400;
 const MOVE_PX = 10;
 const PULL_PX = 80;
 const REPLY_PX = 56;
+const EDGE_PX = 24;
 const LIFT_MS = 160;
 
 const MENU_KEYS = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
@@ -67,7 +68,9 @@ class Press {
     const timer = setTimeout(() => this.#hold(), LONG_PRESS_MS);
     const offset = 0;
     const isSwiping = false;
-    this.#press = { timer, x, y, item, canSwipe, offset, isSwiping };
+    const isInside = x >= EDGE_PX;
+    const isSwipe = canSwipe && isInside;
+    this.#press = { timer, x, y, item, canSwipe: isSwipe, offset, isSwiping };
   }
 
   move(event) {
@@ -77,7 +80,7 @@ class Press {
     const dy = event.clientY - press.y;
     if (press.isSwiping) return void this.#pull(dx);
     if (Math.hypot(dx, dy) <= MOVE_PX) return;
-    const isSideways = dx < 0 && Math.abs(dx) > Math.abs(dy);
+    const isSideways = dx > 0 && Math.abs(dx) > Math.abs(dy);
     if (!press.canSwipe || !isSideways) return void this.cancel();
     clearTimeout(press.timer);
     press.isSwiping = true;
@@ -94,7 +97,7 @@ class Press {
     const press = this.#press;
     if (!press?.isSwiping) return void this.cancel();
     this.#releasedAt = performance.now();
-    const isReply = press.offset <= -REPLY_PX;
+    const isReply = press.offset >= REPLY_PX;
     this.cancel();
     if (!isReply) return;
     navigator.vibrate?.(10);
@@ -126,9 +129,9 @@ class Press {
 
   #pull(dx) {
     const press = this.#press;
-    press.offset = clamp(dx, -PULL_PX, 0);
+    press.offset = clamp(dx, 0, PULL_PX);
     press.item.style.transform = `translateX(${press.offset}px)`;
-    press.item.classList.toggle('swipe-ready', press.offset <= -REPLY_PX);
+    press.item.classList.toggle('swipe-ready', press.offset >= REPLY_PX);
   }
 
   #hold() {
