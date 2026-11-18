@@ -6,11 +6,16 @@ server, [metacom](https://github.com/metarhia/metacom) transport, and
 sync. Terminal-like UI follows the
 [chat terminal theme](https://www.figma.com/design/eMClRRHH4GKf3G58RhfK8d).
 
-- Install dependencies: `npm i`, `metacom`, `globalstorage`, and `impress`
-  are linked from `../..`, `../globalstorage`, and `../impress`
+- Install dependencies: `npm i`, `metacom`, `globalstorage`, `impress`, and
+  `metaice` are linked from `../..`, `../globalstorage`, `../impress`, and
+  `../metaice`
 - Start server: `node server`
-- Open in browser: [`http://127.0.0.1:8000/`](http://127.0.0.1:8000/), the
-  balancer redirects to the server port `8001`
+- The `api` group serves the app on `XXII_PORT` (default `8000`):
+  [`http://127.0.0.1:8000/`](http://127.0.0.1:8000/). One port, no balancer,
+  so call state stays in that thread
+- The `rtc` group serves STUN and TURN on `XXII_ICE_PORT` (default `3478`)
+  over UDP and TCP. metaice is the provider behind that group, and impress
+  owns the sockets
 - Server data is kept in `application/data`, set `XXII_DATA` to use another
   folder
 - `npm run static` copies browser builds of metacom, globalstorage, and
@@ -117,6 +122,32 @@ each tile can also show or hide its own stats. Connection bars use RTT and
 loss. Stats include bitrate, codecs, video size and frame rate, and candidate
 types where the browser supplies them, reusing the bandwidth policy sample.
 
+## STUN and TURN
+
+STUN and TURN are metaice behind the `rtc` group. impress owns the sockets.
+`application/config/metaice.js` keeps the host, external servers, secret, and
+port that build the ICE server list.
+
+- `XXII_PORT` defaults to `8000` when unset. It is the `api` group port.
+- `XXII_ICE_PORT` defaults to `3478` when unset or empty. It is the `rtc`
+  group port over UDP and TCP, and the port in the ICE server list. `0`
+  means port `0`.
+- `XXII_TURN_SECRET` defaults to empty. Empty turns TURN off and leaves STUN
+  on.
+- `XXII_TURN_PUBLIC_ADDRESS` defaults to empty when unset. It is the numeric
+  relay address.
+- `XXII_TURN_PRIVATE_PEERS` defaults to `false`. Exactly `true` sets
+  `allowPrivatePeers`. Anything else, including unset, is `false`.
+
+The same server can run as the `metaice` CLI: `metaice [config]`. The
+config is a `.js` or `.json` options file. `SIGINT` and `SIGTERM` exit 0.
+A failed listen exits 1.
+
+Open the ICE port for UDP and TCP and the relay range for UDP. The default
+relay range is `49160-49359`. Open the TLS port only when TLS is configured.
+
+Calls settings still hold public STUN, user servers, and force relay.
+
 ## Releases
 
 The app version lives in `application/static/manifest.json` as `"version"`;
@@ -159,8 +190,8 @@ emoji switched on or off), `folder`, and `entry` (folder to channel link) are
 last-writer-wins registers, so a change is applied once whichever way it
 travels. A folder `parent` loop made by
 concurrent moves shows the looped folders at the root. `application/static/chat.js`
-validates deltas in browsers and on the server. Only one server thread
-(`ports: [8001]`) owns the server replica files.
+validates deltas in browsers and on the server. Only the `api` thread
+owns the server replica files.
 
 File bytes never go into replicas. A `file` record carries name, mime,
 size, and checksum; the bytes live in OPFS `files/<sha256>` shared by tabs
@@ -245,4 +276,11 @@ server) with `files/have`, `get`, and `put`.
   missing fields, connection bars, peer volume storage, gain and cleanup;
   `test/call-tiles.js` checks menus, volume, restoration, real Chrome stats,
   screen audio and teardown;
-  ports `8000` and `8001` must be free
+  `test/call-turn.js` forces relay through the `rtc` group and checks
+  that both sides select a relay pair while audio and video flow
+  (scenario 9);
+  `npm run test:app` reserves two different free ports and passes them as
+  `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so
+  it does not bind `8000` or `3478`. The browser harness picks free
+  `XXII_PORT` and `XXII_ICE_PORT`
+  (not `0`, and not a port it found busy) and opens that api port

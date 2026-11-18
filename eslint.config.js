@@ -6,6 +6,7 @@ const VENDOR = [
   'application/static/metacom.js',
   'application/static/metautil.js',
   'application/static/globalstorage.js',
+  'docs/**',
 ];
 
 module.exports = [

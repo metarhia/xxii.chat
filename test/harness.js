@@ -1,15 +1,23 @@
 'use strict';
 
+const dgram = require('node:dgram');
 const fs = require('node:fs/promises');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 const { setTimeout: delay } = require('node:timers/promises');
 
 const CHROME = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const ROOT = path.join(__dirname, '..');
-const ORIGIN = 'http://127.0.0.1:8001';
+const RESERVE_FLAG = '--reserve-ports';
+const APP_FLAG = '--app-tests';
+const APP_ATTEMPTS = 4;
+
+let apiPort = 0;
+let icePort = 0;
+let ORIGIN = '';
 const MEDIA_FLAGS = [
   '--use-fake-ui-for-media-stream',
   '--use-fake-device-for-media-stream',
@@ -82,24 +90,159 @@ class BrowserProtocol {
 const script = (body) =>
   `(async () => { const { app } = await import('/domain.js'); ${body} })()`;
 
-const stopServer = async (server) => {
-  const stopped = server.exitCode !== null || server.signalCode !== null;
-  if (stopped) return;
-  const exited = once(server, 'exit');
-  const timer = setTimeout(() => server.kill('SIGKILL'), 8000);
-  try {
-    server.kill('SIGINT');
-    await exited;
-  } finally {
-    clearTimeout(timer);
+const BLOCKED_PORTS = [0, 3478, 8000, 8001];
+
+const closeBound = (socket) =>
+  new Promise((resolve) => {
+    socket.close(() => resolve());
+  });
+
+const bindUdp = () =>
+  new Promise((resolve, reject) => {
+    const socket = dgram.createSocket('udp4');
+    socket.once('error', reject);
+    socket.bind({ port: 0, address: '0.0.0.0' }, () => {
+      resolve({ socket, port: socket.address().port });
+    });
+  });
+
+const holdTcp = (port) =>
+  new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      server.close();
+      resolve(null);
+    });
+    const options = { port, host: '0.0.0.0', exclusive: true };
+    server.listen(options, () => resolve(server));
+  });
+
+const takePort = async (excluded) => {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const udp = await bindUdp();
+    const port = udp.port;
+    const listed = BLOCKED_PORTS.includes(port);
+    const skipped = listed || excluded.includes(port);
+    if (skipped) {
+      await closeBound(udp.socket);
+      continue;
+    }
+    const tcp = await holdTcp(port);
+    if (!tcp) {
+      await closeBound(udp.socket);
+      continue;
+    }
+    return { port, udp: udp.socket, tcp };
   }
+  throw new Error('No free port');
 };
 
-const startServer = async (dataPath) => {
-  const env = { ...process.env, XXII_DATA: dataPath };
+const releaseHeld = async (held) => {
+  await closeBound(held.udp);
+  await closeBound(held.tcp);
+};
+
+const reservePort = async () => {
+  const held = await takePort([]);
+  await releaseHeld(held);
+  return held.port;
+};
+
+const reservePair = async () => {
+  const first = await takePort([]);
+  let second = null;
+  try {
+    second = await takePort([first.port]);
+  } catch (error) {
+    await releaseHeld(first);
+    throw error;
+  }
+  await releaseHeld(first);
+  await releaseHeld(second);
+  return [first.port, second.port];
+};
+
+const portFree = (port) =>
+  new Promise((resolve) => {
+    const server = net.createServer();
+    let settled = false;
+    const finish = (free) => {
+      if (settled) return;
+      settled = true;
+      if (!server.listening) {
+        resolve(free);
+        return;
+      }
+      server.close(() => resolve(free));
+    };
+    server.once('error', () => finish(false));
+    const options = { port, host: '0.0.0.0', exclusive: true };
+    server.listen(options, () => finish(true));
+  });
+
+const heardPort = (output, port) => {
+  const pattern = new RegExp(`Listen port ${port}([^0-9]|$)`);
+  return pattern.test(output);
+};
+
+const waitForPorts = async (ports) => {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    let free = true;
+    for (let index = 0; index < ports.length; index++) {
+      const open = await portFree(ports[index]);
+      if (!open) free = false;
+    }
+    if (free) return true;
+    await delay(200);
+  }
+  return false;
+};
+
+const concretePort = (environment, name, fallback) => {
+  if (!Object.hasOwn(environment, name)) return `${fallback}`;
+  const text = `${environment[name]}`;
+  const missing = text === '' || text === '0' || text === 'undefined';
+  if (missing) return `${fallback}`;
+  return text;
+};
+
+const stopServer = async (server) => {
+  const stopped = server.exitCode !== null || server.signalCode !== null;
+  if (!stopped) {
+    const exited = once(server, 'exit');
+    const timer = setTimeout(() => server.kill('SIGKILL'), 8000);
+    try {
+      server.kill('SIGINT');
+      await exited;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const ports = server.xxiiPorts ?? [];
+  await waitForPorts(ports);
+};
+
+const spawnServer = async (dataPath, environment) => {
+  const apiText = concretePort(environment, 'XXII_PORT', apiPort);
+  const iceText = concretePort(environment, 'XXII_ICE_PORT', icePort);
+  const ports = [Number(apiText), Number(iceText)];
+  const ready = await waitForPorts(ports);
+  if (!ready) {
+    const message = `Ports ${apiText} and ${iceText} are still in use`;
+    throw new Error(message);
+  }
+  const env = {
+    ...process.env,
+    ...environment,
+    XXII_PORT: apiText,
+    XXII_ICE_PORT: iceText,
+    XXII_DATA: dataPath,
+  };
   const stdio = ['ignore', 'pipe', 'pipe'];
   const options = { cwd: ROOT, env, stdio };
   const server = spawn(process.execPath, ['server.js'], options);
+  server.xxiiPorts = ports;
   let output = '';
   const collect = (data) => {
     output += data.toString();
@@ -107,12 +250,30 @@ const startServer = async (dataPath) => {
   server.stdout.on('data', collect);
   server.stderr.on('data', collect);
   for (let attempt = 0; attempt < 150; attempt++) {
-    if (output.includes('Listen port 8001')) return server;
+    const apiUp = heardPort(output, apiText);
+    const iceUp = heardPort(output, iceText);
+    if (apiUp && iceUp) return server;
     if (server.exitCode !== null) break;
     await delay(100);
   }
   await stopServer(server);
   throw new Error(`Server did not start:\n${output}`);
+};
+
+const startServer = async (dataPath, environment = {}) => {
+  let last = new Error('Server did not start');
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await spawnServer(dataPath, environment);
+    } catch (error) {
+      last = error;
+      const busy = `${error.message}`.includes('EADDRINUSE');
+      const held = `${error.message}`.includes('still in use');
+      if (!busy && !held) throw error;
+      await delay(500);
+    }
+  }
+  throw last;
 };
 
 const startCallServer = async (t) => {
@@ -148,6 +309,7 @@ const launch = async (t, flags) => {
   ];
   const stdio = ['ignore', 'ignore', 'pipe'];
   const chrome = spawn(CHROME, args, { stdio });
+  chrome.stderr.resume();
   t.after(async () => {
     chrome.kill();
     await Promise.race([once(chrome, 'exit'), delay(2000)]);
@@ -203,6 +365,79 @@ const wait = async (browser, session, body, timeoutMs = 15000) => {
   throw new Error(`Browser condition timed out: ${body}`);
 };
 
+const runAppOnce = (apiPort, icePort) =>
+  new Promise((resolve) => {
+    const env = {
+      ...process.env,
+      MODE: 'test',
+      XXII_PORT: `${apiPort}`,
+      XXII_ICE_PORT: `${icePort}`,
+    };
+    const stdio = ['ignore', 'pipe', 'pipe'];
+    const options = { cwd: ROOT, env, stdio };
+    const child = spawn(process.execPath, ['server.js'], options);
+    let output = '';
+    const collect = (chunk) => {
+      output += chunk.toString();
+      process.stdout.write(chunk);
+    };
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+    child.once('exit', (code) => {
+      const status = code === null ? 1 : code;
+      resolve({ code: status, output });
+    });
+  });
+
+const runAppTests = async () => {
+  let lastCode = 1;
+  for (let attempt = 0; attempt < APP_ATTEMPTS; attempt++) {
+    const ports = await reservePair();
+    const apiPort = ports[0];
+    const icePort = ports[1];
+    const result = await runAppOnce(apiPort, icePort);
+    lastCode = result.code;
+    const failed = result.code !== 0;
+    const busy = failed && result.output.includes('EADDRINUSE');
+    if (!busy) break;
+  }
+  process.exitCode = lastCode;
+};
+
+const readReserved = () => {
+  const args = [__filename, RESERVE_FLAG];
+  const stdio = ['ignore', 'pipe', 'pipe'];
+  const options = { encoding: 'utf8', stdio };
+  const result = spawnSync(process.execPath, args, options);
+  if (result.status !== 0) {
+    const detail = `${result.stderr || result.stdout}`.trim();
+    throw new Error(detail || 'No free port');
+  }
+  const lines = result.stdout.trim().split('\n');
+  return [Number(lines[0]), Number(lines[1])];
+};
+
+if (process.argv.includes(RESERVE_FLAG)) {
+  reservePair()
+    .then((ports) => {
+      process.stdout.write(`${ports[0]}\n${ports[1]}\n`);
+    })
+    .catch((error) => {
+      process.stderr.write(`${error.stack}\n`);
+      process.exitCode = 1;
+    });
+} else if (process.argv.includes(APP_FLAG)) {
+  runAppTests().catch((error) => {
+    process.stderr.write(`${error.stack}\n`);
+    process.exitCode = 1;
+  });
+} else {
+  const reserved = readReserved();
+  apiPort = reserved[0];
+  icePort = reserved[1];
+  ORIGIN = `http://127.0.0.1:${apiPort}`;
+}
+
 module.exports = {
   ORIGIN,
   MEDIA_FLAGS,
@@ -210,6 +445,8 @@ module.exports = {
   script,
   stopServer,
   startServer,
+  reservePort,
+  reservePair,
   startCallServer,
   launch,
   readServer,
