@@ -564,11 +564,13 @@ class CallSession extends Emitter {
 
   #onDenied(data) {
     if (data.endpoint && data.endpoint !== this.endpoint) return;
+    this.emit('denied');
     this.#shutdown();
   }
 
   #onRemoved(data) {
     if (data.endpoint !== this.endpoint) return;
+    this.emit('removed', data);
     this.#shutdown();
   }
 

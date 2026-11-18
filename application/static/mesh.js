@@ -316,15 +316,31 @@ class Mesh extends Emitter {
     this.attach().catch((error) => this.emit('error', error));
   }
 
-  async attach() {
+  async listen() {
     const { metacom } = this.#app;
-    if (!metacom || !this.connected) return;
+    if (!metacom || !this.connected) return null;
     await metacom.load('presence', 'signal');
     const { presence, signal } = metacom.api;
     addListener(presence, 'update', this.#onUpdate);
     addListener(signal, 'message', this.#onSignal);
+    return metacom.api;
+  }
+
+  async attach() {
+    const api = await this.listen();
+    if (!api) return;
+    const presence = api.presence;
     const list = this.isLeader ? await this.announce() : await presence.list();
     this.update(list);
+  }
+
+  async greet() {
+    const api = await this.listen();
+    if (!api || !this.isLeader) return;
+    const list = await this.announce();
+    if (!Array.isArray(list)) return;
+    this.peers = new Map(list.map((entry) => [entry.peer, entry]));
+    this.emit('peers');
   }
 
   async announce() {

@@ -250,6 +250,29 @@
       }
     });
 
+    await t.test('An omitted policy follows the config', async () => {
+      const clients = [];
+      const restore = patch({ defaultPolicy: 'approval' });
+      try {
+        const ada = person(clients, 'p-ada');
+        const bob = person(clients, 'p-bob');
+        const opened = await begin(ada, 'policy', 'p-ada:1');
+        const id = opened.state.call;
+        node.assert.strictEqual(opened.state.policy, 'approval');
+        const knock = await enter(bob, id, 'p-bob:1', {
+          token: opened.token,
+        });
+        node.assert.strictEqual(knock.status, 'lobby');
+        const read = await domain.call.link(ada, { call: id });
+        node.assert.strictEqual(read.token, opened.token);
+        const again = await domain.call.link(ada, { call: id });
+        node.assert.strictEqual(again.token, read.token);
+      } finally {
+        restore();
+        await done(clients);
+      }
+    });
+
     await t.test('Lobby admit and deny', async () => {
       const clients = [];
       try {
@@ -906,6 +929,108 @@
           'joined',
         );
       } finally {
+        await done(clients);
+      }
+    });
+
+    await t.test('Co-host can act and cannot demote the host', async () => {
+      const clients = [];
+      let restore = null;
+      try {
+        const ada = person(clients, 'c-ada');
+        const bob = person(clients, 'c-bob');
+        const cam = person(clients, 'c-cam');
+        const zoe = person(clients, 'c-zoe');
+        const owner = person(clients, 'c-own');
+        const gus = person(clients, 'c-gus');
+        restore = ownedBy('c-own');
+        const opened = await begin(ada, 'roles', 'c-ada:1', {
+          policy: 'open',
+        });
+        const id = opened.state.call;
+        await enter(bob, id, 'c-bob:1');
+        await enter(cam, id, 'c-cam:1');
+        await enter(zoe, id, 'c-zoe:1');
+        await enter(owner, id, 'c-own:1');
+        isCode(
+          await domain.call.host(bob, {
+            call: id,
+            action: 'mute',
+            target: 'c-cam:1',
+          }),
+          'call/admin-only',
+        );
+        await domain.call.host(ada, {
+          call: id,
+          action: 'promote',
+          target: 'c-bob:1',
+        });
+        node.assert.strictEqual(
+          await domain.call.host(bob, {
+            call: id,
+            action: 'mute',
+            target: 'c-cam:1',
+          }),
+          true,
+        );
+        node.assert.strictEqual(last(cam, 'call/request').data.by, 'c-bob');
+        isCode(
+          await domain.call.host(bob, {
+            call: id,
+            action: 'demote',
+            target: 'c-ada:1',
+          }),
+          'call/bad-action',
+        );
+        node.assert.strictEqual(domain.call.calls.get(id).host, 'c-ada');
+        const hostRow = row(last(ada, 'call/state').data, 'c-ada:1');
+        node.assert.strictEqual(hostRow.admin, true);
+        await domain.call.host(ada, {
+          call: id,
+          action: 'promote',
+          target: 'c-cam:1',
+        });
+        await domain.call.host(bob, {
+          call: id,
+          action: 'demote',
+          target: 'c-cam:1',
+        });
+        const demoted = row(last(cam, 'call/state').data, 'c-cam:1');
+        node.assert.strictEqual(demoted.admin, false);
+        const guest = domain.call.calls.get(id).participants.get('c-cam:1');
+        guest.mic = true;
+        await domain.call.host(bob, {
+          call: id,
+          action: 'unmute',
+          target: 'c-cam:1',
+        });
+        node.assert.strictEqual(guest.mic, true);
+        const asked = last(cam, 'call/request').data.action;
+        node.assert.strictEqual(asked, 'unmute');
+        ada.events.length = 0;
+        bob.events.length = 0;
+        cam.events.length = 0;
+        zoe.events.length = 0;
+        owner.events.length = 0;
+        await domain.call.host(bob, { call: id, action: 'muteAll' });
+        node.assert.strictEqual(named(ada, 'call/request').length, 0);
+        node.assert.strictEqual(named(bob, 'call/request').length, 0);
+        node.assert.strictEqual(named(owner, 'call/request').length, 0);
+        node.assert.strictEqual(named(cam, 'call/request').length, 1);
+        node.assert.strictEqual(named(zoe, 'call/request').length, 1);
+        node.assert.strictEqual(last(cam, 'call/request').data.action, 'mute');
+        await domain.call.host(ada, {
+          call: id,
+          action: 'policy',
+          value: 'approval',
+        });
+        const waiting = await enter(gus, id, 'c-gus:1');
+        node.assert.strictEqual(waiting.status, 'lobby');
+        await domain.call.admit(bob, { call: id, endpoint: 'c-gus:1' });
+        const joined = domain.call.calls.get(id).participants.has('c-gus:1');
+        node.assert.strictEqual(joined, true);
+      } finally {
+        if (restore) restore();
         await done(clients);
       }
     });

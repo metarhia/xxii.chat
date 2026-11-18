@@ -1,6 +1,31 @@
 import { Menu, Press } from './overlays.js';
 import { tileId } from './call-layout.js';
 
+const adminItems = (stage, endpoint) => {
+  if (!stage.isAdmin || endpoint === stage.session?.endpoint) return [];
+  const person = stage.personOf(endpoint);
+  if (!person) return [];
+  const mute = person.mic ? 'Ask to mute' : 'Ask to unmute';
+  const items = [{ action: 'ask-mute', label: mute }];
+  if (person.camera) {
+    items.push({ action: 'stop-camera', label: 'Stop camera' });
+  }
+  if (person.screen) {
+    items.push({ action: 'stop-remote-screen', label: 'Stop screen' });
+  }
+  const lit = stage.spotlight === endpoint;
+  const spotlight = lit ? 'Clear spotlight' : 'Spotlight';
+  items.push({ action: 'spotlight', label: spotlight });
+  const host = person.peer !== '' && person.peer === stage.hostPeer;
+  if (!host) {
+    const label = person.admin ? 'Remove co-host' : 'Make co-host';
+    const action = person.admin ? 'demote' : 'promote';
+    items.push({ action, label });
+  }
+  items.push({ action: 'remove', label: 'Remove' });
+  return items;
+};
+
 class TileMenu {
   constructor(stage) {
     this.stage = stage;
@@ -81,12 +106,13 @@ class TileMenu {
         label: enabled ? 'Audio only on' : label,
       });
     }
+    const menuItems = items.concat(adminItems(stage, endpoint));
     const parent = document.fullscreenElement ?? document.body;
     parent.append(this.element);
     this.menu.open({
       id: tileId(endpoint, slot),
       mine: new Set(),
-      items,
+      items: menuItems,
       point,
       item: null,
     });

@@ -1924,6 +1924,59 @@ svg {
   min-height: 0;
 }
 
+.call-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.call-people {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 220px;
+  flex: 0 0 220px;
+  padding: 12px;
+  overflow: auto;
+  background: var(--panel);
+}
+
+.call-lobby,
+.lobby-row,
+.knock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.call-roster {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#knock-toasts {
+  position: fixed;
+  top: calc(52px + var(--safe-top));
+  right: 16px;
+  z-index: 36;
+  display: grid;
+  gap: 8px;
+}
+
+.knock {
+  display: grid;
+  gap: 8px;
+  max-width: 280px;
+  padding: 10px 12px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+}
+
 .call-topbar {
   display: flex;
   align-items: center;
@@ -2221,16 +2274,32 @@ svg {
 }
 
 .call-share,
-.call-share details {
+.call-share details,
+.call-leave,
+.call-leave details {
   position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.call-share summary {
+.call-share summary,
+.call-leave summary {
   padding: 6px 10px;
   cursor: pointer;
+}
+
+.call-host,
+.call-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.call-prompt {
+  padding: 8px 12px;
+  background: var(--raised);
 }
 
 .share-menu {
@@ -2247,7 +2316,8 @@ svg {
 }
 
 .call-share details:not([open]) .share-menu,
-.call-layout-options:not([open]) .share-menu {
+.call-layout-options:not([open]) .share-menu,
+.call-leave details:not([open]) .share-menu {
   display: none;
 }
 
