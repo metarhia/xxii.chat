@@ -153,6 +153,12 @@ const tileAction = (endpoint, action) => {
     return true;`;
 };
 
+const announced = (text) => `const live = document.querySelector(
+    '#call-announcements[aria-live="polite"]');
+  const message = live?.textContent;
+  if (message !== ${JSON.stringify(text)}) throw new Error(message);
+  return true;`;
+
 const MUTED = `const note = document.querySelector('.notification');
   const text = note ? note.textContent : '';
   const mic = document.querySelector('#call-view [data-action="mic"]');
@@ -285,12 +291,14 @@ test(
       audioLevel(guestId, 2000, false),
     );
     await waitFront(browser, guest.sessionId, MUTED, 10000);
+    await waitFront(browser, guest.sessionId, announced('alex muted you'));
 
     await front(browser, host.sessionId);
     await run(host.sessionId, tileAction(guestId, 'remove'));
     await waitFront(browser, host.sessionId, links(1), 15000);
     await waitFront(browser, extra.sessionId, links(1), 15000);
     await waitFront(browser, guest.sessionId, REMOVED, 10000);
+    await waitFront(browser, guest.sessionId, announced('removed by alex'));
 
     const lobby = keep(
       t,
@@ -313,6 +321,7 @@ test(
     await run(host.sessionId, END);
     await waitFront(browser, host.sessionId, ENDED, 15000);
     await waitFront(browser, extra.sessionId, ENDED, 15000);
+    await waitFront(browser, extra.sessionId, announced('alex ended the call'));
     await waitFront(browser, lobby.sessionId, ENDED, 15000);
   },
 );

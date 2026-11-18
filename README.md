@@ -145,6 +145,44 @@ speaker. Speaking tiles show a green bar and an avatar ring that follows the
 microphone level. The mini call follows the active speaker. Press `F` outside
 text fields for full screen, or `Ctrl+Alt+L` to cycle layouts.
 
+The call controls have a hand button and a reactions menu. Raised hands are
+call state: the People panel lists them first, ordered by raise time, and
+tiles show the order number. Anyone lowers their own hand; admins lower any
+hand from the tile menu or the People panel, or all hands at once. A hand
+also lowers itself after three seconds of speaking unless auto-lower is off
+in Calls settings. The reactions 👍 ❤️ 😂 😮 👏 🎉 float up from the sender's tile for three
+seconds. They travel as `reaction` messages on the call data channel, at most
+three per second per sender.
+
+Shortcuts in a call: `Ctrl+D` mutes and unmutes, `Ctrl+E` turns the camera
+on and off, `Ctrl+Alt+H` raises and lowers the hand, `Ctrl+Alt+S` starts and
+stops screen sharing, `Ctrl+Alt+L` cycles layouts, `F` toggles full screen,
+and `Esc` closes open menus without leaving the call. The combinations with
+`Ctrl` also work in the composer; `F` and `Space` do not fire in text fields.
+Hold `Space` outside text fields while muted to talk: the microphone opens
+while the key is down and closes on release, when the window loses focus, or
+when the tab is hidden. The `more` menu lists the keys and offers
+picture-in-picture: in browsers with Document Picture-in-Picture the call
+moves into a small window with the active speaker, mic, camera, hand,
+reactions, and leave, and closing it returns to the mini call; elsewhere the
+menu says that it is not available. Every control is reachable with `Tab` and
+operated with `Enter` or `Space`.
+
+The sidebar’s session block and the call’s more menu open Calls settings.
+This browser remembers device choices, join defaults, self-view mirroring,
+noise suppression, push-to-talk, auto-lower, and network settings. The mic
+chevron offers a device picker, noise suppression, and push-to-talk. Recording
+defaults include layout, audio mode, quality, and a folder in browsers with
+directory access. A speaker test plays a short tone on the selected output.
+
+Phones show the active tile above a horizontally scrollable strip with the
+controls above the safe area. Chat and People open as bottom sheets. Back
+closes the sheet, then returns to the mini call. The camera menu switches
+between front and back cameras. On Android and iOS the camera pauses while
+the tab is hidden and resumes on return. The call requests a screen wake lock
+when available. Nearby joins and leaves share a toast for calls of up to eight.
+Screen readers also announce raised hands and host requests.
+
 Tile options open with the ellipsis, keyboard focus, or touch long press.
 The menu offers pin, full screen, audio only, stats, and local volume from
 0–200%. Volume is remembered per peer for all their microphone and screen
@@ -263,7 +301,8 @@ server) with `files/have`, `get`, and `put`.
 | `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state                                      |
 | `files/have`, `get`, `put`       | answer peer | File exchange between peers                                        |
 | `CallSession` event `stats`      | call tab    | Per-link RTT, loss, streams and candidates sampled once per second |
-| `call/update`                    | server      | Mic, camera, and shared screen state for the endpoint              |
+| `call/update`                    | server      | Mic, camera, shared screen, and raised hand for the endpoint       |
+| `reaction` peer message          | call link   | One emoji from the reaction set, at most 3 per second per sender   |
 | `hint` peer message              | call link   | Rendered slot size, frame cap, and camera audio-only request       |
 | `ice/servers`                    | server      | ICE server list for the call tab; host is location.hostname        |
 
@@ -318,6 +357,11 @@ server) with `files/have`, `get`, and `put`.
   lock denies (scenario 10);
   `test/call-host.js` checks ask to mute, remove, and end for everyone
   (scenario 11);
+  `test/call-hands.js` covers hand order, reactions, membership toasts and
+  screen reader announcements. `test/call-keys.js` covers shortcuts,
+  keyboard menus and picture-in-picture. `test/call-settings.js` checks
+  settings validation, migration and toast timing. `test/call-phone.js`
+  checks saved defaults, push-to-talk, auto-lower, mobile controls and Back;
   `npm run test:app` reserves two different free ports and passes them as
   `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so
   it does not bind `8000` or `3478`. The browser harness picks free

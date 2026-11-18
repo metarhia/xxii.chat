@@ -933,6 +933,67 @@
       }
     });
 
+    await t.test('Hands are raised, ordered, and lowered', async () => {
+      const clients = [];
+      try {
+        const ada = person(clients, 'r-ada');
+        const bob = person(clients, 'r-bob');
+        const cam = person(clients, 'r-cam');
+        const opened = await begin(ada, 'hands', 'r-ada:1', {
+          policy: 'open',
+        });
+        const id = opened.state.call;
+        await enter(bob, id, 'r-bob:1');
+        await enter(cam, id, 'r-cam:1');
+        const raise = (client, endpoint, hand) =>
+          domain.call.update(client, { call: id, endpoint, hand });
+        const hands = () => {
+          const state = last(ada, 'call/state').data;
+          const raised = state.participants.filter((item) => item.hand > 0);
+          raised.sort((a, b) => a.hand - b.hand);
+          return raised.map((item) => item.endpoint);
+        };
+        node.assert.strictEqual(await raise(cam, 'r-cam:1', true), true);
+        await wait(5);
+        await raise(bob, 'r-bob:1', true);
+        await wait(5);
+        await raise(ada, 'r-ada:1', true);
+        node.assert.deepStrictEqual(hands(), ['r-cam:1', 'r-bob:1', 'r-ada:1']);
+        const stored = domain.call.calls.get(id).participants.get('r-cam:1');
+        const first = stored.hand;
+        await wait(5);
+        await raise(cam, 'r-cam:1', true);
+        node.assert.strictEqual(stored.hand, first);
+        node.assert.strictEqual(await raise(bob, 'r-bob:1', false), true);
+        node.assert.deepStrictEqual(hands(), ['r-cam:1', 'r-ada:1']);
+        isCode(
+          await domain.call.host(bob, {
+            call: id,
+            action: 'lowerHand',
+            target: 'r-cam:1',
+          }),
+          'call/admin-only',
+        );
+        node.assert.ok(stored.hand > 0);
+        isCode(await raise(bob, 'r-cam:1', false), 'call/forbidden');
+        node.assert.ok(stored.hand > 0);
+        await domain.call.host(ada, {
+          call: id,
+          action: 'lowerHand',
+          target: 'r-cam:1',
+        });
+        node.assert.strictEqual(stored.hand, 0);
+        node.assert.deepStrictEqual(hands(), ['r-ada:1']);
+        await raise(cam, 'r-cam:1', true);
+        await domain.call.host(ada, { call: id, action: 'lowerHands' });
+        node.assert.deepStrictEqual(hands(), []);
+        const seen = last(cam, 'call/state').data;
+        node.assert.strictEqual(row(seen, 'r-cam:1').hand, 0);
+      } finally {
+        await done(clients);
+      }
+    });
+
     await t.test('Co-host can act and cannot demote the host', async () => {
       const clients = [];
       let restore = null;

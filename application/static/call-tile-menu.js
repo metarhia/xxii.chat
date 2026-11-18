@@ -13,6 +13,9 @@ const adminItems = (stage, endpoint) => {
   if (person.screen) {
     items.push({ action: 'stop-remote-screen', label: 'Stop screen' });
   }
+  if (person.hand > 0) {
+    items.push({ action: 'lower-hand', label: 'Lower hand' });
+  }
   const lit = stage.spotlight === endpoint;
   const spotlight = lit ? 'Clear spotlight' : 'Spotlight';
   items.push({ action: 'spotlight', label: spotlight });

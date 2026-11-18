@@ -124,6 +124,13 @@
       </aside>
 
       <main id="chat-view" class="chat-view">
+        <button
+          id="close-call-chat"
+          class="close-call-chat link-btn"
+          type="button"
+        >
+          close chat
+        </button>
         <header class="topbar">
           <button
             id="menu-btn"
@@ -317,6 +324,17 @@
         </section>
         <section class="panel-body" data-panel="calls">
           <section class="section">
+            <h3 class="small">DEVICES</h3>
+            <div class="call-device-fields"></div>
+            <button class="test-speaker link-btn" type="button">
+              test speaker
+            </button>
+          </section>
+          <section class="section">
+            <h3 class="small">CALL PREFERENCES</h3>
+            <div class="join-defaults"></div>
+          </section>
+          <section class="section">
             <h3 class="small">NETWORK</h3>
             <label class="check">
               <input id="ice-public-stun" type="checkbox" />
@@ -352,6 +370,13 @@
               <button id="ice-add" class="link-btn" type="submit">add</button>
             </form>
             <ul id="ice-servers" class="list"></ul>
+          </section>
+          <section class="section">
+            <h3 class="small">RECORDINGS</h3>
+            <div class="record-defaults"></div>
+            <button class="record-folder link-btn" type="button">
+              choose folder
+            </button>
           </section>
         </section>
       </aside>
@@ -416,7 +441,19 @@
       </div>
     </div>
     <div id="palette" class="palette hidden"></div>
-    <div id="notification" class="notification hidden" role="status"></div>
+    <div
+      id="call-announcements"
+      class="visually-hidden"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <div id="call-toast" hidden></div>
+    <div
+      id="notification"
+      class="notification hidden"
+      role="status"
+      aria-live="polite"
+    ></div>
 
     <template id="contact-item-template">
       <li class="nav-item contact-item">

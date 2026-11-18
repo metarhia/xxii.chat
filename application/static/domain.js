@@ -20,6 +20,7 @@ import { formatSize, fitSize, readSetting, writeSetting } from './view.js';
 import { readMap, writeMap, cloneTemplate, setBadge } from './view.js';
 import { fillText, parseBlocks, excerptOf, isEditable } from './view.js';
 import { isReducedMotion } from './view.js';
+import { CallPreferences } from './call-preferences.js';
 import { isIceUrl, readIce, writeIce, buildIce } from './ice.js';
 import { Press, Menu, Lightbox, Switcher } from './overlays.js';
 import { Replica, Uplink } from './globalstorage.js';
@@ -128,6 +129,8 @@ const LAYERS = {
   switcher: (app) => app.hideSwitcher(),
   sidebar: (app) => app.app.classList.remove('menu-open'),
   panel: (app) => app.hidePanel(),
+  call: (app) => app.callStage?.collapse(),
+  callSheet: (app) => app.callStage?.hideSheet(),
   focus: (app) => app.leaveFocus(),
   article: (app) => app.leaveArticle(),
 };
@@ -535,6 +538,11 @@ class ChatApplication extends Application {
     const isSidebarHidden = readSetting(SIDEBAR_KEY, '') === 'hidden';
     this.app.classList.toggle('sidebar-hidden', isSidebarHidden);
     this.usernameInput.value = this.username;
+    this.preferences = new CallPreferences(
+      document.querySelector('.panel-body[data-panel="calls"]'),
+      () => this.callStage,
+      (text) => this.showNotification(text, 'warning'),
+    );
     this.renderIce();
     this.fillPalette();
     this.restoreDraft();
@@ -668,6 +676,8 @@ class ChatApplication extends Application {
     this.versionBtn.onclick = () => this.handleVersionClick();
     this.clearMessagesBtn.onclick = () => this.clearDatabase();
     this.clearLogBtn.onclick = () => this.logger.clear();
+    document.getElementById('close-call-chat').onclick = () =>
+      this.callStage?.closeSheet();
     this.callBtn.onclick = () => beginCall(this);
     this.searchBtn.onclick = () => this.toggleSearch();
     this.pinsBtn.onclick = () => this.togglePanel('pins');
@@ -2068,6 +2078,7 @@ class ChatApplication extends Application {
   showPanel(name) {
     const isOpen = this.panel !== '';
     this.panel = name;
+    if (name === 'calls') this.preferences.refresh();
     this.renderPanel();
     if (!isOpen && isNarrow()) this.pushLayer('panel');
   }
@@ -3127,6 +3138,16 @@ class ChatApplication extends Application {
   ensureCallStage() {
     if (this.callStage) return this.callStage;
     const hooks = {
+      preferences: this.preferences,
+      closeSettings: () => this.closePanel(),
+      settings: () => {
+        this.showPanel('calls');
+        this.panelCloseBtn.focus();
+      },
+      pushLayer: (name) => {
+        if (!this.layers.includes(name)) this.pushLayer(name);
+      },
+      popLayer: (name) => this.popLayer(name),
       nick: () => this.username,
       hasNick: () => this.username !== '',
       saveNick: (nick) => {
@@ -3138,7 +3159,7 @@ class ChatApplication extends Application {
       focusChat: (id) => this.focusCallChat(id),
       changed: () => this.scheduleRender(),
       fail: (error) => this.report(error),
-      notice: (text) => this.showNotification(text, 'warning'),
+      notice: (text, region) => this.showNotification(text, 'warning', region),
       admit: (call, endpoint) => this.api.call.admit({ call, endpoint }),
       deny: (call, endpoint) => this.api.call.deny({ call, endpoint }),
       host: (args) => this.api.call.host(args),
@@ -3238,6 +3259,11 @@ class ChatApplication extends Application {
   onCallEnded(data) {
     const call = data?.call;
     if (typeof call !== 'string') return;
+    const stage = this.callStage;
+    if (stage?.session?.call === call && data.by) {
+      const text = `${stage.nickOf(data.by)} ended the call`;
+      this.showNotification(text, 'info', stage.announcements);
+    }
     this.liveCalls.delete(call);
     this.markBookEnded(call);
     this.ring.stop(call);
@@ -3561,13 +3587,17 @@ class ChatApplication extends Application {
     if (!session) return;
     const call = session.call;
     const endpoint = session.endpoint;
-    const mic = flags.mic;
-    const camera = flags.camera;
-    const screen = flags.screen;
-    await this.api.call.update({ call, endpoint, mic, camera, screen });
+    const args = { call, endpoint };
+    for (const name of ['mic', 'camera', 'screen', 'hand']) {
+      if (typeof flags[name] === 'boolean') args[name] = flags[name];
+    }
+    await this.api.call.update(args);
   }
 
-  showNotification(message, type = 'info') {
+  showNotification(message, type = 'info', region = this.notification) {
+    const separate = region !== this.notification;
+    this.notification.setAttribute('aria-live', separate ? 'off' : 'polite');
+    if (separate) region.textContent = message;
     this.notification.textContent = message;
     this.notification.className = `notification ${type}`;
     setTimeout(() => {

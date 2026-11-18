@@ -567,7 +567,9 @@ const applyUpdate = (item, args) => {
     changed = true;
   }
   if (typeof args.hand === 'boolean') {
-    item.hand = args.hand ? Date.now() : 0;
+    const raised = item.hand > 0;
+    if (!args.hand) item.hand = 0;
+    else if (!raised) item.hand = Date.now();
     changed = true;
   }
   if (typeof args.title === 'string') {
