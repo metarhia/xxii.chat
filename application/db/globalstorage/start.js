@@ -1,6 +1,7 @@
 async () => {
   const { port } = application.server;
-  if (!config.server.ports.includes(port)) return;
+  const ports = config.server.api.ports;
+  if (!ports.includes(port)) return;
   const { Replica, SyncService } = npm.globalstorage;
   const root = process.cwd();
   const chatPath = node.path.join(root, 'application/static/chat.js');
