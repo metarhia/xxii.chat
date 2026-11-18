@@ -223,13 +223,23 @@ const stopServer = async (server) => {
   await waitForPorts(ports);
 };
 
+const tlsTextOf = (environment) => {
+  const raw = environment.XXII_TURN_TLS_PORT;
+  if (raw === undefined || `${raw}` === '') return '';
+  return `${raw}`;
+};
+
 const spawnServer = async (dataPath, environment) => {
   const apiText = concretePort(environment, 'XXII_PORT', apiPort);
   const iceText = concretePort(environment, 'XXII_ICE_PORT', icePort);
+  const tlsText = tlsTextOf(environment);
   const ports = [Number(apiText), Number(iceText)];
+  if (tlsText !== '') ports.push(Number(tlsText));
   const ready = await waitForPorts(ports);
   if (!ready) {
-    const message = `Ports ${apiText} and ${iceText} are still in use`;
+    const both = `${apiText} and ${iceText}`;
+    const listed = tlsText === '' ? both : `${both}, ${tlsText}`;
+    const message = `Ports ${listed} are still in use`;
     throw new Error(message);
   }
   const env = {
@@ -244,6 +254,7 @@ const spawnServer = async (dataPath, environment) => {
   const server = spawn(process.execPath, ['server.js'], options);
   server.xxiiPorts = ports;
   let output = '';
+  server.xxiiLog = () => output;
   const collect = (data) => {
     output += data.toString();
   };
@@ -252,7 +263,8 @@ const spawnServer = async (dataPath, environment) => {
   for (let attempt = 0; attempt < 150; attempt++) {
     const apiUp = heardPort(output, apiText);
     const iceUp = heardPort(output, iceText);
-    if (apiUp && iceUp) return server;
+    const tlsUp = tlsText === '' || heardPort(output, tlsText);
+    if (apiUp && iceUp && tlsUp) return server;
     if (server.exitCode !== null) break;
     await delay(100);
   }
@@ -293,7 +305,7 @@ const startCallServer = async (t) => {
   return server;
 };
 
-const launch = async (t, flags) => {
+const launch = async (t, flags, env = null) => {
   const extra = flags ?? [];
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'xxii-chrome-'));
   const args = [
@@ -308,14 +320,25 @@ const launch = async (t, flags) => {
     'about:blank',
   ];
   const stdio = ['ignore', 'ignore', 'pipe'];
-  const chrome = spawn(CHROME, args, { stdio });
-  chrome.stderr.resume();
-  t.after(async () => {
+  const options = { stdio };
+  if (env) options.env = { ...process.env, ...env };
+  const chrome = spawn(CHROME, args, options);
+  const stderr = { text: '' };
+  const readStderr = () => stderr.text;
+  chrome.stderr.on('data', (chunk) => {
+    stderr.text += chunk.toString();
+  });
+  const ended = () => chrome.exitCode !== null || chrome.signalCode !== null;
+  const stopChrome = async () => {
+    if (ended()) return;
     chrome.kill();
     await Promise.race([once(chrome, 'exit'), delay(2000)]);
-    if (chrome.exitCode === null) chrome.kill('SIGKILL');
-    const options = { recursive: true, force: true, maxRetries: 5 };
-    await fs.rm(profile, options);
+    if (!ended()) chrome.kill('SIGKILL');
+  };
+  t.after(async () => {
+    await stopChrome();
+    const remove = { recursive: true, force: true, maxRetries: 5 };
+    await fs.rm(profile, remove);
   });
   const file = path.join(profile, 'DevToolsActivePort');
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -325,6 +348,8 @@ const launch = async (t, flags) => {
       const socket = new WebSocket(`ws://127.0.0.1:${lines[0]}${lines[1]}`);
       await once(socket, 'open');
       const browser = new BrowserProtocol(socket);
+      browser.stderrText = readStderr;
+      browser.stopChrome = stopChrome;
       t.after(() => browser.close());
       return browser;
     }
