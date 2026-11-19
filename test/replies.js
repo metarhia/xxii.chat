@@ -2,6 +2,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 
 const load = () => import('../application/static/replies.js');
 
@@ -25,15 +27,22 @@ const repliesOf = (list) => {
   return replies;
 };
 
-const row = (id, root, nick = 'x') => ({ id, root, nick });
+const luminance = (hex) => {
+  const channel = (index) => {
+    const srgb = parseInt(hex.slice(index, index + 2), 16) / 255;
+    if (srgb <= 0.04045) return srgb / 12.92;
+    return ((srgb + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+};
 
-const kinds = (lanes) => lanes.map((cells) => cells.map((cell) => cell.kind));
-
-test('rootOf ends at a missing parent and stops cycles', async () => {
+test('rootOf stops at top, a missing parent, or a cycle', async () => {
   const { rootOf } = await load();
   const list = [message('a', ''), message('b', 'a'), message('c', 'b')];
   assert.equal(rootOf(records(list), 'c'), 'a');
   assert.equal(rootOf(records(list), 'a'), 'a');
+  assert.equal(rootOf(records(list), 'c', 'a'), 'b');
+  assert.equal(rootOf(records(list), 'c', 'b'), 'c');
   const orphan = [message('d', 'gone'), message('e', 'd')];
   assert.equal(rootOf(records(orphan), 'e'), 'gone');
   const loop = [message('x', 'y'), message('y', 'x')];
@@ -41,24 +50,25 @@ test('rootOf ends at a missing parent and stops cycles', async () => {
   assert.equal(rootOf(records(loop), 'y'), 'x');
 });
 
-test('conversationOf and branchOf walk a deep tree', async () => {
-  const { conversationOf, branchOf } = await load();
+test('threadOf and branchOf walk a deep tree', async () => {
+  const { threadOf, branchOf } = await load();
   const list = [
     message('r', '', 1),
     message('a', 'r', 2),
     message('b', 'a', 3),
-    message('c', 'b', 4),
     message('d', 'r', 5),
+    message('c', 'b', 4),
     message('e', 'a', 6),
     message('z', '', 7),
   ];
   const replies = repliesOf(list);
-  const all = conversationOf(replies, 'r').map((item) => item.id);
+  const all = threadOf(replies, 'r').map((item) => item.id);
   assert.deepEqual(all, ['a', 'b', 'c', 'd', 'e']);
-  assert.deepEqual(conversationOf(replies, 'z'), []);
-  const branch = branchOf(records(list), replies, 'a');
-  assert.deepEqual(branch, ['r', 'a', 'b', 'c', 'e']);
-  assert.deepEqual(branchOf(records(list), replies, 'r'), [
+  assert.deepEqual(threadOf(replies, 'z'), []);
+  const byId = records(list);
+  assert.deepEqual(branchOf(byId, replies, 'a'), ['r', 'a', 'b', 'c', 'e']);
+  assert.deepEqual(branchOf(byId, replies, 'b', 'r'), ['a', 'b', 'c']);
+  assert.deepEqual(branchOf(byId, replies, 'r'), [
     'r',
     'a',
     'b',
@@ -68,112 +78,69 @@ test('conversationOf and branchOf walk a deep tree', async () => {
   ]);
 });
 
-test('lanesOf draws root, node, pass, and last cells', async () => {
-  const { lanesOf } = await load();
-  const rows = [row('r', 'r'), row('p', 'p'), row('a', 'r'), row('b', 'r')];
-  const lanes = lanesOf(rows, 4);
-  assert.deepEqual(kinds(lanes), [['root'], ['pass'], ['node'], ['last']]);
-  assert.equal(lanes[2][0].title, '2 replies · x');
-});
-
-test('lanesOf crosses two conversations in two lanes', async () => {
-  const { lanesOf } = await load();
-  const rows = [
-    row('r1', 'r1'),
-    row('r2', 'r2'),
-    row('a', 'r1'),
-    row('b', 'r2'),
-    row('c', 'r1'),
+test('threadRootOf handles messages and article comments', async () => {
+  const { threadRootOf } = await load();
+  const list = [
+    message('r', ''),
+    message('a', 'r'),
+    message('b', 'a'),
+    message('c', 'b'),
+    message('plain', ''),
+    message('orphan', 'missing'),
+    message('post', ''),
+    message('comment', 'post'),
+    message('nested', 'comment'),
+    message('single', 'post'),
   ];
-  const lanes = lanesOf(rows, 4);
-  assert.deepEqual(kinds(lanes), [
-    ['root', ''],
-    ['pass', 'root'],
-    ['node', 'pass'],
-    ['pass', 'last'],
-    ['last', ''],
-  ]);
-});
-
-test('lanesOf shares an overflow lane beyond max', async () => {
-  const { lanesOf } = await load();
-  const rows = [
-    row('r1', 'r1'),
-    row('a1', 'r1'),
-    row('r2', 'r2'),
-    row('a2', 'r2'),
-    row('r3', 'r3'),
-    row('a3', 'r3'),
-  ];
-  const lanes = lanesOf(rows, 2);
-  assert.equal(lanes[0].length, 3);
-  assert.deepEqual(kinds(lanes)[0], ['', '', 'overflow']);
-  const latest = lanes[5].map((cell) => cell.kind);
-  assert.deepEqual(latest, ['', 'last', '']);
-  assert.equal(lanes[0][2].root, '');
-  assert.equal(lanes[1][2].title, '1 reply · x');
-  const few = lanesOf(rows, 4);
-  assert.equal(few[0].length, 3);
-  assert.equal(
-    few[0].some((cell) => cell.kind === 'overflow'),
-    false,
-  );
-});
-
-test('lanesOf keeps lanes while the window of rows moves', async () => {
-  const { lanesOf } = await load();
-  const rows = [
-    row('r1', 'r1'),
-    row('r2', 'r2'),
-    row('a1', 'r1'),
-    row('a2', 'r2'),
-    row('b1', 'r1'),
-    row('b2', 'r2'),
-  ];
-  const slots = new Map();
-  const full = lanesOf(rows, 4, slots);
-  const moved = lanesOf(rows.slice(1), 4, slots);
-  for (let i = 1; i < moved.length; i++) {
-    assert.equal(moved[i][0].root || '', full[i + 1][0].root || '');
-    assert.equal(moved[i][1].root || '', full[i + 1][1].root || '');
-  }
-  const heads = lanesOf(rows.slice(2), 4, slots);
-  assert.deepEqual(kinds(heads)[0], ['node', '']);
-  assert.equal(heads[0][0].cut, true);
-  assert.equal(heads[1][1].root, 'r2');
-  assert.equal(heads[0][0].color, full[0][0].color);
-});
-
-test('lanesOf drops slots beyond a smaller max', async () => {
-  const { lanesOf } = await load();
-  const rows = [
-    row('r1', 'r1'),
-    row('r2', 'r2'),
-    row('a1', 'r1'),
-    row('a2', 'r2'),
-  ];
-  const slots = new Map();
-  assert.equal(lanesOf(rows, 4, slots)[0].length, 2);
-  const narrow = lanesOf(rows.concat(row('r3', 'r3')), 1, slots);
-  assert.equal(narrow[0].length, 2);
-  assert.equal(slots.size, 1);
-  assert.equal(slots.get('r2'), 0);
-});
-
-test('lanesOf draws nothing without replies', async () => {
-  const { lanesOf } = await load();
-  const lanes = lanesOf([row('a', 'a'), row('b', 'b')], 4);
-  assert.deepEqual(lanes, [[], []]);
+  const view = { records: records(list), replies: repliesOf(list) };
+  assert.equal(threadRootOf(view, 'r'), 'r');
+  assert.equal(threadRootOf(view, 'c'), 'r');
+  assert.equal(threadRootOf(view, 'plain'), '');
+  assert.equal(threadRootOf(view, 'orphan'), 'missing');
+  assert.equal(threadRootOf(view, 'post', 'post'), '');
+  assert.equal(threadRootOf(view, 'comment', 'post'), 'comment');
+  assert.equal(threadRootOf(view, 'nested', 'post'), 'comment');
+  assert.equal(threadRootOf(view, 'single', 'post'), '');
 });
 
 test('colorOf is stable and within the palette', async () => {
   const { colorOf } = await load();
-  const color = colorOf('0b4c5fc0-1111-4222-8333-444455556666');
-  assert.equal(color, colorOf('0b4c5fc0-1111-4222-8333-444455556666'));
-  assert.ok(Number.isInteger(color) && color >= 0 && color < 8);
+  const root = '0b4c5fc0-1111-4222-8333-444455556666';
+  const color = colorOf(root);
+  assert.equal(color, colorOf(root));
   const seen = new Set();
-  for (let i = 0; i < 40; i++) seen.add(colorOf(`root-${i}`));
-  assert.ok(seen.size > 4);
+  for (let i = 0; i < 400; i++) {
+    const index = colorOf(`root-${i}`);
+    assert.ok(Number.isInteger(index) && index >= 0 && index < 32);
+    seen.add(index);
+  }
+  assert.equal(seen.size, 32);
+});
+
+test('both thread palettes have 32 colors with readable contrast', async () => {
+  const file = path.join(__dirname, '../application/static/default.css');
+  const css = await fs.readFile(file, 'utf8');
+  assert.doesNotMatch(css, /--lane-/);
+  const dark = css.match(/^:root \{([^}]+)}/m)[1];
+  const light = css.match(/^:root\[data-theme='light'\] \{([^}]+)}/m)[1];
+  const background = dark.match(/--bg: (#[0-9a-f]{6});/)[1];
+  const check = (theme, backdrop) => {
+    const token = /--thread-(\d+): (#[0-9a-f]{6});/g;
+    const colors = Array.from(theme.matchAll(token));
+    assert.equal(colors.length, 32);
+    assert.equal(new Set(colors.map((match) => match[2])).size, 32);
+    const back = luminance(backdrop);
+    for (let i = 0; i < colors.length; i++) {
+      const match = colors[i];
+      assert.equal(Number(match[1]), i);
+      const color = luminance(match[2]);
+      const high = Math.max(color, back) + 0.05;
+      const low = Math.min(color, back) + 0.05;
+      assert.ok(high / low >= 4.5, match[2]);
+    }
+  };
+  check(dark, background);
+  check(light, '#ffffff');
 });
 
 test('repliesToMe counts unread replies to my messages', async () => {
