@@ -201,12 +201,27 @@ shows a red dot with time and size, and the chat gets a `● nick recorded 12
 min` note. The recorder keeps rendering when its tab is hidden: it asks other
 people for video sized to their tiles of the program, so they keep sending
 even though the hidden call view asks for nothing. Leaving the call asks
-whether to stop the recording. A recording plays from `/recordings/<id>/<file>`,
-served by the service worker from OPFS with `Range` support. Anyone in the call can
-opt out of other people's recordings from the recording notice or the People
-panel: the recording then shows `opted out` instead of their video and drops
+whether to stop the recording. Anyone in the call can opt out of other people's
+recordings from the recording notice or the People panel. The recording then
+shows `opted out` instead of their video and drops
 their voice within a frame, and the roster marks them. The recorder's app
 honors this; a modified app could ignore it.
+
+Open **Recordings** from the sidebar session block or the record control menu
+to see local recordings and browser storage usage. Play and seek in the library
+using the service worker's `/recordings/<id>/<file>` route with `Range` support.
+Finished recordings can be renamed, deleted, or downloaded. In browsers that
+offer file and folder pickers, **Save as** lets you pick a file and **Save to
+folder** copies to the folder remembered in Calls settings. Both show progress,
+and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate names.
+
+On app start, a recording left open after a crash is marked **Interrupted**.
+The app recovers the stored file size and duration and fills in the existing WebM
+duration field. If the file does not provide timing, the library uses the last
+saved duration. Each active or paused recording holds a browser lock, so opening
+another tab leaves it alone. Interrupted recordings can be played, renamed,
+deleted, and exported. Recording and startup repair require browser Web Locks
+and synchronous OPFS access in a worker.
 
 Phones show the active tile above a horizontally scrollable strip with the
 controls above the safe area. Chat and People open as bottom sheets. Back
@@ -338,6 +353,8 @@ server) with `files/have`, `get`, and `put`.
 | `reaction` peer message          | call link   | One emoji from the reaction set, at most 3 per second per sender   |
 | `hint` peer message              | call link   | Rendered slot size, frame cap, and camera audio-only request       |
 | `ice/servers`                    | server      | ICE server list for the call tab; host is location.hostname        |
+| `GET /recordings/<id>/<file>`    | worker      | Local playback and downloads with byte ranges                      |
+| `repair`                         | recorder    | Recover interrupted recordings on app start                        |
 
 ## Testing
 
@@ -397,6 +414,10 @@ server) with `files/have`, `get`, and `put`.
   checks saved defaults, push-to-talk, auto-lower, mobile controls and Back;
   `test/call-mirror.js` checks the mirrored self view and remote tile, the
   toggle without renegotiation, the stats path, and camera off (scenario 23);
+  `test/recording-route.js` checks byte ranges (scenario 16),
+  `test/recording-repair.js` checks startup recovery and playback (scenario 17),
+  and `test/recording-export.js` checks picker and folder export (scenario 18).
+  `test/recording-duration.js` covers timing in WebM and fragmented MP4.
   `npm run test:app` reserves two different free ports and passes them as
   `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so
   it does not bind `8000` or `3478`. The browser harness picks free

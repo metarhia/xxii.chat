@@ -4,7 +4,7 @@ import { Mixer } from './mixer.js';
 import { membersOf } from './members.js';
 import { Recorder, RecordingWriter } from './recorder.js';
 import { qualityOf } from './layout.js';
-import { titleOf, spaceOf } from './recording-files.js';
+import { titleOf, spaceOf, timeText, sizeText } from './recording-files.js';
 import { defaultsOf, valueOf, paintRecordControl } from './record-panel.js';
 
 const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
@@ -14,36 +14,9 @@ const PERSIST_KEY = 'xxii:storage-persist';
 const HINT_OWNER = 'recorder';
 const HINT_STEP = 40;
 const HINT_FPS = 30;
-const KIBIBYTE = 1024;
-const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
-const SECOND_MS = 1000;
-const MINUTE_SECONDS = 60;
-const HOUR_SECONDS = 3600;
 const DEFAULT_SETTINGS = ['people', 'audio', 'quality'];
 const LOW_SPACE = 'Less than 2 GB of free space, the recording may stop early';
 const FULL_SPACE = 'Less than 500 MB of free space. Free some space first';
-
-const pad = (value) => `${value}`.padStart(2, '0');
-
-const timeText = (ms) => {
-  const total = Math.max(0, Math.floor(ms / SECOND_MS));
-  const hours = Math.floor(total / HOUR_SECONDS);
-  const minutes = Math.floor((total % HOUR_SECONDS) / MINUTE_SECONDS);
-  const seconds = total % MINUTE_SECONDS;
-  const base = `${pad(minutes)}:${pad(seconds)}`;
-  return hours > 0 ? `${hours}:${base}` : base;
-};
-
-const sizeText = (bytes) => {
-  let value = Math.max(0, bytes);
-  let unit = 0;
-  while (value >= KIBIBYTE && unit < SIZE_UNITS.length - 1) {
-    value /= KIBIBYTE;
-    unit++;
-  }
-  const digits = unit < 2 ? 0 : 1;
-  return `${value.toFixed(digits)} ${SIZE_UNITS[unit]}`;
-};
 
 const hintOf = (tile, local) => {
   const split = tile.id.lastIndexOf('/');

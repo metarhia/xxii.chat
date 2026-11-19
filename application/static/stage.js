@@ -80,6 +80,10 @@ const ACTIONS = {
     stage.recording?.togglePanel();
   },
   'record-background': (stage) => stage.recording?.resetBackground(),
+  recordings: (stage) => {
+    stage.closeMenus();
+    stage.hooks.recordings();
+  },
   layout: (stage) => stage.nextLayout(),
   pip: (stage) => stage.openPip(),
   'pip-back': (stage) => stage.closePip(true),
@@ -1363,12 +1367,14 @@ class CallStage {
 
   onKey(event) {
     if (event.isComposing) return;
-    if (event.key === 'Escape' && this.root.dataset.panel === 'calls') {
+    const { panel } = this.root.dataset;
+    if (event.key === 'Escape' && ['calls', 'recordings'].includes(panel)) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      this.hooks.closeSettings();
+      this.hooks.closeSidePanel();
       return;
     }
+    if (event.target.closest?.('.recordings-player')) return;
     if (event.key === 'Escape' && this.tileMenu?.menu.isOpen) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -1401,8 +1407,10 @@ class CallStage {
   onKeyUp(event) {
     const isSpace = event.code === 'Space' || event.key === ' ';
     if (!isSpace || !this.talk.held) return;
-    event.preventDefault();
-    event.stopPropagation();
+    if (!event.target.closest?.('.recordings-player')) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     this.talkStep('up');
   }
 

@@ -107,6 +107,7 @@
           </div>
           <div class="tools">
             <button id="calls-btn" class="link-btn">calls</button>
+            <button id="recordings-btn" class="link-btn">recordings</button>
             <button id="install-btn" class="link-btn hidden">install</button>
             <button
               id="version-btn"
@@ -387,6 +388,18 @@
             </button>
           </section>
         </section>
+        <section class="panel-body" data-panel="recordings">
+          <p class="recordings-storage muted"></p>
+          <p class="recordings-status muted hidden" role="status"></p>
+          <p class="recordings-repair muted" role="status" hidden></p>
+          <video
+            class="recordings-player hidden"
+            controls
+            playsinline
+            preload="metadata"
+          ></video>
+          <ul class="recordings-list list"></ul>
+        </section>
       </aside>
     </div>
 
@@ -462,6 +475,50 @@
       role="status"
       aria-live="polite"
     ></div>
+
+    <template id="recording-item-template">
+      <li class="recording-item">
+        <img alt="" loading="lazy" />
+        <div class="recording-info">
+          <strong class="recording-title"></strong>
+          <p class="recording-chat muted"></p>
+          <p class="recording-details muted"></p>
+          <p class="recording-note muted" hidden>
+            Recording ended unexpectedly.
+          </p>
+          <div class="recording-actions">
+            <button class="recording-play link-btn" type="button">play</button>
+            <a class="recording-download link-btn" hidden>download</a>
+            <button class="recording-save-as link-btn" type="button" hidden>
+              save as
+            </button>
+            <button class="recording-save-folder link-btn" type="button" hidden>
+              save to folder
+            </button>
+            <button class="recording-rename link-btn" type="button">
+              rename
+            </button>
+            <button class="recording-delete link-btn" type="button">
+              delete
+            </button>
+          </div>
+          <progress
+            class="recording-export-progress"
+            aria-label="Recording export progress"
+            value="0"
+            max="100"
+            hidden
+          ></progress>
+          <form class="recording-form hidden">
+            <input type="text" aria-label="Recording title" required />
+            <button class="link-btn" type="submit">save</button>
+            <button class="recording-cancel link-btn" type="button">
+              cancel
+            </button>
+          </form>
+        </div>
+      </li>
+    </template>
 
     <template id="contact-item-template">
       <li class="nav-item contact-item">

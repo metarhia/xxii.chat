@@ -32,6 +32,7 @@ import { Application } from './application.js';
 import { CallSession } from './call.js';
 import { requestCallNotifications } from './notifications.js';
 import { CallStage, RingAlert } from './stage.js';
+import { Recordings } from './recordings.js';
 
 const TASKS = {
   clear: {
@@ -48,6 +49,7 @@ const PANELS = {
   members: 'Members',
   log: 'Log',
   calls: 'Calls',
+  recordings: 'Recordings',
 };
 
 const SHORTCUTS = {
@@ -530,6 +532,11 @@ class ChatApplication extends Application {
       () => this.callStage,
       (text) => this.showNotification(text, 'warning'),
     );
+    this.recordings = new Recordings(
+      document.querySelector('.panel-body[data-panel="recordings"]'),
+      () => this.refreshRecordings(),
+    );
+    this.recordings.repair().then(() => this.refreshRecordings());
     this.renderIce();
     this.fillPalette();
     this.restoreDraft();
@@ -546,6 +553,7 @@ class ChatApplication extends Application {
     this.versionBtn = byId('version-btn');
     this.clearMessagesBtn = byId('clear-messages-btn');
     this.callsBtn = byId('calls-btn');
+    this.recordingsBtn = byId('recordings-btn');
     this.clearLogBtn = byId('clear-log-btn');
     this.connectionStatus = byId('connection-status');
     this.meshStatus = byId('mesh-status');
@@ -675,6 +683,7 @@ class ChatApplication extends Application {
     this.membersBtn.onclick = () => this.togglePanel('members');
     this.logBtn.onclick = () => this.togglePanel('log');
     this.callsBtn.onclick = () => this.togglePanel('calls');
+    this.recordingsBtn.onclick = () => this.togglePanel('recordings');
     this.icePublicStun.addEventListener('change', () => this.saveIceFlags());
     this.iceForceRelay.addEventListener('change', () => this.saveIceFlags());
     onSubmit(this.iceForm, () => this.addIceServer());
@@ -1995,6 +2004,7 @@ class ChatApplication extends Application {
     this.membersBtn.classList.toggle('active', this.panel === 'members');
     this.logBtn.classList.toggle('active', this.panel === 'log');
     this.callsBtn.classList.toggle('active', this.panel === 'calls');
+    this.recordingsBtn.classList.toggle('active', this.panel === 'recordings');
     if (!this.panel) return;
     this.panelTitle.textContent = PANELS[this.panel];
     if (this.panel === 'pins') this.renderPins();
@@ -2062,15 +2072,26 @@ class ChatApplication extends Application {
 
   showPanel(name) {
     const isOpen = this.panel !== '';
+    if (this.panel === 'recordings' && name !== 'recordings') {
+      this.recordings.close();
+    }
     this.panel = name;
     if (name === 'calls') this.preferences.refresh();
+    if (name === 'recordings') this.refreshRecordings();
     this.renderPanel();
     if (!isOpen && isNarrow()) this.pushLayer('panel');
   }
 
   hidePanel() {
+    if (this.panel === 'recordings') this.recordings.close();
     this.panel = '';
     this.renderPanel();
+  }
+
+  refreshRecordings() {
+    if (this.panel === 'recordings') {
+      this.recordings.refresh().catch((error) => this.report(error));
+    }
   }
 
   closePanel() {
@@ -2531,8 +2552,10 @@ class ChatApplication extends Application {
     if (event.isComposing) return;
     if (event.key === 'Escape') {
       event.preventDefault();
+      if (this.panel === 'recordings') return void this.closePanel();
       return void this.closeTop();
     }
+    if (event.target.closest?.('.recordings-player')) return;
     if (this.lightbox.isOpen) {
       const step = LIGHTBOX_KEYS[event.key];
       if (step) this.lightbox.step(step);
@@ -3187,9 +3210,13 @@ class ChatApplication extends Application {
     if (this.callStage) return this.callStage;
     const hooks = {
       preferences: this.preferences,
-      closeSettings: () => this.closePanel(),
+      closeSidePanel: () => this.closePanel(),
       settings: () => {
         this.showPanel('calls');
+        this.panelCloseBtn.focus();
+      },
+      recordings: () => {
+        this.showPanel('recordings');
         this.panelCloseBtn.focus();
       },
       pushLayer: (name) => {
@@ -3651,10 +3678,12 @@ class ChatApplication extends Application {
     const nick = this.username;
     const record = { id, chat, call, author, nick, timestamp };
     saveRecording(this.replicaOf(chat), record);
+    this.refreshRecordings();
   }
 
   recordRecordingStop({ id, chat, stopped }) {
     saveRecordingStop(this.replicaOf(chat), id, { stopped });
+    this.refreshRecordings();
   }
 
   showNotification(message, type = 'info', region = this.notification) {

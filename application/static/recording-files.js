@@ -12,6 +12,11 @@ const MEGABYTE = 1024 * 1024;
 const GIGABYTE = 1024 * MEGABYTE;
 const LOW_BYTES = 2 * GIGABYTE;
 const STOP_BYTES = 500 * MEGABYTE;
+const KIBIBYTE = 1024;
+const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+const SECOND_MS = 1000;
+const MINUTE_SECONDS = 60;
+const HOUR_SECONDS = 3600;
 
 const RANGE = /^bytes=(\d*)-(\d*)$/;
 const ROUTE = /^\/recordings\/([\w-]+)\/([\w.-]+)$/;
@@ -53,6 +58,28 @@ const fileNameOf = (chat, started, extension) => {
 const titleOf = (chatName, started) => `${chatName} ${stampOf(started, ':')}`;
 
 const programFileOf = (extension) => `${PROGRAM}.${extension}`;
+
+const recordingUrlOf = (id, file) => `/recordings/${id}/${file}`;
+
+const timeText = (ms) => {
+  const total = Math.max(0, Math.floor(ms / SECOND_MS));
+  const hours = Math.floor(total / HOUR_SECONDS);
+  const minutes = Math.floor((total % HOUR_SECONDS) / MINUTE_SECONDS);
+  const seconds = total % MINUTE_SECONDS;
+  const base = `${pad(minutes)}:${pad(seconds)}`;
+  return hours > 0 ? `${hours}:${base}` : base;
+};
+
+const sizeText = (bytes) => {
+  let value = Math.max(0, bytes);
+  let unit = 0;
+  while (value >= KIBIBYTE && unit < SIZE_UNITS.length - 1) {
+    value /= KIBIBYTE;
+    unit++;
+  }
+  const digits = unit < 2 ? 0 : 1;
+  return `${value.toFixed(digits)} ${SIZE_UNITS[unit]}`;
+};
 
 const encodeAttr = (char) =>
   `%${char.charCodeAt(0).toString(16).toUpperCase()}`;
@@ -113,7 +140,7 @@ const createMeta = (input) => ({
   folder: '',
 });
 
-const isOpen = (meta) => OPEN_STATES.includes(meta.state);
+const isOpen = (meta) => OPEN_STATES.includes(meta?.state);
 
 const progressOf = (meta, event) => {
   if (!isOpen(meta)) return meta;
@@ -175,8 +202,25 @@ const spaceOf = (estimate) => {
   return 'ok';
 };
 
+const readMeta = async (handle) => {
+  const file = await handle.getFile();
+  return JSON.parse(await file.text());
+};
+
+const recordingsOf = async (storage) => {
+  const root = await storage.getDirectory();
+  try {
+    return await root.getDirectoryHandle(RECORDINGS);
+  } catch (error) {
+    if (error.name === 'NotFoundError') return null;
+    throw error;
+  }
+};
+
 export { RECORDINGS, META_FILE, POSTER_FILE, STATES, TYPES };
 export { FLUSH_MS, META_MS, POSTER_MS, LOW_BYTES, STOP_BYTES };
 export { stampOf, fileNameOf, titleOf, programFileOf, dispositionOf };
+export { recordingUrlOf, timeText, sizeText };
 export { typeOf, extensionOf, routeOf, rangeOf };
-export { createMeta, nextMeta, scheduleOf, markedOf, spaceOf };
+export { createMeta, nextMeta, isOpen, scheduleOf, markedOf, spaceOf };
+export { readMeta, recordingsOf };
