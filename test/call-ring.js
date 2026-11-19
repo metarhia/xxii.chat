@@ -419,7 +419,7 @@ const preparePermissionEntry = async (browser, session, entry) => {
     button.dataset.action = ${quoted};
     button.textContent = 'join';
     card.append(button);
-    app.messageList.append(card);
+    app.chatMessages.append(card);
     return true;`,
   );
   return `[data-id="permission"] [data-action="${entry}"]`;

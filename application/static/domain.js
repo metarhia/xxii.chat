@@ -13,8 +13,8 @@ import { MAX_FILE_SIZE, attachFile, attachmentsOf } from './chat.js';
 import { listChannels, listAuthors, folderTree } from './chat.js';
 import { threadsOf, activityOf, reactionsOf, unreadOf } from './chat.js';
 import { lineageOf } from './chat.js';
-import { rootOf, conversationOf, branchOf } from './replies.js';
-import { lanesOf, repliesToMe } from './replies.js';
+import { rootOf, threadOf, threadRootOf, branchOf } from './replies.js';
+import { colorOf, repliesToMe } from './replies.js';
 import { isImage, storeFile, readFile, saveFile } from './files.js';
 import { readBlob, onFileStored } from './files.js';
 import { timeOf, dateOf, dayKey, dayOf, dayLabel, plural } from './view.js';
@@ -97,11 +97,11 @@ const MESSAGE_ACTIONS = {
   react: (app, id, { dataset }) => app.toggleReaction(id, dataset.reaction),
   reply: (app, id) => app.startReply(id),
   'reply-hover': (app, id) => app.startReply(id, fragmentOf(id)),
-  'reply-quote': (app, id) => app.startReply(id, app.menuFragment),
+  'reply-quote': (app, id) => app.startQuotedReply(id),
   article: (app, id) => app.openArticle(id),
-  focus: (app, id) => app.focusConversation(id),
-  counter: (app, id) => app.focusConversation(id, ''),
-  quote: (app, id, { dataset }) => app.focusQuoted(dataset.target, id),
+  selection: (app, id) => app.selectThread(id),
+  counter: (app, id) => app.selectThread(id, false),
+  quote: (app, id, { dataset }) => app.jumpToQuoted(dataset.target, id),
   menu: (app, id, button) => app.toggleMenuAt(id, button),
   pin: (app, id) => app.togglePin(id),
   copy: (app, id) => app.copyText(id),
@@ -120,10 +120,10 @@ const ITEM_KEYS = {
     const { id } = item.dataset;
     app.startReply(id, fragmentOf(id));
   },
-  f: (app, item) => app.focusConversation(item.dataset.id),
+  f: (app, item) => app.selectThread(item.dataset.id),
 };
 
-const FOCUS_KEYS = { '[': -1, ']': 1, ArrowUp: -1, ArrowDown: 1 };
+const THREAD_KEYS = { '[': -1, ']': 1, ArrowUp: -1, ArrowDown: 1 };
 
 const LAYERS = {
   menu: (app) => app.hideMenu(),
@@ -133,7 +133,7 @@ const LAYERS = {
   panel: (app) => app.hidePanel(),
   call: (app) => app.callStage?.collapse(),
   callSheet: (app) => app.callStage?.hideSheet(),
-  focus: (app) => app.leaveFocus(),
+  selection: (app) => app.leaveThread(),
   article: (app) => app.leaveArticle(),
 };
 
@@ -167,10 +167,7 @@ const MAX_RETRY_MS = 30000;
 const FLASH_MS = 1600;
 const MENU_INDENT_PX = 48;
 const BOTTOM_PX = 40;
-const WIDE_PX = 640;
-const WIDE_LANES = 4;
-const NARROW_LANES = 2;
-const FOCUS_PAGES = 10;
+const SELECTION_PAGES = 10;
 const MAX_INITIALS = 3;
 const PREVIEW_WIDTH = 320;
 const PREVIEW_HEIGHT = 240;
@@ -260,15 +257,13 @@ const createHeadingLink = (index, text) => {
 const replyTargetOf = (event) => {
   const item = event.target.closest('.message');
   if (!item?.dataset.id) return null;
-  const isControl = event.target.closest('button, a, .lane') !== null;
+  const isControl = event.target.closest('button, a') !== null;
   return isControl ? null : item;
 };
 
-const quoteText = (parent, fragment) =>
-  parent && fragment ? { ...parent, text: fragment } : parent;
-
-const quoteOf = (id, view) => {
+const quoteOf = (id, view, fragment = '') => {
   const parent = view.records.get(id);
+  if (fragment) return { id, nick: parent?.nick ?? '', text: fragment };
   if (!parent) return { id, nick: '', text: 'message is not loaded yet' };
   const files = view.attachments.get(id) ?? [];
   const names = files.map((file) => file.name).join(', ');
@@ -282,9 +277,9 @@ const articleInfo = (view) => {
   return `post · ${count}`;
 };
 
-const initialsOf = (conversation) => {
+const initialsOf = (thread) => {
   const initials = [];
-  for (const reply of conversation) {
+  for (const reply of thread) {
     const initial = Array.from(reply.nick ?? '')[0]?.toUpperCase();
     if (!initial || initials.includes(initial)) continue;
     initials.push(initial);
@@ -308,32 +303,13 @@ const fillQuote = (button, quote) => {
   button.querySelector('.quote-text').textContent = quote.text;
 };
 
-const createLane = (cell) => {
-  const lane = document.createElement('i');
-  lane.className = `lane ${cell.kind}`;
-  if (cell.kind === '') return lane;
-  lane.title = cell.title;
-  lane.dataset.root = cell.root;
-  lane.classList.toggle('cut', cell.cut === true);
-  const color = cell.kind === 'overflow' ? 'var(--lane-gray)' : null;
-  lane.style.setProperty('--lane', color ?? `var(--lane-${cell.color})`);
-  return lane;
-};
-
-const fillLanes = (element, cells) => {
-  const container = element.querySelector('.lanes');
-  container.replaceChildren(...cells.map(createLane));
-  element.classList.toggle('laned', cells.length > 0);
-  element.style.setProperty('--lanes', cells.length);
-};
-
-const selectItem = (item) => {
+const selectItem = (item, scroll = true) => {
   item.tabIndex = -1;
   item.addEventListener('blur', () => item.removeAttribute('tabindex'), {
     once: true,
   });
   item.focus({ preventScroll: true });
-  item.scrollIntoView({ block: 'nearest' });
+  if (scroll) item.scrollIntoView({ block: 'nearest' });
 };
 
 const readCollapsed = () => {
@@ -347,7 +323,8 @@ const kindOf = (item) => {
   return 'article';
 };
 
-const isGrouped = (previous, message) => {
+const isGrouped = (previous, message, isSameThread) => {
+  if (!isSameThread) return false;
   if (!previous || isPost(previous) || isPost(message)) return false;
   const isSameAuthor = previous.author === message.author;
   const isClose = message.timestamp - previous.timestamp < GROUP_MS;
@@ -478,7 +455,8 @@ class ChatApplication extends Application {
     this.filter = '';
     this.panel = '';
     this.article = '';
-    this.focus = null;
+    this.selection = null;
+    this.threadTarget = '';
     this.timelineOffset = 0;
     this.view = null;
     this.readAt = readMap(READ_KEY);
@@ -494,9 +472,6 @@ class ChatApplication extends Application {
     this.divider = { chat: this.chat, at: this.readAtOf(this.chat) };
     this.collapsed = readCollapsed();
     this.cache = new Map();
-    this.laneMax = WIDE_LANES;
-    this.laneSlots = new Map();
-    this.hotRoot = '';
     this.iceCache = null;
     this.previews = new Map();
     this.loading = new Map();
@@ -616,12 +591,13 @@ class ChatApplication extends Application {
     this.replyPrefix = this.replyBar.querySelector('.reply-prefix');
     this.replyAuthor = this.replyBar.querySelector('.reply-author');
     this.replyText = this.replyBar.querySelector('.reply-text');
+    this.replyWithQuote = this.replyBar.querySelector('.reply-with-quote');
     this.replyCancel = byId('reply-cancel');
-    this.focusBar = byId('focus-bar');
-    this.focusPosition = byId('focus-position');
-    this.focusPrev = byId('focus-prev');
-    this.focusNext = byId('focus-next');
-    this.focusClose = byId('focus-close');
+    this.selectionBar = byId('selection-bar');
+    this.selectionPosition = byId('selection-position');
+    this.selectionPrev = byId('selection-prev');
+    this.selectionNext = byId('selection-next');
+    this.selectionClose = byId('selection-close');
     this.attachBtn = byId('attach-btn');
     this.fileInput = byId('file-input');
     this.emojiBtn = byId('emoji-btn');
@@ -643,7 +619,10 @@ class ChatApplication extends Application {
     this.menu = new Menu(this.menuElement, createReactionButtons);
     this.press = new Press({
       hold: (item, x, y) => this.openMenu(item, { x, y }, true),
-      swipe: (item) => this.startReply(item.dataset.id),
+      swipe: (item) => {
+        const { id } = item.dataset;
+        this.startReply(id, fragmentOf(id));
+      },
     });
     this.lightbox = new Lightbox(byId('lightbox'), {
       load: (file) => this.previewOf(file),
@@ -710,9 +689,9 @@ class ChatApplication extends Application {
     this.chatTitle.onclick = () => this.closeArticle();
     this.replyTarget.onclick = () => this.revealMessage(this.targetId());
     this.replyCancel.onclick = () => this.cancelReply();
-    this.focusPrev.onclick = () => this.focusStep(-1);
-    this.focusNext.onclick = () => this.focusStep(1);
-    this.focusClose.onclick = () => this.closeFocus();
+    this.selectionPrev.onclick = () => this.stepThread(-1);
+    this.selectionNext.onclick = () => this.stepThread(1);
+    this.selectionClose.onclick = () => this.closeThread();
     this.loadMoreBtn.onclick = () => this.loadOlder();
     this.jumpBtn.onclick = () => this.jumpToLatest();
     this.backPill.onclick = () => this.goBack();
@@ -766,7 +745,7 @@ class ChatApplication extends Application {
       const item = event.target.closest('.member[data-peer]');
       if (item) this.selectDirect(item.dataset.peer);
     });
-    this.messageList.addEventListener('click', (event) => {
+    this.chatMessages.addEventListener('click', (event) => {
       this.handleMessageClick(event);
     });
     this.messageList.addEventListener('pointerdown', (event) => {
@@ -777,7 +756,9 @@ class ChatApplication extends Application {
     });
     this.messageList.addEventListener('dblclick', (event) => {
       const item = replyTargetOf(event);
-      if (item) this.startReply(item.dataset.id);
+      if (!item) return;
+      const { id } = item.dataset;
+      this.startReply(id, fragmentOf(id));
     });
     this.messageList.addEventListener('contextmenu', (event) => {
       this.handleContextMenu(event);
@@ -836,14 +817,7 @@ class ChatApplication extends Application {
       else this.scheduleRender();
       this.ring.onVisibility();
     });
-    window.addEventListener('resize', () => {
-      this.closeMenu();
-      if (this.laneMaxOf() !== this.laneMax) this.renderMessages(false);
-    });
-    this.messageList.addEventListener('pointerover', (event) => {
-      this.heatLane(event.target.closest('.lane[data-root]'));
-    });
-    this.messageList.addEventListener('pointerout', () => this.heatLane(null));
+    window.addEventListener('resize', () => this.closeMenu());
     window.addEventListener('popstate', () => this.handlePopState());
     window.addEventListener('storage', (event) => this.handleStorage(event));
     window.addEventListener('beforeunload', () => this.syncUsername());
@@ -1004,7 +978,7 @@ class ChatApplication extends Application {
       if (peer) this.selectDirect(peer);
       else this.selectChat(chat);
     }
-    this.focusQuoted(reply);
+    this.jumpToQuoted(reply);
   }
 
   markRead(isAtBottom) {
@@ -1241,35 +1215,35 @@ class ChatApplication extends Application {
   }
 
   detailsOf(message, view) {
-    const { id, replyTo } = message;
+    const { id, replyTo, quote: fragment } = message;
     const isArticle = id === this.article;
-    const isRoot = !replyTo && !isArticle && view.replies.has(id);
-    const conversation = isRoot ? conversationOf(view.replies, id) : [];
-    const replyCount = conversation.length;
-    const initials = initialsOf(conversation);
-    const isQuoted = Boolean(replyTo) && replyTo !== this.article;
-    const parent = isQuoted ? quoteOf(replyTo, view) : null;
-    const quote = quoteText(parent, message.quote);
+    const threadRoot = threadRootOf(view, id, this.article);
+    const hasCounter = threadRoot === id || (isPost(message) && !isArticle);
+    const thread = hasCounter ? threadOf(view.replies, id) : [];
+    const replyCount = thread.length;
+    const initials = initialsOf(thread);
+    const quote = fragment && replyTo ? quoteOf(replyTo, view, fragment) : null;
     const files = view.attachments.get(id) ?? [];
     const byReaction = view.reactions.get(id);
     const reactions = this.summarize(byReaction, view.nicks);
     const isContinued = false;
-    const lanes = [];
+    const isThreadContinued = false;
     return {
       isArticle,
+      threadRoot,
       replyCount,
       initials,
       quote,
       files,
       reactions,
       isContinued,
-      lanes,
+      isThreadContinued,
     };
   }
 
   shownOf(view) {
     const root = view.records.get(this.article);
-    if (root) return [root].concat(conversationOf(view.replies, root.id));
+    if (root) return [root].concat(threadOf(view.replies, root.id));
     if (!this.filter) return view.items;
     return view.items.filter((message) => this.isMatch(message, view));
   }
@@ -1281,7 +1255,6 @@ class ChatApplication extends Application {
     const isArticleShown = view.records.has(this.article);
     const limit = isArticleShown ? Infinity : this.limit;
     const visible = view.shown.slice(-limit);
-    const lanes = this.lanesFor(visible, view);
     const focused = isItem(document.activeElement)
       ? document.activeElement.dataset.id
       : '';
@@ -1289,6 +1262,7 @@ class ChatApplication extends Application {
     const sections = [];
     let section = null;
     let previous = null;
+    let previousRoot = '';
     let day = '';
     let isMarked = false;
     for (let i = 0; i < visible.length; i++) {
@@ -1316,10 +1290,14 @@ class ChatApplication extends Application {
         continue;
       }
       const details = this.detailsOf(message, view);
-      details.isContinued = isGrouped(previous, message);
-      details.lanes = lanes[i];
+      const { threadRoot } = details;
+      const isSameThread = previousRoot === threadRoot;
+      const isThreadContinued = previous && threadRoot && isSameThread;
+      details.isContinued = isGrouped(previous, message, isSameThread);
+      details.isThreadContinued = Boolean(isThreadContinued);
       section.append(this.messageElement(message, details, cache));
       previous = message;
+      previousRoot = threadRoot;
       if (!details.isArticle) continue;
       const count = plural(visible.length - 1, 'reply', 'replies');
       section.append(createLabel('replies-divider', count));
@@ -1334,37 +1312,9 @@ class ChatApplication extends Application {
     this.renderHeader(view);
     const box = this.chatMessages;
     if (isAtBottom) box.scrollTop = box.scrollHeight;
-    this.renderFocus();
+    this.renderSelection();
     this.updateJump();
-    if (focused) this.selectById(focused);
-  }
-
-  laneMaxOf() {
-    const isWide = this.messageList.clientWidth > WIDE_PX;
-    return isWide ? WIDE_LANES : NARROW_LANES;
-  }
-
-  lanesFor(visible, view) {
-    this.laneMax = this.laneMaxOf();
-    const rows = visible.map((message) => {
-      const root = rootOf(view.records, message.id);
-      return { id: message.id, root, nick: message.nick };
-    });
-    return lanesOf(rows, this.laneMax, this.laneSlots);
-  }
-
-  heatLane(target) {
-    const root = target ? target.dataset.root : '';
-    if (root === this.hotRoot) return;
-    this.hotRoot = root;
-    for (const lane of this.messageList.querySelectorAll('.lane.hot')) {
-      lane.classList.remove('hot');
-    }
-    if (!root) return;
-    const selector = `.lane[data-root="${CSS.escape(root)}"]`;
-    for (const lane of this.messageList.querySelectorAll(selector)) {
-      lane.classList.add('hot');
-    }
+    if (focused) this.selectById(focused, false);
   }
 
   isNew(message) {
@@ -1540,12 +1490,14 @@ class ChatApplication extends Application {
     this.composerInfo.textContent = `${nick}${hint}${keys}`;
     this.replyBar.classList.toggle('hidden', !quote);
     if (!quote) return;
-    const inConversation = this.focusItems().includes(quote.id);
-    this.replyBar.classList.toggle('in-focus', inConversation);
-    const prefix = inConversation ? '↩ to conversation:' : 'reply to';
+    const inThread = this.threadItems().includes(quote.id);
+    this.replyBar.classList.toggle('in-thread', inThread);
+    const prefix = inThread ? '↩ to thread:' : 'reply to';
     this.replyPrefix.textContent = prefix;
     this.replyAuthor.textContent = quote.nick;
     this.replyText.textContent = quote.text;
+    const hasQuote = this.fragments.has(this.chat);
+    this.replyWithQuote.classList.toggle('hidden', !hasQuote);
   }
 
   createMessage(message, details) {
@@ -1553,12 +1505,18 @@ class ChatApplication extends Application {
     element.dataset.id = message.id;
     element.classList.toggle('pinned', message.pinned === true);
     element.classList.toggle('continued', details.isContinued);
+    const { threadRoot, isThreadContinued } = details;
+    if (threadRoot) {
+      const color = colorOf(threadRoot);
+      element.classList.add('threaded');
+      element.style.setProperty('--thread', `var(--thread-${color})`);
+    }
+    element.classList.toggle('thread-continued', isThreadContinued);
     const time = element.querySelector('.time');
     time.textContent = timeOf(message.timestamp);
     time.title = dateOf(message.timestamp);
     element.querySelector('.author').textContent = message.nick;
     fillText(element.querySelector('.content'), message.content);
-    fillLanes(element, details.lanes);
     fillQuote(element.querySelector('.quote'), details.quote);
     this.fillFiles(element.querySelector('.attachments'), details.files);
     this.fillReactions(element.querySelector('.reactions'), details.reactions);
@@ -1567,6 +1525,8 @@ class ChatApplication extends Application {
     replies.classList.toggle('hidden', replyCount === 0);
     replies.querySelector('.count').textContent = replyCount;
     replies.querySelector('.initials').textContent = details.initials.join(' ');
+    const count = plural(replyCount, 'reply', 'replies');
+    replies.setAttribute('aria-label', `${count}, select thread`);
     return element;
   }
 
@@ -1748,25 +1708,18 @@ class ChatApplication extends Application {
   }
 
   handleMessageClick(event) {
-    if (this.handleLaneClick(event)) return;
-    const item = event.target.closest('[data-id]');
-    if (!item) return;
-    const { id } = item.dataset;
-    const button = event.target.closest('button');
-    const isCard = !button && item.classList.contains('post');
-    const isLink = event.target.closest('a') !== null;
-    if (isCard && !isLink) return void this.openArticle(id);
+    const { target } = event;
+    const button = target.closest('button');
     const action = MESSAGE_ACTIONS[button?.dataset.action];
-    if (action) return void action(this, id, button);
-    const hasSelection = window.getSelection().toString() !== '';
-    if (!button && !isLink && !hasSelection) this.clickInFocus(id);
-  }
-
-  handleLaneClick(event) {
-    const lane = event.target.closest('.lane[data-root]');
-    if (!lane?.dataset.root) return false;
-    this.enterFocus(lane.dataset.root, '');
-    return true;
+    const actionItem = action ? target.closest('[data-id]') : null;
+    if (actionItem) return void action(this, actionItem.dataset.id, button);
+    if (target.closest('button, a, img, .attachments')) return;
+    if (!window.getSelection().isCollapsed) return;
+    const item = target.closest(`${ITEMS}, .call-card`);
+    const id = item?.dataset.id ?? '';
+    if (item?.classList.contains('post')) return void this.openArticle(id);
+    const isMessage = item?.classList.contains('message');
+    this.clickThread(isMessage ? id : '');
   }
 
   mineOf(id) {
@@ -1846,15 +1799,14 @@ class ChatApplication extends Application {
     const kind = kindOf(item);
     const items = [];
     this.menuFragment = fragmentOf(id);
-    if (kind === 'post') items.push({ action: 'article', label: 'Open post' });
-    else items.push({ action: 'reply', label: 'Reply' });
-    if (kind !== 'post' && this.menuFragment) {
+    if (kind === 'post') {
+      items.push({ action: 'article', label: 'Open post' });
+    } else {
+      items.push({ action: 'reply', label: 'Reply' });
       items.push({ action: 'reply-quote', label: 'Reply with quote' });
     }
-    const { records, replies } = this.view;
-    const hasConversation = replies.has(rootOf(records, id));
-    if (kind !== 'post' && hasConversation) {
-      items.push({ action: 'focus', label: 'Focus conversation' });
+    if (kind === 'message') {
+      items.push({ action: 'selection', label: 'Select thread' });
     }
     const pinLabel = record?.pinned ? 'Unpin' : 'Pin';
     items.push({ action: 'pin', label: pinLabel });
@@ -1871,8 +1823,15 @@ class ChatApplication extends Application {
     const button = event.target.closest('button[data-action]');
     if (!button) return;
     const id = this.menu.target;
+    const { action } = button.dataset;
+    const selectAfterPop = action === 'selection' && this.menu.isLifted;
+    const run = () => MESSAGE_ACTIONS[action](this, id, button);
+    if (selectAfterPop && this.layers.at(-1) === 'menu') {
+      window.addEventListener('popstate', run, { once: true });
+      return void this.closeMenu();
+    }
     this.closeMenu();
-    MESSAGE_ACTIONS[button.dataset.action](this, id, button);
+    run();
   }
 
   closeMenu() {
@@ -2181,15 +2140,15 @@ class ChatApplication extends Application {
     return value;
   }
 
-  openArticle(id) {
+  openArticle(id, keepSelectionLayer = false) {
     const root = this.recordOf(id);
     if (!root || !isPost(root)) return;
+    this.dropThread(keepSelectionLayer);
     if (!this.article) {
       const box = this.chatMessages;
       this.timelineOffset = box.scrollHeight - box.scrollTop;
       this.pushLayer('article');
     }
-    this.focus = null;
     this.article = id;
     this.closeSearch();
     this.render();
@@ -2199,7 +2158,7 @@ class ChatApplication extends Application {
 
   leaveArticle() {
     if (!this.article) return;
-    this.focus = null;
+    this.dropThread();
     this.article = '';
     this.render();
     const box = this.chatMessages;
@@ -2208,41 +2167,45 @@ class ChatApplication extends Application {
   }
 
   closeArticle() {
-    this.closeFocus();
+    this.closeThread();
     if (this.article) this.closeLayer('article');
   }
 
   dropArticle() {
-    this.dropFocus();
+    this.dropThread();
     if (!this.article) return;
     this.article = '';
     this.popLayer('article');
   }
 
-  focusItems() {
-    const { focus, view } = this;
-    if (!focus || !view) return [];
-    const root = view.records.has(focus.root) ? [focus.root] : [];
-    const replies = conversationOf(view.replies, focus.root);
-    return root.concat(replies.map((reply) => reply.id));
+  threadItems() {
+    const { selection, view } = this;
+    if (!selection || !view) return [];
+    const { root } = selection;
+    const items = threadOf(view.replies, root).map((reply) => reply.id);
+    if (view.records.has(root)) items.unshift(root);
+    return items;
   }
 
-  chosenOf() {
-    const ids = this.focusItems();
-    const chosen = this.focus?.chosen;
+  chosenOf(ids) {
+    const chosen = this.selection?.chosen;
     if (ids.includes(chosen)) return chosen;
     return ids.at(-1) ?? '';
   }
 
-  focusConversation(id, chosen = id) {
-    const view = this.view;
-    if (!view?.records.has(id)) return;
-    const root = rootOf(view.records, id);
-    if (view.replies.has(root)) return void this.enterFocus(root, chosen);
-    this.showNotification('No replies to focus on yet', 'warning');
+  selectThread(id, scroll = true) {
+    const message = this.view?.records.get(id);
+    const isMessage = message && !isPost(message);
+    const root = isMessage ? threadRootOf(this.view, id, this.article) : '';
+    if (!root) {
+      const text = 'No replies to this message yet';
+      return void this.showNotification(text, 'warning');
+    }
+    this.enterThread(root, id);
+    if (scroll && this.isFar(id)) this.scrollToSelection(this.itemOf(id));
   }
 
-  focusQuoted(id, from = '') {
+  jumpToQuoted(id, from = '') {
     const { records } = this.view;
     if (!records.has(id)) {
       const text = 'The message is not loaded yet';
@@ -2251,10 +2214,17 @@ class ChatApplication extends Application {
     const root = rootOf(records, id);
     const record = records.get(root);
     const isCard = record && isPost(record) && this.article !== root;
-    if (isCard) this.openArticle(root);
-    this.enterFocus(root, id);
+    const top = isCard ? root : this.article;
+    const threadRoot = threadRootOf(this.view, id, top);
+    if (isCard) {
+      const inArticle = this.article !== '';
+      const isSelectionOnTop = this.layers.at(-1) === 'selection';
+      const keepLayer = inArticle && isSelectionOnTop && threadRoot !== '';
+      this.openArticle(root, keepLayer);
+    }
+    if (threadRoot) this.enterThread(threadRoot, id);
     const isFar = this.isFar(id);
-    this.flash(id);
+    this.flash(id, true);
     if (isFar && from) this.showBack(from);
     else this.hideBack();
   }
@@ -2272,120 +2242,152 @@ class ChatApplication extends Application {
     const index = items.findIndex((message) => message.id === id);
     if (index < 0) return;
     const pages = Math.ceil((items.length - index) / PAGE_SIZE);
-    const most = this.limit + FOCUS_PAGES * PAGE_SIZE;
+    const most = this.limit + SELECTION_PAGES * PAGE_SIZE;
     this.limit = Math.max(this.limit, Math.min(pages * PAGE_SIZE, most));
   }
 
-  enterFocus(root, chosen) {
-    const isNew = this.focus === null;
-    if (isNew) this.closeSearch();
-    const box = this.chatMessages;
-    const offset = isNew ? box.scrollHeight - box.scrollTop : this.focus.offset;
+  enterThread(root, chosen) {
+    this.closeSearch();
+    this.hideBack();
+    const { selection, chatMessages: box } = this;
     const fromBottom = box.scrollHeight - box.scrollTop;
-    this.focus = { root, chosen, offset, cleared: false };
-    if (isNew) this.pushLayer('focus');
+    const offset = selection?.offset ?? fromBottom;
+    const moved = selection?.moved ?? false;
+    this.selection = { root, chosen, offset, moved, cleared: false };
+    this.threadTarget = '';
+    if (!selection && this.layers.at(-1) !== 'selection') {
+      this.pushLayer('selection');
+    }
+    const limit = this.limit;
     if (!this.article) this.loadThrough(root);
-    this.renderMessages(false);
-    box.scrollTop = box.scrollHeight - fromBottom;
+    if (this.limit !== limit) {
+      this.renderMessages(false);
+      box.scrollTop = box.scrollHeight - fromBottom;
+    } else {
+      this.renderSelection();
+    }
     this.renderComposer();
   }
 
-  leaveFocus() {
+  leaveThread() {
+    const { selection, chatMessages: box } = this;
+    if (!selection) return;
+    this.selection = null;
+    this.threadTarget = '';
     this.hideBack();
-    if (!this.focus) return;
-    const { offset } = this.focus;
-    this.focus = null;
-    this.renderMessages(false);
+    this.renderSelection();
     this.renderComposer();
-    const box = this.chatMessages;
-    box.scrollTop = box.scrollHeight - offset;
+    if (selection.moved) box.scrollTop = box.scrollHeight - selection.offset;
     this.updateJump();
   }
 
-  closeFocus() {
-    if (this.focus) this.closeLayer('focus');
+  closeThread() {
+    if (this.selection) this.closeLayer('selection');
   }
 
-  dropFocus() {
-    if (!this.focus) return;
-    this.focus = null;
-    this.popLayer('focus');
+  dropThread(keepLayer = false) {
+    if (!this.selection) return;
+    this.selection = null;
+    this.threadTarget = '';
+    this.hideBack();
+    if (!keepLayer) this.popLayer('selection');
   }
 
-  renderFocus() {
+  renderSelection() {
     const list = this.messageList;
-    const { focus, view } = this;
-    list.classList.toggle('focusing', focus !== null);
+    const { selection, view } = this;
+    list.classList.toggle('selecting', selection !== null);
     const items = list.querySelectorAll(`${ITEMS}, .call-card`);
-    const members = new Set(this.focusItems());
-    const chosen = this.chosenOf();
-    const branch = focus
-      ? new Set(branchOf(view.records, view.replies, chosen))
+    const ids = this.threadItems();
+    const members = new Set(ids);
+    const loaded = ids.filter((id) => this.cache.has(id));
+    const chosen = this.chosenOf(loaded);
+    const chain = selection
+      ? new Set(branchOf(view.records, view.replies, chosen, this.article))
       : new Set();
     for (const item of items) {
       const { id } = item.dataset;
       const isArticle = item.classList.contains('post-article');
-      const isMember = members.has(id) || isArticle;
-      item.classList.toggle('dim', focus !== null && !isMember);
-      item.classList.toggle('branch', focus !== null && branch.has(id));
+      const isMember = members.has(id);
+      const isDimmed = selection !== null && !isMember && !isArticle;
+      item.classList.toggle('dim', isDimmed);
+      item.classList.toggle('chain', isMember && chain.has(id));
+      item.classList.toggle('chosen', isMember && id === chosen);
     }
-    for (const lane of list.querySelectorAll('.lane[data-root]')) {
-      lane.classList.toggle('bold', lane.dataset.root === focus?.root);
-    }
-    this.renderFocusBar();
+    this.renderSelectionBar(loaded, chosen);
   }
 
-  renderFocusBar() {
-    this.focusBar.classList.toggle('hidden', this.focus === null);
-    if (!this.focus) return;
-    const ids = this.focusItems();
-    const index = ids.indexOf(this.chosenOf());
-    this.focusPosition.textContent = `${index + 1} of ${ids.length}`;
-    this.focusPrev.disabled = index <= 0;
-    this.focusNext.disabled = index >= ids.length - 1;
+  renderSelectionBar(ids, chosen) {
+    this.selectionBar.classList.toggle('hidden', this.selection === null);
+    if (!this.selection) {
+      this.selectionPosition.textContent = '';
+      return;
+    }
+    const index = ids.indexOf(chosen);
+    const position = `${index + 1} of ${ids.length}`;
+    if (this.selectionPosition.textContent !== position) {
+      this.selectionPosition.textContent = position;
+    }
+    this.selectionPrev.disabled = index <= 0;
+    this.selectionNext.disabled = index >= ids.length - 1;
   }
 
-  focusStep(step) {
-    if (!this.focus) return;
-    const ids = this.focusItems();
-    const index = ids.indexOf(this.chosenOf()) + step;
+  stepThread(step) {
+    if (!this.selection) return;
+    const ids = this.threadItems().filter((id) => this.cache.has(id));
+    const index = ids.indexOf(this.chosenOf(ids)) + step;
     if (index < 0 || index >= ids.length) return;
     const id = ids[index];
-    this.focus.chosen = id;
-    this.renderFocus();
+    this.selection.chosen = id;
+    this.renderSelection();
     const element = this.itemOf(id);
     if (!element) return;
-    element.scrollIntoView({ block: 'center', behavior: scrollBehavior() });
-    if (isItem(document.activeElement)) selectItem(element);
+    this.scrollToSelection(element);
+    if (isItem(document.activeElement)) selectItem(element, false);
   }
 
-  clickInFocus(id) {
-    if (!this.focus) return;
-    const isMember = this.focusItems().includes(id);
-    const element = this.itemOf(id);
-    const isArticle = element?.classList.contains('post-article');
-    if (!isMember && !isArticle) return void this.closeFocus();
-    this.focus.chosen = id;
-    this.setQuote(id);
-    this.renderFocus();
+  scrollToSelection(element) {
+    if (!element) return;
+    const box = this.chatMessages;
+    const row = element.getBoundingClientRect();
+    const delta = row.top - box.getBoundingClientRect().top;
+    const center = box.scrollTop + delta + (row.height - box.clientHeight) / 2;
+    const max = box.scrollHeight - box.clientHeight;
+    const top = Math.max(0, Math.min(center, max));
+    if (this.selection && Math.abs(top - box.scrollTop) >= 1) {
+      this.selection.moved = true;
+    }
+    box.scrollTo({ top, behavior: scrollBehavior() });
+  }
+
+  clickThread(id) {
+    const root = id ? threadRootOf(this.view, id, this.article) : '';
+    if (!root) return void this.closeThread();
+    if (root !== this.selection?.root) return void this.enterThread(root, id);
+    this.selection.chosen = id;
+    this.selection.cleared = false;
+    this.quotes.delete(this.chat);
+    this.fragments.delete(this.chat);
+    this.threadTarget = id;
+    this.renderSelection();
+    this.renderComposer();
   }
 
   targetId() {
     const explicit = this.quotes.get(this.chat) ?? '';
-    if (explicit || !this.focus || this.focus.cleared) return explicit;
-    return this.focusItems().at(-1) ?? '';
+    if (explicit || !this.selection || this.selection.cleared) return explicit;
+    return this.threadTarget || (this.threadItems().at(-1) ?? '');
   }
 
   currentQuote() {
     const id = this.targetId();
-    const quote = id && this.view ? quoteOf(id, this.view) : null;
     const fragment = this.fragments.get(this.chat);
-    if (quote && fragment) quote.text = fragment;
-    return quote;
+    return id && this.view ? quoteOf(id, this.view, fragment) : null;
   }
 
   setQuote(id, fragment = '') {
-    if (id && this.focus) this.focus.cleared = false;
+    this.threadTarget = '';
+    if (id && this.selection) this.selection.cleared = false;
     if (id) this.quotes.set(this.chat, id);
     else this.quotes.delete(this.chat);
     if (id && fragment) this.fragments.set(this.chat, fragment);
@@ -2394,7 +2396,7 @@ class ChatApplication extends Application {
   }
 
   cancelReply() {
-    if (this.focus) this.focus.cleared = true;
+    if (this.selection) this.selection.cleared = true;
     this.setQuote('');
   }
 
@@ -2403,9 +2405,16 @@ class ChatApplication extends Application {
     if (!record) return;
     const isCard = isPost(record) && id !== this.article;
     if (isCard) return void this.openArticle(id);
-    const isPlain = id === this.article && !this.focus;
+    const isPlain = id === this.article && !this.selection && !fragment;
     this.setQuote(isPlain ? '' : id, fragment);
     this.messageInput.focus();
+  }
+
+  startQuotedReply(id) {
+    const text = this.recordOf(id)?.content ?? '';
+    const line = text.replace(/\s+/g, ' ').trim();
+    const prefix = line.slice(0, QUOTE_LENGTH).trim();
+    this.startReply(id, this.menuFragment || prefix);
   }
 
   goBack() {
@@ -2449,10 +2458,12 @@ class ChatApplication extends Application {
     this.renderMessages(false);
   }
 
-  flash(id) {
+  flash(id, trackSelection = false) {
     const element = this.itemOf(id);
     if (!element) return;
-    element.scrollIntoView({ block: 'center', behavior: scrollBehavior() });
+    const behavior = scrollBehavior();
+    if (trackSelection) this.scrollToSelection(element);
+    else element.scrollIntoView({ block: 'center', behavior });
     const from = { backgroundColor: FLASH_COLOR };
     const to = { backgroundColor: 'transparent' };
     element.animate([from, to], { duration: FLASH_MS, easing: 'ease-in' });
@@ -2463,9 +2474,9 @@ class ChatApplication extends Application {
     return this.messageList.querySelector(selector);
   }
 
-  selectById(id) {
+  selectById(id, scroll = true) {
     const item = this.itemOf(id);
-    if (item) selectItem(item);
+    if (item) selectItem(item, scroll);
     else this.messageInput.focus();
   }
 
@@ -2533,16 +2544,19 @@ class ChatApplication extends Application {
     const isUp = event.key === 'ArrowUp' && !hasModifier && !event.shiftKey;
     if (isComposer && isEmpty && isUp) {
       event.preventDefault();
-      if (this.focus) return void this.selectById(this.chosenOf());
+      if (this.selection) {
+        const ids = this.threadItems().filter((id) => this.cache.has(id));
+        return void this.selectById(this.chosenOf(ids));
+      }
       return void this.selectLast();
     }
     const isOverlay = this.menu.isOpen || this.switcher.isOpen;
     const isTyping = isEditable(event.target);
-    const isFocusKey = this.focus && !hasModifier && !isOverlay && !isTyping;
-    const focusStep = isFocusKey && FOCUS_KEYS[event.key];
-    if (focusStep) {
+    const canStep = this.selection && !hasModifier && !isOverlay && !isTyping;
+    const stepThread = canStep && THREAD_KEYS[event.key];
+    if (stepThread) {
       event.preventDefault();
-      return void this.focusStep(focusStep);
+      return void this.stepThread(stepThread);
     }
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     const itemAction = isItem(event.target) && !hasModifier && ITEM_KEYS[key];
@@ -2581,9 +2595,11 @@ class ChatApplication extends Application {
     if (isTopicOpen) return void this.closeDescription();
     const isSearchOpen = !this.searchBar.classList.contains('hidden');
     if (isSearchOpen) return void this.toggleSearch();
+    const hasTarget = this.quotes.has(this.chat) || this.threadTarget !== '';
+    if (hasTarget) return void this.setQuote('');
+    if (this.selection) return void this.closeThread();
+    if (this.backTo) return void this.goBack();
     if (isItem(document.activeElement)) return void this.messageInput.focus();
-    if (this.quotes.get(this.chat)) return void this.setQuote('');
-    if (this.focus) return void this.closeFocus();
     if (this.article) return void this.closeArticle();
     if (this.panel && isNarrow()) return void this.closePanel();
     this.toggleSidebar();
@@ -2655,7 +2671,10 @@ class ChatApplication extends Application {
   toggleSearch() {
     const isHidden = this.searchBar.classList.toggle('hidden');
     this.searchBtn.classList.toggle('active', !isHidden);
-    if (!isHidden) return void this.searchInput.focus();
+    if (!isHidden) {
+      this.closeThread();
+      return void this.searchInput.focus();
+    }
     this.searchInput.value = '';
     this.filter = '';
     this.renderMessages();
@@ -2933,15 +2952,16 @@ class ChatApplication extends Application {
 
   async sendMessage() {
     const content = this.messageInput.value.trim();
-    const { chat, focus } = this;
+    const { chat, selection } = this;
     const pending = this.pendingOf(chat);
     const isEmpty = content === '' && pending.length === 0;
     if (isEmpty || !this.hasNick()) return;
     const isPostMode = this.isPostMode();
     const replyTo = this.targetId() || this.article;
     const quote = this.fragments.get(chat) ?? '';
-    const isInside = this.focusItems().includes(replyTo);
-    const isEnding = focus !== null && (focus.cleared || !isInside);
+    const isInside = this.threadItems().includes(replyTo);
+    const isEnding = selection?.cleared ?? false;
+    this.threadTarget = '';
     this.messageInput.value = '';
     this.pending.delete(chat);
     this.quotes.delete(chat);
@@ -2953,8 +2973,10 @@ class ChatApplication extends Application {
     const id = isPostMode
       ? this.writePost(chat, content, files)
       : this.writeMessage(chat, content, replyTo, files, quote);
-    if (isEnding) this.closeFocus();
-    else if (this.focus) this.focus.chosen = id;
+    if (selection && selection === this.selection) {
+      if (isEnding && selection.cleared) this.closeThread();
+      else if (isInside) selection.chosen = id;
+    }
     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
     const names = files.map((file) => file.name).join(', ');
     await this.reportDelivery(content || names);

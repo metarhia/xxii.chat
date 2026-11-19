@@ -37,51 +37,44 @@ sync. Terminal-like UI follows the
   collapsed folders are remembered per browser
 - Channel names may start with an emoji icon (`📣 news`), owners edit the
   description by clicking it in the top bar
-- One composer for everything: `Reply` puts a `reply to` bar above it, the
-  reply stays in the chat, in time order, with a one-line quote of its
-  parent (or with the fragment you selected, see below); a root message
-  with replies shows `↩ 3` and the initials of the
-  authors (phones: only `↩ 3`)
-- Starting a reply: the `↩` button on hover, `R` on the selected message,
-  a double click (no word gets selected; drag to select text), or on touch
-  screens a swipe to the right (from at least 24 px off the left edge, the
-  row follows the finger); it focuses the composer and shows the reply bar,
-  without starting focus mode
-- Fragment quotes: select text inside one message and reply with `↩`, `R`,
-  or `Reply with quote` in the menu, and the selection (up to 300
-  characters) becomes the quote line of the reply on every peer; a
-  selection across messages is ignored
-- Back pill: a click on a quote that jumps far away from the view shows
-  `↓ back`, which returns to the reply (`Esc` also returns)
-- Conversation lanes: when the chat has replies, a gutter left of the
-  messages draws each conversation (a message with its transitive replies)
-  as a colored line, `●` on its root, `├` on replies, `└` on the last one in
-  view; 4 lanes on wide screens, 2 on phones, older conversations share a
-  gray dashed lane; hovering a lane thickens it and shows `N replies` with
-  the nicks
-- Focus: a click on a lane, on a quote, or on the `↩ 3` counter, the menu
-  item `Focus conversation`, or `F` on the selected message highlights the
-  whole conversation, draws the branch of the chosen message (its ancestors
-  and replies) with a stronger bar, and dims the rest; a bar above the
-  composer shows `‹ 2 of 6 ›` and `✕`, `‹ ›`, `[` `]`, `↑` `↓` move between
-  its messages in time order; the composer replies into the conversation
-  (default: its latest message, a click on a highlighted message picks
-  another, `✕` on the reply bar sends the next message to the chat and ends
-  focus); `✕`, `Esc`, the back button on phones, or a click on a dimmed
-  message ends focus and returns to the place where it started; older pages
-  are loaded (up to 10) when the root is above the loaded messages
+- Replies stay in the chat in time order. A thread contains a root message
+  and all its replies. Each thread uses one of 32 colors for author nicks
+  and the stripe at the left of each row. The root shows a right-pointing
+  reply arrow, the count, and up to three author initials. Phones show the
+  arrow and count.
+- Start a reply with the hover reply button, `R` on the selected message,
+  a double click or tap, or a swipe to the right on touch screens. Start
+  the swipe at least 24 px from the left edge. Drag to select text.
+- `Reply with quote` in the message menu quotes the start of the message
+  or the text you selected in that message, up to 300 characters. Reply
+  gestures also quote text selected in the message. The quote appears on
+  every peer. Click a quote to jump to its message. For distant jumps,
+  `↓ back` returns to the reply.
+- Click or tap any thread message, its root's reply counter, or a quote to
+  select the thread. The chosen message, its ancestors, and its replies
+  get a wider stripe, and other threads and standalone messages dim.
+  The selection bar shows the chosen message's position and buttons to
+  step through the thread. Select another thread to switch. Click outside
+  the thread, use the selection bar's `✕`, press `Esc`, or use the phone's
+  back button to clear. Clearing restores the saved scroll position after
+  a jump or step. If the root is above the loaded messages, selection
+  loads up to 10 older pages.
+- The composer replies to the latest message of the selected thread by
+  default. Click a member of the selected thread to reply to it. The reply
+  bar's `✕` makes the next send a plain message and clears the selection
+  when it is sent.
 - Pinned messages, clickable links, message search, older messages by pages
   of 50; consecutive messages of one author are grouped, days have sticky
   labels
 - Message actions live in one menu: right click or the `⋯` handle on hover
-  opens reactions, reply, focus, pin, copy, and downloads; on touch screens
+  opens reactions, reply, thread selection, pin, copy, and downloads; on touch screens
   a long press lifts the message with reactions above and actions below,
   and a swipe to the right replies, a double tap replies too
 - Reactions toggle: clicking your reaction again removes it, your reactions
   are highlighted, a reaction shows who reacted on hover
 - Replies to me: `↩ N` next to the unread count in the chat header and the
-  chat list counts unread replies to your messages, a click focuses the next
-  one
+  chat list counts unread replies to your messages. Click it to select the
+  thread of the next unread reply and jump to it
 - Unread: per chat read time kept in the browser, badges, a `new messages`
   line, a jump-to-latest button with the count, unread total in the tab
   title and on the installed app icon
@@ -105,12 +98,13 @@ sync. Terminal-like UI follows the
 - Keyboard: `Ctrl+K` jumps to a chat, feed, or contact, `Alt+↑`/`Alt+↓`
   previous or next chat, `Ctrl+F` search, `Ctrl+P` pinned; `↑` in an empty
   composer selects the last message, `↑`/`↓` move, `Enter` or `Shift+F10`
-  opens the menu, `R` replies (with the selected text as the quote), `F` focuses the conversation, and in focus
-  `[` `]` `↑` `↓` move between its messages; `Esc` closes the top overlay,
-  cancels a reply target, ends focus, closes an open post, or shows and
-  hides the sidebar
-- Mobile: back button closes the sidebar, panel, viewer, menu, focus, and post, layout
-  respects safe areas and the on-screen keyboard, bigger touch targets
+  opens the menu, `R` replies, and `F` selects the thread of the current
+  message. Use `[`, `]`, `↑`, or `↓` to step through the selected thread.
+  `Esc` closes the top overlay, clears a reply target or thread selection,
+  closes an open post, or toggles the sidebar
+- Mobile: the back button closes the sidebar, panel, viewer, menu, thread
+  selection, or post. The layout respects safe areas and the on-screen
+  keyboard and offers bigger touch targets
 - Nick shared between tabs, install prompt, clear database, members list,
   and activity log
 
@@ -355,7 +349,7 @@ server) with `files/have`, `get`, and `put`.
   settings keep public STUN off by default, store user servers, and can
   force relay
 - `npm run test:browser`: the chat scenarios and `test:calls`; tabs, chats,
-  menu reactions that toggle, quoted replies, focus, pins, feeds opened
+  menu reactions that toggle, quoted replies, thread selection, pins, feeds opened
   in place, keyboard selection, `Esc`,
   `Ctrl+K`, drafts, swipe and long press,
   folders and their visibility between peers, offline writes, OPFS,

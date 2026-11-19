@@ -218,32 +218,35 @@
         >
           ↓ back
         </button>
-        <div id="focus-bar" class="focus-bar hidden">
+        <div id="selection-bar" class="selection-bar hidden" aria-live="polite">
           <button
-            id="focus-prev"
+            id="selection-prev"
             class="link-btn"
             type="button"
-            title="Previous message of the conversation ([)"
-            aria-label="Previous message of the conversation"
+            title="Previous message in the thread ([)"
+            aria-label="Previous message in the thread"
           >
             ‹
           </button>
-          <span id="focus-position" class="focus-position"></span>
+          <span aria-atomic="true">
+            <span class="visually-hidden">Thread, </span>
+            <span id="selection-position"></span>
+          </span>
           <button
-            id="focus-next"
+            id="selection-next"
             class="link-btn"
             type="button"
-            title="Next message of the conversation (])"
-            aria-label="Next message of the conversation"
+            title="Next message in the thread (])"
+            aria-label="Next message in the thread"
           >
             ›
           </button>
           <button
-            id="focus-close"
-            class="link-btn focus-close"
+            id="selection-close"
+            class="link-btn selection-close"
             type="button"
-            title="End focus (Esc)"
-            aria-label="End focus"
+            title="Clear thread selection (Esc)"
+            aria-label="Clear thread selection"
           >
             ✕
           </button>
@@ -261,6 +264,7 @@
                 <span class="reply-author"></span
               ></span>
               <span class="reply-text"></span>
+              <span class="reply-with-quote hidden">with quote</span>
             </button>
             <button
               id="reply-cancel"
@@ -532,7 +536,6 @@
     <template id="message-template">
       <div class="message">
         <span class="time"></span>
-        <div class="lanes" aria-hidden="true"></div>
         <div class="body">
           <button class="quote hidden" type="button" data-action="quote">
             <span class="quote-author"></span><span class="quote-text"></span>
@@ -544,7 +547,7 @@
           <div class="reactions"></div>
           <button class="replies hidden" data-action="counter">
             <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" />
+              <path d="M3 2v5a4 4 0 0 0 4 4h7M10 7l4 4-4 4" />
             </svg>
             <span class="count"></span>
             <span class="initials"></span>
@@ -585,7 +588,7 @@
         <div class="post-footer">
           <button class="replies" data-action="article">
             <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v1" />
+              <path d="M3 2v5a4 4 0 0 0 4 4h7M10 7l4 4-4 4" />
             </svg>
             <span class="count"></span>
           </button>

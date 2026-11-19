@@ -19,16 +19,38 @@
   --away: #ffff00;
   --offline: #ff3b30;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
-  --lane-0: #f2a33a;
-  --lane-1: #4fc3f7;
-  --lane-2: #ef6f8f;
-  --lane-3: #a6d854;
-  --lane-4: #b58df0;
-  --lane-5: #45d3b8;
-  --lane-6: #f08a5d;
-  --lane-7: #e5d65a;
-  --lane-gray: #6f7873;
-  --lane-width: 14px;
+  --thread-0: #ffa098;
+  --thread-1: #3eb786;
+  --thread-2: #c9acff;
+  --thread-3: #cb932e;
+  --thread-4: #37d2f2;
+  --thread-5: #db7aa6;
+  --thread-6: #a2ce72;
+  --thread-7: #7b9aef;
+  --thread-8: #ffa47a;
+  --thread-9: #08b7a5;
+  --thread-10: #e3a2f2;
+  --thread-11: #b59e2c;
+  --thread-12: #6acaff;
+  --thread-13: #e37a88;
+  --thread-14: #7cd591;
+  --thread-15: #9a90ea;
+  --thread-16: #f7ab5d;
+  --thread-17: #0ab3be;
+  --thread-18: #f59cd8;
+  --thread-19: #98a941;
+  --thread-20: #91c1ff;
+  --thread-21: #e37e69;
+  --thread-22: #53d8b1;
+  --thread-23: #b487dd;
+  --thread-24: #e4b750;
+  --thread-25: #00afd9;
+  --thread-26: #ff9bba;
+  --thread-27: #75b15f;
+  --thread-28: #abb9fe;
+  --thread-29: #dd864b;
+  --thread-30: #2fd8d1;
+  --thread-31: #c980c7;
   --font: 'Fira Code', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -633,106 +655,12 @@ svg {
   border-radius: 4px;
 }
 
-.message.laned {
-  grid-template-columns: 60px calc(var(--lanes) * var(--lane-width)) minmax(
-      0,
-      1fr
-    );
-}
-
-.lanes {
-  display: flex;
-}
-
-.message:not(.laned) > .lanes {
-  display: none;
-}
-
-.lane {
-  position: relative;
-  flex: 0 0 var(--lane-width);
-  margin: -3px 0;
-  cursor: default;
-}
-
-.lane::before,
-.lane::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  background: var(--lane);
-  transform: translateX(-50%);
-}
-
-.lane.pass::before,
-.lane.node::before,
-.lane.last::before,
-.lane.root::before {
-  top: -4px;
-  bottom: -4px;
-  width: 2px;
-}
-
-.lane.root::before {
-  top: 12px;
-}
-
-.lane.last::before {
-  bottom: auto;
-  height: 16px;
-}
-
-.lane.cut::before {
-  top: 12px;
-}
-
-.lane.last.cut::before {
-  display: none;
-}
-
-.lane.node::after,
-.lane.last::after {
-  top: 11px;
-  left: 50%;
-  width: 7px;
-  height: 2px;
-  transform: none;
-}
-
-.lane.root::after {
-  top: 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.lane.overflow::before {
-  top: -4px;
-  bottom: -4px;
-  width: 2px;
-  background: repeating-linear-gradient(
-    to bottom,
-    var(--lane) 0 3px,
-    transparent 3px 6px
-  );
-}
-
-.lane.hot::before,
-.lane.bold::before {
-  width: 4px;
-}
-
-.focusing .dim {
+.selecting .dim {
   opacity: 0.35;
   cursor: pointer;
 }
 
-.focusing .branch {
-  box-shadow: inset 3px 0 0 var(--text);
-  background: var(--button);
-}
-
-.focus-bar {
+.selection-bar {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -742,15 +670,15 @@ svg {
   font-size: 11px;
 }
 
-.focus-bar .focus-close {
+.selection-bar .selection-close {
   margin-left: auto;
 }
 
-.reply-bar.in-focus .reply-text::before {
+.reply-bar.in-thread .reply-text::before {
   content: '«';
 }
 
-.reply-bar.in-focus .reply-text::after {
+.reply-bar.in-thread .reply-text::after {
   content: '»';
 }
 
@@ -765,7 +693,7 @@ svg {
   }
 }
 
-.message:not(.continued) {
+.message:not(.continued, .thread-continued) {
   margin-top: 6px;
 }
 
@@ -782,6 +710,21 @@ svg {
   outline: none;
   background: var(--active-bg);
   box-shadow: inset 3px 0 0 var(--active);
+}
+
+.message.threaded {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  box-shadow: inset 3px 0 0 var(--thread);
+}
+
+.selecting .message.chain {
+  background: var(--button);
+  box-shadow: inset 6px 0 0 var(--thread);
+}
+
+.selecting .message.chosen {
+  background: var(--button-hover);
 }
 
 .more {
@@ -881,6 +824,10 @@ svg {
   flex: none;
 }
 
+.message.threaded .author {
+  color: var(--thread);
+}
+
 .author::after {
   content: ':';
 }
@@ -928,7 +875,8 @@ svg {
   color: var(--text);
 }
 
-.reply-label {
+.reply-label,
+.reply-with-quote {
   flex: none;
   color: var(--muted);
 }
@@ -1229,6 +1177,10 @@ svg {
 .replies:hover {
   background: var(--button);
   color: var(--text);
+}
+
+.message.threaded .replies {
+  color: var(--thread);
 }
 
 .jump {
@@ -1836,13 +1788,6 @@ svg {
     grid-template-columns: 44px minmax(0, 1fr);
     padding-left: 24px;
   }
-
-  .message.laned {
-    grid-template-columns: 44px calc(var(--lanes) * var(--lane-width)) minmax(
-        0,
-        1fr
-      );
-  }
 }
 
 @media (hover: none) {
@@ -1980,13 +1925,6 @@ svg {
 
   .message {
     grid-template-columns: 44px minmax(0, 1fr);
-  }
-
-  .message.laned {
-    grid-template-columns: 44px calc(var(--lanes) * var(--lane-width)) minmax(
-        0,
-        1fr
-      );
   }
 
   .lightbox-stage {
@@ -2607,15 +2545,38 @@ svg {
 }
 
 :root[data-theme='light'] {
-  --lane-0: #c77a0a;
-  --lane-1: #0b7fb5;
-  --lane-2: #c23a63;
-  --lane-3: #5a8f12;
-  --lane-4: #7a4fc9;
-  --lane-5: #0f9a84;
-  --lane-6: #c4531f;
-  --lane-7: #a39512;
-  --lane-gray: #8b938e;
+  --thread-0: #a43b38;
+  --thread-1: #045c3e;
+  --thread-2: #714ca6;
+  --thread-3: #674603;
+  --thread-4: #016f82;
+  --thread-5: #822154;
+  --thread-6: #497101;
+  --thread-7: #2c4598;
+  --thread-8: #a14206;
+  --thread-9: #035a50;
+  --thread-10: #854494;
+  --thread-11: #5a4d01;
+  --thread-12: #016c97;
+  --thread-13: #881f37;
+  --thread-14: #047836;
+  --thread-15: #4c3b94;
+  --thread-16: #8e5300;
+  --thread-17: #05585e;
+  --thread-18: #953d7c;
+  --thread-19: #495303;
+  --thread-20: #2163b1;
+  --thread-21: #892310;
+  --thread-22: #03755b;
+  --thread-23: #623287;
+  --thread-24: #7e5e01;
+  --thread-25: #00566c;
+  --thread-26: #9f3960;
+  --thread-27: #245c01;
+  --thread-28: #4e58b1;
+  --thread-29: #783902;
+  --thread-30: #01736e;
+  --thread-31: #732973;
 }
 
 .react-menu {

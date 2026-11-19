@@ -58,6 +58,9 @@ class BrowserProtocol {
   }
 
   request(method, params = {}, sessionId = undefined) {
+    if (this.#socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('Browser connection is closed'));
+    }
     const id = ++this.#id;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
