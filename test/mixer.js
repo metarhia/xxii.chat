@@ -48,10 +48,10 @@ const SETUP = `
     return destination.stream.getAudioTracks()[0];
   };
   window.FREQUENCIES = {
-    ada: 445.3125,
-    bob: 761.71875,
-    kim: 1201.171875,
-    share: 1640.625,
+    ada: 978.515625,
+    bob: 1775.390625,
+    kim: 2167.96875,
+    share: 2384.765625,
   };
   window.tones = {};
   for (const name of Object.keys(window.FREQUENCIES)) {
@@ -138,7 +138,8 @@ test(
     const out = await measure('window.list[1].optOut = true; return true;');
     assert.equal(out.gains['bob:1/mic'], 0);
     assert.ok(out.levels.bob < ABSENT, `opted-out bob ${out.levels.bob}`);
-    assert.ok(Math.abs(out.levels.ada - all.levels.ada) < 1);
+    const kept = out.levels.ada - all.levels.ada;
+    assert.ok(Math.abs(kept) < 1, `ada changed by ${kept} dB`);
     const back = await measure('window.list[1].optOut = false; return true;');
     assert.equal(back.gains['bob:1/mic'], 1);
     assert.ok(back.levels.bob > PRESENT, `opted back in ${back.levels.bob}`);
@@ -147,7 +148,10 @@ test(
     const onScreen = await measure(
       `${shown} window.mix = { audio: 'onScreen' }; return true;`,
     );
-    assert.ok(onScreen.levels.ada > PRESENT);
+    assert.ok(
+      onScreen.levels.ada > PRESENT,
+      `on screen ${onScreen.levels.ada}`,
+    );
     assert.ok(
       onScreen.levels.bob < ABSENT,
       `off screen ${onScreen.levels.bob}`,
@@ -165,7 +169,7 @@ test(
     );
     const half = custom.levels.ada - all.levels.ada;
     assert.ok(Math.abs(half + 6.02) < 1, `half volume ${half} dB`);
-    assert.ok(custom.levels.bob < ABSENT);
+    assert.ok(custom.levels.bob < ABSENT, `muted bob ${custom.levels.bob}`);
     assert.equal(custom.gains['ada:1/mic'], 0.5);
 
     const me = await measure(
@@ -174,7 +178,7 @@ test(
       return true;`,
     );
     assert.ok(me.levels.ada < ABSENT, `own voice ${me.levels.ada}`);
-    assert.ok(me.levels.bob > PRESENT);
+    assert.ok(me.levels.bob > PRESENT, `other voice ${me.levels.bob}`);
     assert.equal(me.gains['ada:1/mic'], 0);
 
     const share = await measure(
@@ -186,7 +190,7 @@ test(
       return true;`,
     );
     assert.ok(share.levels.share > PRESENT, `screen ${share.levels.share}`);
-    assert.ok(share.levels.bob < ABSENT);
+    assert.ok(share.levels.bob < ABSENT, `bob under share ${share.levels.bob}`);
     assert.equal(share.gains['bob:1/screenAudio'], 1);
     const hiddenShare = await measure('window.shown = new Set(); return true;');
     const hiddenLevel = hiddenShare.levels.share;
@@ -196,9 +200,11 @@ test(
       window.mix = { audio: 'all', screenAudio: false };
       return true;`,
     );
-    assert.ok(noScreenAudio.levels.share < ABSENT);
+    const noShare = noScreenAudio.levels.share;
+    assert.ok(noShare < ABSENT, `screen audio off ${noShare}`);
     assert.equal(noScreenAudio.gains['bob:1/screenAudio'], 0);
-    assert.ok(noScreenAudio.levels.bob > PRESENT);
+    const bobLevel = noScreenAudio.levels.bob;
+    assert.ok(bobLevel > PRESENT, `bob with screen audio off ${bobLevel}`);
 
     const swapped = await measure(
       `window.mix = {};
