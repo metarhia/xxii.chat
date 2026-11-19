@@ -1,11 +1,14 @@
 import { ParticipantVolume } from './call-volume.js';
 import { TileMenu } from './call-tile-menu.js';
+import { peerOf, colorOf, initialsOf } from './avatar.js';
 import { statsText } from './call-stats.js';
 import { MediaCapture, CallLevels, isMobile } from './media.js';
 import { pausesCameraInBackground } from './media.js';
 import { requestCallNotifications } from './notifications.js';
 import { notificationClient } from './notifications.js';
 import { ViewHints } from './view-hints.js';
+import { CallRecording } from './call-record.js';
+import { createRecordPanel, createRecordControl } from './record-panel.js';
 import { CALL_LAYOUTS, STRIP_POSITIONS } from './call-layout.js';
 import { tileId, callLayout } from './call-layout.js';
 import { REACTIONS, REACTION_SHOW_MS, isReaction } from './call-hands.js';
@@ -69,6 +72,14 @@ const ACTIONS = {
   'hide-self': (stage) => stage.toggleView('hideSelf'),
   'hide-no-video': (stage) => stage.toggleView('hideNoVideo'),
   hand: (stage) => stage.toggleHand(),
+  'opt-out': (stage) => stage.toggleOptOut(),
+  record: (stage) => stage.recording?.toggle(),
+  'record-pause': (stage) => stage.recording?.togglePause(),
+  'record-panel': (stage) => {
+    stage.closeMenus();
+    stage.recording?.togglePanel();
+  },
+  'record-background': (stage) => stage.recording?.resetBackground(),
   layout: (stage) => stage.nextLayout(),
   pip: (stage) => stage.openPip(),
   'pip-back': (stage) => stage.closePip(true),
@@ -114,33 +125,6 @@ const REMOTE_REQUEST = {
 };
 
 const POLICIES = ['open', 'link', 'approval'];
-
-const hueOf = (id) => {
-  let hash = 0;
-  for (const char of id) hash = (hash * 33 + char.charCodeAt(0)) % 360;
-  return hash;
-};
-
-const peerOf = (endpoint) => {
-  const index = endpoint.indexOf(':');
-  if (index <= 0) return endpoint;
-  return endpoint.slice(0, index);
-};
-
-const colorOf = (endpoint) => {
-  const peer = endpoint ? peerOf(endpoint) : 'guest';
-  return `hsl(${hueOf(peer)} 42% 32%)`;
-};
-
-const initialsOf = (name) => {
-  const text = typeof name === 'string' ? name.trim() : '';
-  if (text === '') return '?';
-  const parts = text.split(/\s+/);
-  const first = parts[0];
-  const second = parts[1];
-  if (!second) return first.slice(0, 2).toUpperCase();
-  return `${first[0]}${second[0]}`.toUpperCase();
-};
 
 const createButton = (action, label) => {
   const button = document.createElement('button');
@@ -354,10 +338,14 @@ const createPeople = () => {
   roster.className = 'call-roster';
   const copy = createButton('copy-link', 'copy link');
   copy.classList.add('hidden');
+  const optOut = createButton('opt-out', 'opt out of recordings');
+  optOut.classList.add('people-opt-out');
+  optOut.setAttribute('aria-pressed', 'false');
   aside.append(
     createButton('close-sheet', 'close people'),
     lobby,
     roster,
+    optOut,
     createHostControls(),
     copy,
   );
@@ -501,9 +489,16 @@ const createCall = (title) => {
   const heading = document.createElement('span');
   heading.className = 'chat-title';
   heading.textContent = title;
+  const recording = document.createElement('span');
+  recording.className = 'call-recording hidden';
+  const optOut = createButton('opt-out', 'opt out');
+  optOut.classList.add('call-opt-out', 'hidden');
+  optOut.setAttribute('aria-pressed', 'false');
   bar.append(
     back,
     heading,
+    recording,
+    optOut,
     createButton('people', 'people'),
     createButton('chat', 'chat'),
     createLayoutControls(),
@@ -519,7 +514,7 @@ const createCall = (title) => {
   grid.append(strip);
   const body = document.createElement('div');
   body.className = 'call-body';
-  body.append(grid, createPeople());
+  body.append(grid, createPeople(), createRecordPanel());
   const controls = document.createElement('footer');
   controls.className = 'call-controls';
   controls.append(
@@ -531,6 +526,7 @@ const createCall = (title) => {
   controls.insertBefore(createShare(), leave);
   controls.insertBefore(createHand(), leave);
   controls.insertBefore(createReact(), leave);
+  controls.insertBefore(createRecordControl(), leave);
   controls.insertBefore(createMore(), leave);
   const note = document.createElement('p');
   note.className = 'call-note hidden';
@@ -959,6 +955,7 @@ class CallStage {
     this.statsHidden = new Set();
     this.statsAll = false;
     this.viewHints = null;
+    this.recording = null;
     this.quality = new Map();
     this.qualityNotices = new Set();
     this.levels = null;
@@ -1039,6 +1036,7 @@ class CallStage {
     this.announcements = document.getElementById('call-announcements');
     this.phone = matchMedia(PHONE);
     this.preferences = this.hooks.preferences.settings;
+    this.recording = new CallRecording(this, this.preferences);
     this.media.cameraOn = camera && !this.preferences.joinCameraOff;
     this.media.micOn = !this.preferences.joinMicOff;
     this.media.noise = this.preferences.noise;
@@ -1084,6 +1082,8 @@ class CallStage {
 
   detach() {
     const session = this.session;
+    this.recording?.dispose();
+    this.recording = null;
     this.releaseWake();
     this.closeSheet();
     this.hooks.popLayer('call');
@@ -1191,6 +1191,7 @@ class CallStage {
       this.showNote(this.media?.message || this.media?.notice || '');
       this.renderTiles();
       this.paintPeople();
+      this.paintRecording();
       this.hooks.focusChat(this.chat);
       this.hooks.changed();
     }
@@ -1245,19 +1246,29 @@ class CallStage {
     this.sheet = name;
     this.root.dataset.callSheet = name;
     this.hooks.pushLayer('callSheet');
-    const close =
-      name === 'people'
-        ? this.host.querySelector('.call-people button')
-        : this.root.querySelector('.close-call-chat');
+    const panels = {
+      people: '.call-people button',
+      record: '.call-record button',
+    };
+    const panel = panels[name];
+    const close = panel
+      ? this.host.querySelector(panel)
+      : this.root.querySelector('.close-call-chat');
     close?.focus();
+    this.recording?.paint();
   }
 
   hideSheet() {
     if (!this.sheet) return;
-    const trigger = this.host?.querySelector(`[data-action="${this.sheet}"]`);
+    const isRecord = this.sheet === 'record';
+    const selector = isRecord
+      ? '.call-record-control [data-action="record"]'
+      : `[data-action="${this.sheet}"]`;
+    const trigger = this.host?.querySelector(selector);
     this.sheet = '';
     delete this.root.dataset.callSheet;
     trigger?.focus();
+    this.recording?.paint();
   }
 
   closeSheet() {
@@ -1365,6 +1376,11 @@ class CallStage {
       return;
     }
     if (event.key === 'Escape' && this.closeMenus()) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    if (event.key === 'Escape' && this.recording?.closePanel()) {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
@@ -1501,6 +1517,9 @@ class CallStage {
   }
 
   leave() {
+    const isRecording = this.recording?.isActive === true;
+    const text = 'You are recording this call. Stop the recording and leave?';
+    if (isRecording && this.hooks.confirm?.(text) === false) return;
     this.cancel();
   }
 
@@ -1554,6 +1573,7 @@ class CallStage {
         admin,
         hand,
         recording: item.recording === true,
+        optOut: item.optOut === true,
       });
     }
     if (this.mode === 'call' || this.mode === 'mini') {
@@ -1597,7 +1617,26 @@ class CallStage {
       this.syncControls();
     }
     this.paintPeople();
+    this.paintRecording();
     this.paintKnocks();
+  }
+
+  paintRecording() {
+    const note = this.host?.querySelector('.call-recording');
+    if (!note) return;
+    const recorders = this.people.filter((person) => person.recording);
+    const names = recorders.map((person) => person.nick || 'guest');
+    const text = names.length > 0 ? `● ${names.join(', ')} recording` : '';
+    note.textContent = text;
+    note.classList.toggle('hidden', text === '');
+    const me = this.session?.endpoint;
+    const byOthers = recorders.some((person) => person.endpoint !== me);
+    const optOut = this.host?.querySelector('.call-opt-out');
+    if (!optOut) return;
+    const isOut = this.isOptedOut();
+    optOut.classList.toggle('hidden', !byOthers);
+    optOut.textContent = isOut ? 'opted out · undo' : 'opt out';
+    optOut.setAttribute('aria-pressed', `${isOut}`);
   }
 
   announceChanges(people) {
@@ -1773,7 +1812,9 @@ class CallStage {
     const mic = media.micOn;
     const camera = media.cameraOn && !media.cameraPaused;
     const screen = media.screenShared && Boolean(media.screenTrack);
-    await this.hooks.update({ mic, camera, screen });
+    const flags = { mic, camera, screen };
+    if (this.recording?.isActive) flags.recording = true;
+    await this.hooks.update(flags);
   }
 
   ensureHost() {
@@ -1835,6 +1876,8 @@ class CallStage {
 
   onDevice(event) {
     const select = event.target;
+    const { record, pin, volume } = select.dataset;
+    if (record || pin || volume) return void this.recording?.change(select);
     if (select.dataset.setting || select.dataset.device) {
       this.hooks.preferences.change(select);
       return;
@@ -1886,6 +1929,7 @@ class CallStage {
   }
 
   syncControls() {
+    this.recording?.paint();
     const roots = [this.host, this.mini, this.pip?.root];
     for (const root of roots) {
       if (root) this.paintButtons(root);
@@ -2085,6 +2129,20 @@ class CallStage {
     return this.setHand(!this.isHandRaised());
   }
 
+  isOptedOut() {
+    const endpoint = this.session?.endpoint;
+    return this.personOf(endpoint)?.optOut === true;
+  }
+
+  async setOptOut(value) {
+    if (!this.session) return;
+    await this.hooks.update({ optOut: value });
+  }
+
+  toggleOptOut() {
+    return this.setOptOut(!this.isOptedOut());
+  }
+
   applyPreferences(settings) {
     if (!settings.pushToTalk) this.talkStep('up');
     this.preferences = settings;
@@ -2095,6 +2153,7 @@ class CallStage {
     this.media
       ?.setMirror(settings.mirror)
       .catch((error) => this.hooks.fail(error));
+    this.recording?.applyDefaults(settings);
     this.syncControls();
     this.paintPreview();
     this.paintNote();
@@ -2253,6 +2312,13 @@ class CallStage {
     const copy = aside.querySelector('[data-action="copy-link"]');
     const showCopy = this.isAdmin && this.kind !== 'direct';
     copy?.classList.toggle('hidden', !showCopy);
+    const optOut = aside.querySelector('.people-opt-out');
+    if (!optOut) return;
+    const isOut = this.isOptedOut();
+    optOut.textContent = isOut
+      ? 'opted out of recordings · undo'
+      : 'opt out of recordings';
+    optOut.setAttribute('aria-pressed', `${isOut}`);
   }
 
   paintHost(aside) {
@@ -2305,6 +2371,12 @@ class CallStage {
         hand.setAttribute('aria-label', `hand raised, number ${order}`);
         item.append(hand);
         if (this.isAdmin) item.append(createButton('lower-hand', 'lower'));
+      }
+      if (person.optOut) {
+        const opted = document.createElement('span');
+        opted.className = 'roster-opted';
+        opted.textContent = 'opted out';
+        item.append(opted);
       }
       list.append(item);
     }

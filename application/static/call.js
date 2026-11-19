@@ -36,6 +36,18 @@ const isOfferer = (local, remote) => {
 
 const delayOf = (attempt) => RECONNECT_MS[Math.min(attempt, 3)];
 
+const mergeHints = (slot, hints) => {
+  let width = 0;
+  let height = 0;
+  let fps = 0;
+  for (const hint of hints) {
+    width = Math.max(width, hint.width);
+    height = Math.max(height, hint.height);
+    fps = Math.max(fps, hint.fps);
+  }
+  return { slot, width, height, fps, audioOnly: false };
+};
+
 const participantOf = (list, endpoint) => {
   if (!Array.isArray(list)) return null;
   for (const item of list) {
@@ -296,6 +308,7 @@ class CallSession extends Emitter {
   #heartbeat = null;
   #onPageHide = null;
   #viewHints = new Map();
+  #demands = new Map();
   #audioOnly = new Set();
 
   constructor(options) {
@@ -389,12 +402,25 @@ class CallSession extends Emitter {
     this.#links.get(endpoint)?.send(message);
   }
 
-  setViewHint(endpoint, message) {
+  setViewHint(endpoint, message, owner = 'view') {
     const hint = validateHint(message);
     if (!hint) return;
     const key = `${endpoint}\n${hint.slot}`;
-    this.#viewHints.set(key, hint);
-    this.#sendHint(endpoint, hint);
+    const owners = this.#demands.get(key) ?? new Map();
+    owners.set(owner, hint);
+    this.#demands.set(key, owners);
+    this.#publishHint(endpoint, hint.slot);
+  }
+
+  releaseViewHints(owner) {
+    const released = [];
+    for (const key of Array.from(this.#demands.keys())) {
+      const owners = this.#demands.get(key);
+      if (!owners.delete(owner)) continue;
+      const parts = key.split('\n');
+      released.push({ endpoint: parts[0], slot: parts[1] });
+    }
+    for (const item of released) this.#publishHint(item.endpoint, item.slot);
   }
 
   setAudioOnly(endpoint, enabled) {
@@ -423,6 +449,18 @@ class CallSession extends Emitter {
 
   requestedAudioOnly(endpoint) {
     return this.#audioOnly.has(endpoint);
+  }
+
+  #publishHint(endpoint, slot) {
+    const key = `${endpoint}\n${slot}`;
+    const owners = this.#demands.get(key);
+    if (!owners || owners.size === 0) {
+      this.#demands.delete(key);
+      return;
+    }
+    const hint = mergeHints(slot, owners.values());
+    this.#viewHints.set(key, hint);
+    this.#sendHint(endpoint, hint);
   }
 
   #sendHint(endpoint, hint) {

@@ -5,6 +5,7 @@ import { readFile, localFiles, clearFiles } from './files.js';
 import { sendBlob, SerialTask } from './files.js';
 import { VERSION_URL, UPDATE_CHANNEL } from './application.js';
 import { onNotificationMessage, onNotificationClick } from './notifications.js';
+import { isRecordingUrl, serveRecording } from './recording-route.js';
 
 const CACHE_PREFIX = 'xxii-';
 const META_CACHE = 'xxii-meta';
@@ -30,6 +31,18 @@ const ASSETS = [
   '/call-settings.js',
   '/call-preferences.js',
   '/call-keys.js',
+  '/layout.js',
+  '/avatar.js',
+  '/members.js',
+  '/compositor.js',
+  '/mixer.js',
+  '/recording-files.js',
+  '/recording-webm.js',
+  '/recording-worker.js',
+  '/recording-route.js',
+  '/recorder.js',
+  '/record-panel.js',
+  '/call-record.js',
   '/call-layout.js',
   '/call-stats.js',
   '/call-volume.js',
@@ -172,6 +185,10 @@ class CacheManager {
     const { request } = event;
     if (request.method !== 'GET') return;
     if (!request.url.startsWith('http')) return;
+    const url = new URL(request.url);
+    if (isRecordingUrl(url)) {
+      return void event.respondWith(serveRecording(request, url));
+    }
     const respond = async () => {
       try {
         const response = await this.serve(request);

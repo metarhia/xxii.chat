@@ -76,6 +76,14 @@ const FIELDS = {
     peak: 'number',
     names: 'string',
   },
+  recording: {
+    chat: 'string',
+    call: 'string',
+    author: 'string',
+    nick: 'string',
+    timestamp: 'number',
+    stopped: 'number',
+  },
   file: {
     chat: 'string',
     message: 'string',
@@ -218,6 +226,20 @@ const endCall = (replica, id, { ended, peak, names }) => {
   return replica.assign('call', id, { ended, peak, names: clipped });
 };
 
+const startRecording = (replica, record) => {
+  const { id, chat, call, author, nick, timestamp } = record;
+  return replica.assign('recording', id, {
+    chat,
+    call,
+    author,
+    nick,
+    timestamp,
+  });
+};
+
+const stopRecording = (replica, id, { stopped }) =>
+  replica.assign('recording', id, { stopped });
+
 const attachFile = (replica, file) => {
   const { id, chat, message, author, name, mime, size, checksum } = file;
   const { width, height, created } = file;
@@ -344,8 +366,21 @@ const threadsOf = (replica, chat) => {
       records.set(id, call);
     }
   }
+  const recordings = [];
+  if (!isFeedChannel) {
+    for (const id of replica.keys('recording')) {
+      const record = replica.get(id);
+      const hasTime = typeof record.timestamp === 'number';
+      const isShown = record.chat === chat && hasTime;
+      if (!isShown) continue;
+      const recording = { id, kind: 'recording', ...record };
+      recordings.push(recording);
+      records.set(id, recording);
+    }
+  }
   for (const thread of replies.values()) thread.sort(byTime);
-  const shown = isFeedChannel ? posts : messages.concat(calls);
+  const timeline = messages.concat(calls, recordings);
+  const shown = isFeedChannel ? posts : timeline;
   return { items: shown.toSorted(byTime), records, replies };
 };
 
@@ -387,6 +422,17 @@ const reactionsOf = (replica, chat) => {
   return reactions;
 };
 
+const countOthers = (unread, replica, entity, field, others) => {
+  for (const id of replica.keys(entity)) {
+    const record = replica.get(id);
+    const chat = record.chat;
+    const isOthers = record[field] !== others.reader;
+    const isNew = record.timestamp > others.readAt(chat);
+    if (chat === undefined || !isOthers || !isNew) continue;
+    unread.set(chat, (unread.get(chat) ?? 0) + 1);
+  }
+};
+
 const unreadOf = (replica, reader, readAt) => {
   const unread = new Map();
   for (const entity of TIMELINE) {
@@ -399,14 +445,9 @@ const unreadOf = (replica, reader, readAt) => {
       unread.set(chat, (unread.get(chat) ?? 0) + 1);
     }
   }
-  for (const id of replica.keys('call')) {
-    const record = replica.get(id);
-    const chat = record.chat;
-    const isOthers = record.host !== reader;
-    const isNew = record.timestamp > readAt(chat);
-    if (chat === undefined || !isOthers || !isNew) continue;
-    unread.set(chat, (unread.get(chat) ?? 0) + 1);
-  }
+  const others = { reader, readAt };
+  countOthers(unread, replica, 'call', 'host', others);
+  countOthers(unread, replica, 'recording', 'author', others);
   return unread;
 };
 
@@ -421,7 +462,7 @@ const filesOf = (replica) => {
 
 const activityOf = (replica) => {
   const activity = new Map();
-  const entities = TIMELINE.concat(['call']);
+  const entities = TIMELINE.concat(['call', 'recording']);
   for (const entity of entities) {
     for (const id of replica.keys(entity)) {
       const record = replica.get(id);
@@ -442,6 +483,7 @@ export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
 export { createFolder, setVisibility, placeItem };
 export { createMessage, createPost, startCall, endCall };
+export { startRecording, stopRecording };
 export { attachFile, setReaction, pin };
 export { listChannels, listAuthors, folderTree, activityOf };
 export { threadsOf, lineageOf };

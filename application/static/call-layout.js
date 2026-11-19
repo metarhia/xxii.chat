@@ -1,56 +1,30 @@
+import { TILE_ASPECT, gridShape, gridRects } from './layout.js';
+
 const CALL_LAYOUTS = ['auto', 'grid', 'spotlight', 'sidebar'];
 const STRIP_POSITIONS = ['bottom', 'top', 'left', 'right'];
-const TILE_ASPECT = 16 / 9;
 const GAP = 8;
 const STRIP_RATIO = 0.22;
 const STRIP_MAX = 120;
 const STRIP_ASPECT = 4 / 3;
 
+const gapOf = (count, width, height) =>
+  Math.min(GAP, width / count, height / count);
+
 const bestGrid = (count, width, height) => {
-  const gap = Math.min(GAP, width / count, height / count);
-  let best = { columns: 1, rows: count, width: 0, height: 0 };
-  let area = -1;
-  for (let columns = 1; columns <= count; columns++) {
-    const rows = Math.ceil(count / columns);
-    const cellWidth = Math.max(0, (width - gap * (columns - 1)) / columns);
-    const cellHeight = Math.max(0, (height - gap * (rows - 1)) / rows);
-    const tileWidth = Math.min(cellWidth, cellHeight * TILE_ASPECT);
-    const tileHeight = tileWidth / TILE_ASPECT;
-    const nextArea = tileWidth * tileHeight;
-    if (nextArea <= area) continue;
-    area = nextArea;
-    best = { columns, rows, width: tileWidth, height: tileHeight };
-  }
-  return best;
+  const gap = gapOf(count, width, height);
+  return gridShape(count, { width, height }, TILE_ASPECT, gap);
 };
 
 const gridTiles = (tiles, bounds) => {
   if (!tiles.length) return [];
-  const grid = bestGrid(tiles.length, bounds.width, bounds.height);
-  const gap = Math.min(
-    GAP,
-    bounds.width / tiles.length,
-    bounds.height / tiles.length,
-  );
-  const result = [];
-  const totalHeight = grid.rows * (grid.height + gap) - gap;
-  for (let index = 0; index < tiles.length; index++) {
-    const row = Math.floor(index / grid.columns);
-    const column = index % grid.columns;
-    const rowCount = Math.min(grid.columns, tiles.length - row * grid.columns);
-    const totalWidth = rowCount * (grid.width + gap) - gap;
-    const x = bounds.x + (bounds.width - totalWidth) / 2;
-    const y = bounds.y + (bounds.height - totalHeight) / 2;
-    result.push({
-      ...tiles[index],
-      x: Math.max(0, x + column * (grid.width + gap)),
-      y: Math.max(0, y + row * (grid.height + gap)),
-      width: grid.width,
-      height: grid.height,
-      featured: false,
-    });
-  }
-  return result;
+  const gap = gapOf(tiles.length, bounds.width, bounds.height);
+  const rects = gridRects(tiles.length, bounds, TILE_ASPECT, gap);
+  const place = (tile, index) => ({
+    ...tile,
+    ...rects[index],
+    featured: false,
+  });
+  return tiles.map(place);
 };
 
 const featuredOf = (tiles, hints) => {
