@@ -1335,8 +1335,71 @@ svg {
 .app[data-panel='pins'] .panel-body[data-panel='pins'],
 .app[data-panel='members'] .panel-body[data-panel='members'],
 .app[data-panel='log'] .panel-body[data-panel='log'],
-.app[data-panel='calls'] .panel-body[data-panel='calls'] {
+.app[data-panel='calls'] .panel-body[data-panel='calls'],
+.app[data-panel='recordings'] .panel-body[data-panel='recordings'] {
   display: flex;
+}
+
+.recordings-player {
+  flex: none;
+  width: 100%;
+  max-height: 42dvh;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.recordings-list {
+  gap: 0;
+}
+
+.recording-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--raised);
+}
+
+.recording-item img {
+  flex: none;
+  width: 25%;
+  max-width: 88px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.recording-info {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.recording-chat,
+.recording-details,
+.recordings-storage,
+.recordings-status {
+  font-size: 12px;
+}
+
+.recording-actions,
+.recording-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.recording-form input {
+  width: 100%;
+}
+
+.recording-download {
+  text-decoration: none;
+}
+
+.recording-export-progress {
+  width: 100%;
 }
 
 .check {
@@ -2712,11 +2775,10 @@ svg {
   display: none;
 }
 
-.app:is(
-    [data-call='prejoin'],
-    [data-call='lobby'],
-    [data-call='call']
-  )[data-panel='calls']
+.app:is([data-call='prejoin'], [data-call='lobby'], [data-call='call']):is(
+    [data-panel='calls'],
+    [data-panel='recordings']
+  )
   > .panel {
   display: flex;
   position: fixed;
@@ -2791,7 +2853,8 @@ svg {
   .app[data-call='call'][data-call-sheet='people'] .call-people,
   .app[data-call='call'][data-call-sheet='record'] .call-record[data-open],
   .app[data-call='call'][data-call-sheet='chat'] .chat-view,
-  .app[data-call='call'][data-panel='calls'] > .panel {
+  .app[data-call='call']:is([data-panel='calls'], [data-panel='recordings'])
+    > .panel {
     display: flex;
     flex-direction: column;
     position: fixed;

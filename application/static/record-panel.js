@@ -229,6 +229,7 @@ const createRecordControl = () => {
   choices.append(
     createButton('record-pause', 'pause'),
     createButton('record-panel', 'program options'),
+    createButton('recordings', 'recordings'),
   );
   menu.append(summary, choices);
   wrap.append(menu);

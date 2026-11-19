@@ -97,6 +97,10 @@ class RecordingWriter {
     return this.#request({ type: 'resume', recording });
   }
 
+  repair() {
+    return this.#request({ type: 'repair' });
+  }
+
   poster(recording, bytes) {
     return this.#request({ type: 'poster', recording, bytes }, [bytes]);
   }
@@ -164,7 +168,7 @@ class Recorder extends Emitter {
   #meta = null;
   #stopping = null;
   #posterTimer = 0;
-  #hasPoster = false;
+  #poster = null;
   #accrued = 0;
   #since = 0;
 
@@ -290,9 +294,12 @@ class Recorder extends Emitter {
     this.stop().catch(ignore);
   }
 
-  async #takePoster() {
-    if (this.#hasPoster) return;
-    this.#hasPoster = true;
+  #takePoster() {
+    this.#poster ??= this.#savePoster();
+    return this.#poster;
+  }
+
+  async #savePoster() {
     try {
       const canvas = this.#compositor.canvas;
       const blob = await new Promise((resolve) => {

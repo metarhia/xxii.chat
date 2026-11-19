@@ -3,6 +3,12 @@ const SEGMENT = 0x18538067;
 const INFO = 0x1549a966;
 const SEEK_HEAD = 0x114d9b74;
 const CLUSTER = 0x1f43b675;
+const TRACKS = 0x1654ae6b;
+const CUES = 0x1c53bb6b;
+const ATTACHMENTS = 0x1941a469;
+const CHAPTERS = 0x1043a770;
+const TAGS = 0x1254c367;
+const TIMECODE = 0xe7;
 const TIMECODE_SCALE = 0x2ad7b1;
 const DURATION = 0x4489;
 
@@ -15,6 +21,17 @@ DURATION_ELEMENT.set(DURATION_HEAD);
 const MAX_VINT = 8;
 const BYTE_BITS = 8;
 const BYTE_RANGE = 256;
+const ELEMENT_HEADER = 4 + MAX_VINT;
+const SEGMENT_CHILDREN = new Set([
+  INFO,
+  SEEK_HEAD,
+  CLUSTER,
+  TRACKS,
+  CUES,
+  ATTACHMENTS,
+  CHAPTERS,
+  TAGS,
+]);
 
 const lengthOf = (first) => {
   if (first === 0) return 0;
@@ -150,4 +167,87 @@ const durationBytesOf = (durationMs, scale = DEFAULT_SCALE) => {
   return bytes;
 };
 
+const storedElementAt = (read, at, limit) => {
+  const bytes = read(at, Math.min(ELEMENT_HEADER, limit - at));
+  const element = elementAt(bytes, 0);
+  if (!element) return null;
+  const { id } = element;
+  const start = at + element.start;
+  const end = element.end < 0 ? -1 : at + element.end;
+  if (!Number.isSafeInteger(end)) return null;
+  return { id, start, end };
+};
+
+const storedUnsignedOf = (read, start, end) => {
+  const size = end - start;
+  if (size < 1 || size > MAX_VINT) return null;
+  const bytes = read(start, size);
+  if (bytes.length !== size) return null;
+  const value = unsignedOf(bytes, { start: 0, end: size });
+  return Number.isSafeInteger(value) ? value : null;
+};
+
+const scanMaster = (read, master, limit, visit) => {
+  const isUnknown = master.end < 0;
+  const end = isUnknown ? limit : Math.min(master.end, limit);
+  let at = master.start;
+  while (at < end) {
+    const child = storedElementAt(read, at, end);
+    if (!child) break;
+    if (isUnknown && SEGMENT_CHILDREN.has(child.id)) return at;
+    if (child.end < 0 || child.end > end) break;
+    if (visit(child) && !isUnknown) break;
+    at = child.end;
+  }
+  return end;
+};
+
+const webmDurationOf = (read, size) => {
+  const header = storedElementAt(read, 0, size);
+  if (header?.id !== EBML_HEADER || header.end < 0 || header.end >= size) {
+    return null;
+  }
+  const segment = storedElementAt(read, header.end, size);
+  if (segment?.id !== SEGMENT) return null;
+  const end = segment.end < 0 ? size : Math.min(segment.end, size);
+  let scale = DEFAULT_SCALE;
+  let offset;
+  let timecode;
+  let at = segment.start;
+  const readInfo = ({ id, start, end }) => {
+    if (id === TIMECODE_SCALE) {
+      const value = storedUnsignedOf(read, start, end);
+      if (value > 0) scale = value;
+    }
+    if (id === DURATION && end - start === FLOAT_BYTES) offset = start;
+  };
+  const readTimecode = ({ id, start, end }) => {
+    if (id !== TIMECODE) return false;
+    const value = storedUnsignedOf(read, start, end);
+    if (value === null) return false;
+    timecode = value;
+    return true;
+  };
+  while (at < end) {
+    const element = storedElementAt(read, at, end);
+    if (!element) break;
+    if (element.id === INFO) {
+      at = scanMaster(read, element, end, readInfo);
+    } else if (element.id === CLUSTER) {
+      at = scanMaster(read, element, end, readTimecode);
+    } else if (element.end >= 0) {
+      at = element.end;
+    } else {
+      break;
+    }
+  }
+  const duration =
+    timecode === undefined
+      ? undefined
+      : (timecode * scale) / NANOSECONDS_PER_MS;
+  const slot = offset === undefined ? null : { offset, scale };
+  return { duration, slot };
+};
+
 export { encodeSize, durationSlotOf, durationBytesOf };
+export { webmDurationOf };

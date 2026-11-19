@@ -1,11 +1,48 @@
 import { RECORDINGS, META_FILE, POSTER_FILE } from './recording-files.js';
 import { programFileOf, nextMeta } from './recording-files.js';
 import { scheduleOf, markedOf } from './recording-files.js';
+import { isOpen, readMeta, recordingsOf } from './recording-files.js';
 import { durationSlotOf, durationBytesOf } from './recording-webm.js';
+import { storedDurationOf } from './recording-duration.js';
 
 const encoder = new TextEncoder();
 const sessions = new Map();
 let queue = Promise.resolve();
+
+const IF_AVAILABLE = { ifAvailable: true };
+const SESSION_WRITES = ['write', 'pause', 'resume'];
+
+const lockNameOf = (recording) => `xxii-recording-${recording}`;
+
+const requireStorage = () => {
+  if (
+    !navigator.storage?.getDirectory ||
+    !globalThis.FileSystemFileHandle?.prototype.createSyncAccessHandle
+  ) {
+    throw new Error('Browser storage for recordings is unavailable');
+  }
+  if (!navigator.locks?.request) {
+    throw new Error('Browser locks for recordings are unavailable');
+  }
+};
+
+const holdLock = (recording) =>
+  new Promise((resolve, reject) => {
+    const done = navigator.locks.request(
+      lockNameOf(recording),
+      IF_AVAILABLE,
+      (lock) => {
+        if (!lock) throw new Error('The recording is already open');
+        return new Promise((release) => {
+          resolve(async () => {
+            release();
+            await done;
+          });
+        });
+      },
+    );
+    done.catch(reject);
+  });
 
 const directoryOf = async (recording) => {
   const root = await navigator.storage.getDirectory();
@@ -57,17 +94,37 @@ const headOf = (session, bytes) => {
 };
 
 const openRecording = async ({ recording, meta }) => {
-  const directory = await directoryOf(recording);
-  const name = programFileOf(meta.extension);
-  const file = await directory.getFileHandle(name, { create: true });
-  const handle = await file.createSyncAccessHandle();
-  handle.truncate(0);
-  const now = Date.now();
-  const marks = { flushedAt: now, metaAt: now };
-  const session = { directory, handle, meta, at: 0, marks, slot: null };
-  sessions.set(recording, session);
-  await saveMeta(session);
-  return { meta };
+  requireStorage();
+  const release = await holdLock(recording);
+  let handle = null;
+  try {
+    const directory = await directoryOf(recording);
+    const name = programFileOf(meta.extension);
+    const file = await directory.getFileHandle(name, { create: true });
+    handle = await file.createSyncAccessHandle();
+    handle.truncate(0);
+    const now = Date.now();
+    const marks = { flushedAt: now, metaAt: now };
+    const session = {
+      directory,
+      handle,
+      meta,
+      at: 0,
+      marks,
+      slot: null,
+      release,
+    };
+    await saveMeta(session);
+    sessions.set(recording, session);
+    return { meta };
+  } catch (error) {
+    try {
+      handle?.close();
+    } finally {
+      await release();
+    }
+    throw error;
+  }
 };
 
 const writeChunk = async ({ recording, chunk, duration }) => {
@@ -108,31 +165,104 @@ const finish = (session, duration) => {
   }
 };
 
-const closeRecording = async ({ recording, duration, people }) => {
-  const session = sessionOf(recording);
-  sessions.delete(recording);
-  const size = finish(session, duration);
-  const time = Date.now();
-  const event = { type: 'close', size, duration, time, people };
-  session.meta = nextMeta(session.meta, event);
-  await saveMeta(session);
-  return { meta: session.meta };
-};
+const endRecording =
+  (type) =>
+  async ({ recording, duration, people }) => {
+    const session = sessionOf(recording);
+    sessions.delete(recording);
+    try {
+      duration ??= session.meta.duration;
+      const size = finish(session, duration);
+      const time = Date.now();
+      const event = { type, size, duration, time, people };
+      session.meta = nextMeta(session.meta, event);
+      await saveMeta(session);
+      return { meta: session.meta };
+    } finally {
+      await session.release();
+    }
+  };
 
-const abortRecording = async ({ recording, duration }) => {
-  const session = sessionOf(recording);
-  sessions.delete(recording);
-  const size = finish(session, duration);
-  const event = { type: 'interrupt', size, duration };
-  session.meta = nextMeta(session.meta, event);
-  await saveMeta(session);
-  return { meta: session.meta };
-};
+const abortRecording = endRecording('interrupt');
 
 const savePoster = async ({ recording, bytes }) => {
-  const directory = await directoryOf(recording);
+  const { directory } = sessionOf(recording);
   await writeFile(directory, POSTER_FILE, new Uint8Array(bytes));
   return {};
+};
+
+const readRecording = async (directory) => {
+  try {
+    const file = await directory.getFileHandle(META_FILE);
+    return await readMeta(file);
+  } catch (error) {
+    if (error.name === 'NotFoundError') return null;
+    throw error;
+  }
+};
+
+const interruptedEvent = async (directory, meta) => {
+  const type = 'interrupt';
+  const name = programFileOf(meta.extension);
+  let file;
+  try {
+    file = await directory.getFileHandle(name);
+  } catch (error) {
+    if (error.name === 'NotFoundError') {
+      return { type, size: 0, duration: meta.duration };
+    }
+    throw error;
+  }
+  const handle = await file.createSyncAccessHandle();
+  try {
+    const size = handle.getSize();
+    const result = storedDurationOf(
+      handle,
+      size,
+      meta.extension,
+      meta.duration,
+    );
+    const { duration, slot } = result;
+    if (slot) {
+      const bytes = durationBytesOf(duration, slot.scale);
+      writeAll(handle, bytes, slot.offset);
+      handle.flush();
+    }
+    return { type, size, duration };
+  } finally {
+    handle.close();
+  }
+};
+
+const repairRecording = async (directory, lock) => {
+  if (!lock) return false;
+  const current = await readRecording(directory);
+  if (!isOpen(current)) return false;
+  const event = await interruptedEvent(directory, current);
+  const meta = nextMeta(current, event);
+  await saveMeta({ directory, meta });
+  return true;
+};
+
+const repair = async () => {
+  requireStorage();
+  const recordings = await recordingsOf(navigator.storage);
+  let repaired = 0;
+  let failed = 0;
+  if (!recordings) return { repaired, failed };
+  for await (const directory of recordings.values()) {
+    if (directory.kind !== 'directory') continue;
+    const meta = await readRecording(directory).catch(() => null);
+    if (meta && !isOpen(meta)) continue;
+    const name = lockNameOf(directory.name);
+    try {
+      const fix = (lock) => repairRecording(directory, lock);
+      if (await navigator.locks.request(name, IF_AVAILABLE, fix)) repaired++;
+    } catch {
+      failed++;
+    }
+  }
+  return { repaired, failed };
 };
 
 const HANDLERS = {
@@ -140,9 +270,10 @@ const HANDLERS = {
   write: writeChunk,
   pause: change('pause'),
   resume: change('resume'),
-  close: closeRecording,
+  close: endRecording('close'),
   abort: abortRecording,
   poster: savePoster,
+  repair,
 };
 
 const dispatch = async (message) => {
@@ -151,6 +282,9 @@ const dispatch = async (message) => {
     const result = await HANDLERS[type](message);
     self.postMessage({ request, ok: true, ...result });
   } catch (error) {
+    if (SESSION_WRITES.includes(type) && sessions.has(message.recording)) {
+      await abortRecording(message).catch(() => {});
+    }
     const text = error?.message ?? 'The recording failed';
     self.postMessage({ request, ok: false, error: text, name: error?.name });
   }
