@@ -7,6 +7,8 @@ import { saveAuthor, createChannel, describe } from './chat.js';
 import { createFolder, setVisibility, placeItem } from './chat.js';
 import { createMessage, createPost, setReaction, pin } from './chat.js';
 import { startCall as saveCall, endCall as saveCallEnd } from './chat.js';
+import { startRecording as saveRecording } from './chat.js';
+import { stopRecording as saveRecordingStop } from './chat.js';
 import { MAX_FILE_SIZE, attachFile, attachmentsOf } from './chat.js';
 import { listChannels, listAuthors, folderTree } from './chat.js';
 import { threadsOf, activityOf, reactionsOf, unreadOf } from './chat.js';
@@ -368,11 +370,21 @@ const createDay = (timestamp) => {
   return section;
 };
 
-const minutesOf = (record) => {
-  const span = record.ended - record.timestamp;
-  const rounded = Math.round(span / MINUTE_MS);
+const minutesBetween = (start, end) => {
+  const rounded = Math.round((end - start) / MINUTE_MS);
   if (rounded < 1) return 1;
   return rounded;
+};
+
+const minutesOf = (record) => minutesBetween(record.timestamp, record.ended);
+
+const recordingLabel = (record, isLive) => {
+  const nick = record.nick || 'guest';
+  if (typeof record.stopped === 'number') {
+    const minutes = minutesBetween(record.timestamp, record.stopped);
+    return `● ${nick} recorded ${minutes} min`;
+  }
+  return isLive ? `● ${nick} recording` : `● ${nick} recorded`;
 };
 
 const callLabel = (record, live) => {
@@ -1298,6 +1310,11 @@ class ChatApplication extends Application {
         previous = null;
         continue;
       }
+      if (message.kind === 'recording') {
+        section.append(this.createRecordingCard(message));
+        previous = null;
+        continue;
+      }
       const details = this.detailsOf(message, view);
       details.isContinued = isGrouped(previous, message);
       details.lanes = lanes[i];
@@ -1494,6 +1511,15 @@ class ChatApplication extends Application {
     button.dataset.action = choice.action;
     button.textContent = choice.label;
     element.append(button);
+    return element;
+  }
+
+  createRecordingCard(record) {
+    const isLive = this.liveCalls.has(record.call);
+    const element = document.createElement('div');
+    element.className = 'call-card recording-card';
+    element.dataset.id = record.id;
+    element.textContent = recordingLabel(record, isLive);
     return element;
   }
 
@@ -3156,6 +3182,9 @@ class ChatApplication extends Application {
       },
       titleOf: (chat) => this.callTitle(chat),
       update: (flags) => this.pushCallState(flags),
+      recordStart: (record) => this.recordRecordingStart(record),
+      recordStop: (record) => this.recordRecordingStop(record),
+      confirm: (text) => window.confirm(text),
       focusChat: (id) => this.focusCallChat(id),
       changed: () => this.scheduleRender(),
       fail: (error) => this.report(error),
@@ -3588,10 +3617,22 @@ class ChatApplication extends Application {
     const call = session.call;
     const endpoint = session.endpoint;
     const args = { call, endpoint };
-    for (const name of ['mic', 'camera', 'screen', 'hand']) {
+    const names = ['mic', 'camera', 'screen', 'hand', 'recording', 'optOut'];
+    for (const name of names) {
       if (typeof flags[name] === 'boolean') args[name] = flags[name];
     }
     await this.api.call.update(args);
+  }
+
+  recordRecordingStart({ id, chat, call, timestamp }) {
+    const author = this.peerId;
+    const nick = this.username;
+    const record = { id, chat, call, author, nick, timestamp };
+    saveRecording(this.replicaOf(chat), record);
+  }
+
+  recordRecordingStop({ id, chat, stopped }) {
+    saveRecordingStop(this.replicaOf(chat), id, { stopped });
   }
 
   showNotification(message, type = 'info', region = this.notification) {

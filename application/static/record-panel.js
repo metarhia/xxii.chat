@@ -1,0 +1,369 @@
+import { PEOPLE, SCREENS, PLACEMENTS, OTHERS, POSITIONS } from './layout.js';
+import { NO_VIDEO, QUALITIES, MIN_SPEAKERS, MAX_SPEAKERS } from './layout.js';
+import { OPTIONS } from './call-settings.js';
+
+const SURFACE_COLOR = '#0f1418';
+const VOLUME_MAX = 200;
+const VOLUME_STEP = 5;
+
+const range = (from, to) => {
+  const values = [];
+  for (let value = from; value <= to; value++) values.push(value);
+  return values;
+};
+
+const FIELDS = [
+  { name: 'people', label: 'People on screen', kind: 'choice', values: PEOPLE },
+  {
+    name: 'maxSpeakers',
+    label: 'Max speakers',
+    kind: 'count',
+    values: range(MIN_SPEAKERS, MAX_SPEAKERS),
+  },
+  { name: 'screen', label: 'Screen share', kind: 'choice', values: SCREENS },
+  {
+    name: 'placement',
+    label: 'Speaker placement',
+    kind: 'choice',
+    values: PLACEMENTS,
+  },
+  { name: 'others', label: 'Others panel', kind: 'choice', values: OTHERS },
+  {
+    name: 'othersPosition',
+    label: 'Panel position',
+    kind: 'choice',
+    values: POSITIONS,
+  },
+  {
+    name: 'audio',
+    label: 'Audio',
+    kind: 'choice',
+    values: OPTIONS.recordingAudio,
+  },
+  { name: 'includeMe', label: 'Include me', kind: 'flag' },
+  { name: 'screenAudio', label: 'Screen audio', kind: 'flag' },
+  { name: 'names', label: 'Names', kind: 'flag' },
+  { name: 'noVideo', label: 'No video', kind: 'choice', values: NO_VIDEO },
+  {
+    name: 'quality',
+    label: 'Quality',
+    kind: 'choice',
+    values: Object.keys(QUALITIES),
+  },
+];
+
+const LABELS = {
+  people: {
+    speaker: 'one speaker',
+    speakers: 'active speakers',
+    grid: 'everyone',
+    pinned: 'chosen people',
+  },
+  screen: {
+    off: 'off',
+    screen: 'screen only',
+    screenSpeaker: 'screen and speaker',
+    screenSpeakers: 'screen and speakers',
+  },
+  placement: { strip: 'strip', bubble: 'bubble' },
+  others: { hidden: 'hidden', strip: 'small tiles', names: 'names only' },
+  audio: {
+    all: 'everyone',
+    onScreen: 'people on screen',
+    duck: 'others quieter',
+    custom: 'per person',
+  },
+  noVideo: { avatar: 'avatar', hide: 'hide' },
+};
+
+const defaultsOf = (settings) => ({
+  people: settings?.recordingLayout ?? 'speakers',
+  maxSpeakers: 4,
+  screen: 'screenSpeakers',
+  placement: 'strip',
+  others: 'hidden',
+  othersPosition: 'bottom',
+  audio: settings?.recordingAudio ?? 'all',
+  includeMe: true,
+  screenAudio: true,
+  names: true,
+  noVideo: 'avatar',
+  quality: settings?.recordingQuality ?? '1080p30',
+  background: '',
+  pinned: [],
+  volumes: {},
+});
+
+const labelOf = (name, value) => LABELS[name]?.[value] ?? `${value}`;
+
+const valueOf = (control) => {
+  if (control.type === 'checkbox') return control.checked;
+  if (control.dataset.kind === 'count') return Number(control.value);
+  return control.value;
+};
+
+const createButton = (action, label) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'link-btn';
+  button.dataset.action = action;
+  button.textContent = label;
+  return button;
+};
+
+const createSelect = (field) => {
+  const select = document.createElement('select');
+  select.dataset.record = field.name;
+  select.dataset.kind = field.kind;
+  for (const value of field.values) {
+    const option = document.createElement('option');
+    option.value = `${value}`;
+    option.textContent = labelOf(field.name, value);
+    select.append(option);
+  }
+  return select;
+};
+
+const createCheck = (field) => {
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.dataset.record = field.name;
+  input.dataset.kind = field.kind;
+  return input;
+};
+
+const createField = (field) => {
+  const isFlag = field.kind === 'flag';
+  const label = document.createElement('label');
+  label.className = isFlag ? 'check' : 'call-field';
+  label.dataset.field = field.name;
+  if (isFlag) {
+    label.append(createCheck(field), field.label);
+    return label;
+  }
+  const caption = document.createElement('span');
+  caption.textContent = field.label;
+  label.append(caption, createSelect(field));
+  return label;
+};
+
+const createBackground = () => {
+  const box = document.createElement('div');
+  box.className = 'record-background';
+  const color = document.createElement('label');
+  color.className = 'call-field';
+  const caption = document.createElement('span');
+  caption.textContent = 'Background';
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.value = SURFACE_COLOR;
+  input.dataset.record = 'background';
+  input.dataset.kind = 'color';
+  color.append(caption, input);
+  const image = document.createElement('label');
+  image.className = 'call-field';
+  const imageCaption = document.createElement('span');
+  imageCaption.textContent = 'Background image';
+  const file = document.createElement('input');
+  file.type = 'file';
+  file.accept = 'image/*';
+  file.dataset.record = 'image';
+  image.append(imageCaption, file);
+  box.append(color, image, createButton('record-background', 'default'));
+  return box;
+};
+
+const createList = (name, label) => {
+  const box = document.createElement('fieldset');
+  box.className = 'record-list hidden';
+  box.dataset.list = name;
+  const legend = document.createElement('legend');
+  legend.textContent = label;
+  box.append(legend);
+  return box;
+};
+
+const createRecordPanel = () => {
+  const aside = document.createElement('aside');
+  aside.className = 'call-record';
+  aside.setAttribute('aria-label', 'Recording');
+  const head = document.createElement('div');
+  head.className = 'record-head';
+  const title = document.createElement('p');
+  title.className = 'chat-title';
+  title.textContent = 'Record';
+  head.append(title, createButton('record-panel', 'close'));
+  const preview = document.createElement('div');
+  preview.className = 'record-preview';
+  const state = document.createElement('p');
+  state.className = 'record-state';
+  const actions = document.createElement('div');
+  actions.className = 'record-actions';
+  actions.append(
+    createButton('record', 'start recording'),
+    createButton('record-pause', 'pause'),
+  );
+  const note = document.createElement('p');
+  note.className = 'call-note record-note hidden';
+  note.setAttribute('role', 'status');
+  const fields = document.createElement('div');
+  fields.className = 'record-fields';
+  for (const field of FIELDS) fields.append(createField(field));
+  fields.append(createBackground());
+  aside.append(head, preview, state, actions, note, fields);
+  aside.append(createList('pinned', 'Chosen people'));
+  aside.append(createList('volumes', 'Volume per person'));
+  return aside;
+};
+
+const createRecordControl = () => {
+  const wrap = document.createElement('div');
+  wrap.className = 'call-record-control';
+  wrap.append(createButton('record', 'record'));
+  const menu = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = '▾';
+  summary.setAttribute('aria-label', 'recording options');
+  const choices = document.createElement('div');
+  choices.className = 'share-menu';
+  choices.append(
+    createButton('record-pause', 'pause'),
+    createButton('record-panel', 'program options'),
+  );
+  menu.append(summary, choices);
+  wrap.append(menu);
+  return wrap;
+};
+
+const paintRecordButton = (button, view) => {
+  const isControl = Boolean(button.closest('.call-record-control'));
+  const isActive = view.state !== 'idle';
+  button.setAttribute('aria-pressed', `${isActive}`);
+  button.disabled = view.isBusy;
+  button.classList.toggle('recording', isActive);
+  if (!isActive) {
+    button.textContent = isControl ? 'record' : 'start recording';
+    return;
+  }
+  if (!isControl) {
+    button.textContent = 'stop recording';
+    return;
+  }
+  const dot = document.createElement('span');
+  dot.className = 'rec-dot';
+  dot.textContent = '●';
+  dot.setAttribute('aria-hidden', 'true');
+  const sign = view.state === 'paused' ? 'paused ' : '';
+  const text = document.createTextNode(` ${sign}${view.text}`);
+  button.replaceChildren(dot, text);
+  button.setAttribute('aria-label', `stop recording, ${sign}${view.text}`);
+};
+
+const paintPause = (button, view) => {
+  const isActive = view.state !== 'idle';
+  button.disabled = !isActive;
+  button.textContent = view.state === 'paused' ? 'resume' : 'pause';
+};
+
+const syncControl = (control, options, view) => {
+  const name = control.dataset.record;
+  if (name === 'image') return;
+  const value = options[name];
+  const isLocked = name === 'quality' && view.state !== 'idle';
+  control.disabled = isLocked;
+  if (control.type === 'checkbox') control.checked = value;
+  else if (name === 'background') control.value = value || SURFACE_COLOR;
+  else control.value = `${value}`;
+};
+
+const paintRows = (box, rows, make) => {
+  const keyOf = (person) => `${person.endpoint}|${person.nick}`;
+  const key = rows.map(keyOf).join('\n');
+  box.classList.toggle('hidden', rows.length === 0);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  const legend = box.querySelector('legend');
+  box.replaceChildren(legend, ...rows.map(make));
+};
+
+const createPinRow = (person) => {
+  const label = document.createElement('label');
+  label.className = 'check';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.dataset.pin = person.endpoint;
+  label.append(input, person.nick || 'guest');
+  return label;
+};
+
+const createVolumeRow = (person) => {
+  const label = document.createElement('label');
+  label.className = 'call-field';
+  const caption = document.createElement('span');
+  caption.textContent = person.nick || 'guest';
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = `${VOLUME_MAX}`;
+  input.step = `${VOLUME_STEP}`;
+  input.dataset.volume = person.endpoint;
+  label.append(caption, input);
+  return label;
+};
+
+const volumeOf = (options, endpoint) => {
+  const saved = options.volumes[endpoint];
+  return Number.isFinite(saved) ? Math.round(saved * 100) : 100;
+};
+
+const syncLists = (box, options) => {
+  const isIdle = (input) => input !== document.activeElement;
+  for (const input of box.querySelectorAll('[data-pin]')) {
+    input.checked = options.pinned.includes(input.dataset.pin);
+  }
+  for (const input of box.querySelectorAll('[data-volume]')) {
+    const volume = volumeOf(options, input.dataset.volume);
+    if (isIdle(input)) input.value = `${volume}`;
+  }
+};
+
+const paintLists = (root, options, people) => {
+  const pins = root.querySelector('[data-list="pinned"]');
+  const volumes = root.querySelector('[data-list="volumes"]');
+  const pinRows = options.people === 'pinned' ? people : [];
+  const volumeRows = options.audio === 'custom' ? people : [];
+  paintRows(pins, pinRows, createPinRow);
+  paintRows(volumes, volumeRows, createVolumeRow);
+  syncLists(pins, options);
+  syncLists(volumes, options);
+};
+
+const paintRecordPanel = (root, view) => {
+  const panel = root.querySelector('.call-record');
+  if (!panel) return;
+  const state = panel.querySelector('.record-state');
+  const isActive = view.state !== 'idle';
+  const label = view.state === 'paused' ? 'paused' : 'recording';
+  state.textContent = isActive ? `${label} · ${view.text}` : 'not recording';
+  const note = panel.querySelector('.record-note');
+  note.textContent = view.notice;
+  note.classList.toggle('hidden', view.notice === '');
+  for (const control of panel.querySelectorAll('[data-record]')) {
+    syncControl(control, view.options, view);
+  }
+  paintLists(panel, view.options, view.people);
+  panel.toggleAttribute('data-open', view.isOpen);
+};
+
+const paintRecordControl = (root, view) => {
+  for (const button of root.querySelectorAll('[data-action="record"]')) {
+    paintRecordButton(button, view);
+  }
+  for (const button of root.querySelectorAll('[data-action="record-pause"]')) {
+    paintPause(button, view);
+  }
+  paintRecordPanel(root, view);
+};
+
+export { FIELDS, SURFACE_COLOR, VOLUME_STEP, defaultsOf, labelOf, valueOf };
+export { createRecordPanel, createRecordControl, paintRecordControl };

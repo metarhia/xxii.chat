@@ -619,6 +619,11 @@ svg {
   margin-left: auto;
 }
 
+.recording-card {
+  background: none;
+  color: var(--muted);
+}
+
 .message {
   position: relative;
   display: grid;
@@ -2129,6 +2134,66 @@ svg {
   background: var(--panel);
 }
 
+.call-record {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  flex: 0 0 300px;
+  padding: 12px;
+  overflow: auto;
+  background: var(--panel);
+}
+
+.call-record[data-open] {
+  display: flex;
+}
+
+.record-head,
+.record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.record-preview canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--bg);
+}
+
+.record-state {
+  color: var(--muted);
+}
+
+.record-fields,
+.record-list,
+.record-background {
+  display: grid;
+  gap: 8px;
+}
+
+.record-list {
+  border: none;
+}
+
+.record-list legend {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.record-background input[type='file'] {
+  max-width: 100%;
+}
+
+.link-btn.recording .rec-dot,
+.call-record-control .recording {
+  color: var(--offline);
+}
+
 .call-lobby,
 .lobby-row,
 .knock-actions {
@@ -2206,6 +2271,22 @@ svg {
 .call-tile.pinned {
   outline: 2px solid var(--active);
   outline-offset: -2px;
+}
+
+.call-recording {
+  color: var(--offline);
+  font-weight: 600;
+}
+
+.call-opt-out[aria-pressed='true'],
+.people-opt-out[aria-pressed='true'] {
+  color: var(--active);
+}
+
+.roster-opted,
+.settings-note {
+  color: var(--muted);
+  font-size: 0.85em;
 }
 
 .call-layout-options {
@@ -2463,6 +2544,8 @@ svg {
 .call-react details,
 .call-more,
 .call-more details,
+.call-record-control,
+.call-record-control details,
 .call-leave,
 .call-leave details {
   position: relative;
@@ -2475,6 +2558,7 @@ svg {
 .call-device summary,
 .call-react summary,
 .call-more summary,
+.call-record-control summary,
 .call-leave summary {
   padding: 6px 10px;
   cursor: pointer;
@@ -2510,6 +2594,7 @@ svg {
 .call-device details:not([open]) .share-menu,
 .call-react details:not([open]) .share-menu,
 .call-more details:not([open]) .share-menu,
+.call-record-control details:not([open]) .share-menu,
 .pip-controls details:not([open]) .share-menu,
 .call-layout-options:not([open]) .share-menu,
 .call-leave details:not([open]) .share-menu {
@@ -2729,7 +2814,8 @@ svg {
 
   .app[data-call='call'] > .sidebar,
   .app[data-call='call'] .chat-view,
-  .app[data-call='call'] .call-people {
+  .app[data-call='call'] .call-people,
+  .app[data-call='call'] .call-record {
     display: none;
   }
 
@@ -2742,6 +2828,7 @@ svg {
   }
 
   .app[data-call='call'][data-call-sheet='people'] .call-people,
+  .app[data-call='call'][data-call-sheet='record'] .call-record[data-open],
   .app[data-call='call'][data-call-sheet='chat'] .chat-view,
   .app[data-call='call'][data-panel='calls'] > .panel {
     display: flex;

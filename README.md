@@ -183,6 +183,37 @@ renegotiation. Screen shares are never mirrored. If the browser cannot
 mirror, the raw camera is used with a notice, and the stats overlay on your
 own tile shows the mirror path.
 
+Recording is local: the record control starts a recording of the call in
+this browser, nothing is uploaded. The recorder composes its own picture, the
+program, from the call (active speakers, a grid, or chosen people, with the
+shared screen, an others panel, name chips, and an avatar or nothing for
+people without video) and mixes its own sound (everyone, only people on
+screen, others quieter, or a volume per person). The record panel, opened from
+the record control menu, has these options with a live preview of the program,
+and every change applies on the next frame; quality (720p30, 1080p30,
+1080p60) is fixed while recording. The panel starts from the layout, audio,
+and quality defaults of Calls settings. The browser picks the first format it
+can encode: MP4 with H.264 and AAC, MP4 with H.264 and Opus (Chrome on Linux),
+WebM with VP9 and Opus, then VP8. Chunks of one second go to a dedicated worker
+that writes the file into the browser storage (OPFS, `recordings/<id>/` with
+`program.mp4` or `program.webm`, `poster.jpg`, and `meta.json` holding the
+state, size, duration, MIME, options, and people); it flushes every 5 seconds
+and saves the metadata every 10, so a crash loses only the last seconds. WebM
+gets its duration written into the header, MP4 needs no fix. Pause leaves no
+gap in the file. The recorder asks the browser for persistent storage once,
+warns below 2 GB of free space, and stops below 500 MB. While recording the
+topbar shows `● nick recording` to everyone in the call, the record control
+shows a red dot with time and size, and the chat gets a `● nick recorded 12
+min` note. The recorder keeps rendering when its tab is hidden: it asks other
+people for video sized to their tiles of the program, so they keep sending
+even though the hidden call view asks for nothing. Leaving the call asks
+whether to stop the recording. A recording plays from `/recordings/<id>/<file>`,
+served by the service worker from OPFS with `Range` support. Anyone in the call can
+opt out of other people's recordings from the recording notice or the People
+panel: the recording then shows `opted out` instead of their video and drops
+their voice within a frame, and the roster marks them. The recorder's app
+honors this; a modified app could ignore it.
+
 Phones show the active tile above a horizontally scrollable strip with the
 controls above the safe area. Chat and People open as bottom sheets. Back
 closes the sheet, then returns to the mini call. The camera menu switches
