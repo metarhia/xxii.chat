@@ -40,38 +40,63 @@ sync. Terminal-like UI follows the
 - Replies stay in the chat in time order. A thread contains a root message
   and all its replies. Each thread uses one of 32 colors for author nicks
   and the stripe at the left of each row. The root shows a right-pointing
-  reply arrow, the count, and up to three author initials. Phones show the
-  arrow and count.
+  reply arrow and the reply count.
 - Start a reply with the hover reply button, `R` on the selected message,
   a double click or tap, or a swipe to the right on touch screens. Start
   the swipe at least 24 px from the left edge. Drag to select text.
-- `Reply with quote` in the message menu quotes the start of the message
-  or the text you selected in that message, up to 300 characters. Reply
-  gestures also quote text selected in the message. The quote appears on
+- `Quote` in the message menu quotes the start of the message
+  or the text you selected in that message, up to 300 characters. Right-click
+  selected message text to open the menu. Reply gestures also quote text
+  selected in the message. The quote appears on
   every peer. Click a quote to jump to its message. For distant jumps,
   `↓ back` returns to the reply.
 - Click or tap any thread message, its root's reply counter, or a quote to
-  select the thread. The chosen message, its ancestors, and its replies
-  get a wider stripe, and other threads and standalone messages dim.
-  The selection bar shows the chosen message's position and buttons to
-  step through the thread. Select another thread to switch. Click outside
-  the thread, use the selection bar's `✕`, press `Esc`, or use the phone's
-  back button to clear. Clearing restores the saved scroll position after
-  a jump or step. If the root is above the loaded messages, selection
-  loads up to 10 older pages.
+  select the thread. Its rows take a shade of the thread color, stronger
+  for the chosen message's ancestors and replies and strongest for the
+  chosen message. Other threads and standalone messages dim, and their
+  stripes darken.
+  The bar above the messages shows the chosen message's position and buttons
+  to step through the thread. Select another thread to switch. Click the chosen
+  message again or click outside the thread to clear. The selection bar's `✕`,
+  `Esc`, and the phone's back button also clear it. Clearing restores the saved
+  scroll position after a jump or step. If the root is above the loaded
+  messages, selection loads up to 10 older pages.
 - The composer replies to the latest message of the selected thread by
-  default. Click a member of the selected thread to reply to it. The reply
-  bar's `✕` makes the next send a plain message and clears the selection
-  when it is sent.
+  default. Click a member of the selected thread to reply to it. Thread
+  selection keeps the composer clear of quote previews. Use `Quote` to
+  include quoted text and the thread bar's `✕` to leave the thread.
 - Pinned messages, clickable links, message search, older messages by pages
   of 50; consecutive messages of one author are grouped, days have sticky
   labels
-- Message actions live in one menu: right click or the `⋯` handle on hover
-  opens reactions, reply, thread selection, pin, copy, and downloads; on touch screens
-  a long press lifts the message with reactions above and actions below,
-  and a swipe to the right replies, a double tap replies too
+- A message row shows the nick on the left and the time on the right. On
+  hover the time gives way to a toolbar: reply, share, forward, edit and
+  delete for your own messages, select, and `⋯` for the menu
+- The menu opens with right click or `⋯` and has reactions and icons for
+  Reply, Quote, Thread, the toolbar actions, Pin, Copy text, and downloads.
+  On touch screens a long press lifts the message with
+  reactions above and actions below, and a swipe to the right replies, a
+  double tap replies too
+- Share puts `/?chat=<id>&message=<id>` on the clipboard. Opening it switches
+  to the chat and scrolls to the message once it is loaded
+- Forward picks a chat or contact in the jump dialog and posts a copy with
+  its text and files there, marked `from <nick>`; a click on the mark opens
+  the original
+- Edit opens an editor in the message row. `Save` or `Enter` saves, and
+  `Cancel` or `Esc` closes the editor. `Shift`+`Enter` inserts a line break.
+  The main composer keeps its draft, and the message shows `edited` after
+  saving. Delete asks first and clears the text. A deleted message
+  without replies disappears, one with replies stays as `message deleted`
+  so its thread keeps its shape and color
+- Select starts picking messages: a click toggles one, `Shift`+click adds a
+  range, and the bar copies them as `nick: text` lines, forwards them, or
+  deletes them when all are yours; `Esc` or `✕` ends it
 - Reactions toggle: clicking your reaction again removes it, your reactions
-  are highlighted, a reaction shows who reacted on hover
+  are highlighted, and a reaction shows who reacted on hover. Messages show
+  their active reactions. Hover over a message with reactions to see all nine
+  options (👍 ❤️ 😂 😮 😢 🔥 🤔 💯 👎). Open the message menu to add the first
+  reaction or to choose any reaction on a touch screen.
+- Call records in the chat are compact cards: the host nick, duration, and
+  people, or a live call with a join button
 - Replies to me: `↩ N` next to the unread count in the chat header and the
   chat list counts unread replies to your messages. Click it to select the
   thread of the next unread reply and jump to it
@@ -98,8 +123,8 @@ sync. Terminal-like UI follows the
 - Keyboard: `Ctrl+K` jumps to a chat, feed, or contact, `Alt+↑`/`Alt+↓`
   previous or next chat, `Ctrl+F` search, `Ctrl+P` pinned; `↑` in an empty
   composer selects the last message, `↑`/`↓` move, `Enter` or `Shift+F10`
-  opens the menu, `R` replies, and `F` selects the thread of the current
-  message. Use `[`, `]`, `↑`, or `↓` to step through the selected thread.
+  opens the menu, `R` replies, `E` edits your own message, and `F`
+  selects the thread of the current message. Use `[`, `]`, `↑`, or `↓` to step through the selected thread.
   `Esc` closes the top overlay, clears a reply target or thread selection,
   closes an open post, or toggles the sidebar
 - Mobile: the back button closes the sidebar, panel, viewer, menu, thread
@@ -307,7 +332,9 @@ Records are CRDT states: fields of `author`, `chat`, `feed`, `post`,
 `message`, `file` (attachment metadata), `reaction` (message, author, and
 emoji switched on or off), `folder`, and `entry` (folder to channel link) are
 last-writer-wins registers, so a change is applied once whichever way it
-travels. A folder `parent` loop made by
+travels. An edit writes `content` and `edited`, a delete writes an empty
+`content` and `deleted` (records are never removed), and a forwarded copy
+carries `forwarded` (the original id) and `origin` (its author's nick). A folder `parent` loop made by
 concurrent moves shows the looped folders at the root. `application/static/chat.js`
 validates deltas in browsers and on the server. Only the `api` thread
 owns the server replica files.
@@ -366,7 +393,8 @@ server) with `files/have`, `get`, and `put`.
   settings keep public STUN off by default, store user servers, and can
   force relay
 - `npm run test:browser`: the chat scenarios and `test:calls`; tabs, chats,
-  menu reactions that toggle, quoted replies, thread selection, pins, feeds opened
+  menu reactions that toggle, quoted replies, thread selection, message
+  toolbar, edit, delete, forward, copy link, picking, pins, feeds opened
   in place, keyboard selection, `Esc`,
   `Ctrl+K`, drafts, swipe and long press,
   folders and their visibility between peers, offline writes, OPFS,

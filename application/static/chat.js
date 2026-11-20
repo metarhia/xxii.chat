@@ -1,13 +1,16 @@
 const REACTIONS = {
   like: '👍',
-  fire: '🔥',
-  done: '✅',
-  think: '🤔',
   love: '❤️',
   laugh: '😂',
+  wow: '😮',
+  sad: '😢',
+  fire: '🔥',
+  think: '🤔',
+  hundred: '💯',
+  dislike: '👎',
 };
 
-const REACTION_NAMES = Object.keys(REACTIONS);
+const REACTION_NAMES = [...Object.keys(REACTIONS), 'done'];
 const ICONS = { chat: '💬', feed: '📢', folder: '📁' };
 const PREFIXES = { chat: '!', feed: '#' };
 const CHANNELS = ['feed', 'chat'];
@@ -55,6 +58,10 @@ const FIELDS = {
     timestamp: 'number',
     replyTo: 'string',
     quote: 'quote',
+    forwarded: 'string',
+    origin: 'string',
+    edited: 'number',
+    deleted: 'number',
     pinned: 'boolean',
   },
   post: {
@@ -126,7 +133,7 @@ const isReactions = (reactions) => {
   const isTagged = Boolean(reactions.$lww || reactions.$counter);
   if (Array.isArray(reactions) || isTagged) return false;
   for (const name in reactions) {
-    if (!Object.hasOwn(REACTIONS, name)) return false;
+    if (!REACTION_NAMES.includes(name)) return false;
     if (!reactions[name].$counter) return false;
   }
   return true;
@@ -138,6 +145,9 @@ const validate = (delta) => {
   const fields = FIELDS[entity];
   const hasReactions = TIMELINE.includes(entity);
   if (Object.hasOwn(data, 'quote') && !Object.hasOwn(data, 'replyTo')) {
+    return false;
+  }
+  if (Object.hasOwn(data, 'origin') && !Object.hasOwn(data, 'forwarded')) {
     return false;
   }
   for (const key in data) {
@@ -205,7 +215,20 @@ const createMessage = (replica, message) => {
   const fields = { chat, author, nick, content, timestamp };
   if (message.replyTo) fields.replyTo = message.replyTo;
   if (message.quote && message.replyTo) fields.quote = message.quote;
+  if (message.forwarded) {
+    fields.forwarded = message.forwarded;
+    fields.origin = message.origin ?? '';
+  }
   return replica.assign('message', id, fields);
+};
+
+const editMessage = (replica, id, { content, edited }) =>
+  replica.assign('message', id, { content, edited });
+
+const deleteMessage = (replica, record, deleted) => {
+  const fields = { content: '', deleted };
+  if (record.pinned) fields.pinned = false;
+  return replica.assign('message', record.id, fields);
 };
 
 const createPost = (replica, post) => {
@@ -328,6 +351,36 @@ const folderTree = (replica, viewer) => {
   return { folders, children, items };
 };
 
+const isDeleted = (record) => typeof record.deleted === 'number';
+
+const isKept = (id, replies, kept) => {
+  if (kept.has(id)) return kept.get(id);
+  kept.set(id, false);
+  const thread = replies.get(id) ?? [];
+  const isShown = (reply) =>
+    !isDeleted(reply) || isKept(reply.id, replies, kept);
+  const result = thread.some(isShown);
+  kept.set(id, result);
+  return result;
+};
+
+const dropDeleted = (messages, records, replies) => {
+  const kept = new Map();
+  const dropped = new Set();
+  for (const message of messages) {
+    if (!isDeleted(message)) continue;
+    if (!isKept(message.id, replies, kept)) dropped.add(message.id);
+  }
+  if (dropped.size === 0) return messages;
+  for (const id of dropped) records.delete(id);
+  for (const [parent, thread] of replies) {
+    const shown = thread.filter((reply) => !dropped.has(reply.id));
+    if (shown.length > 0) replies.set(parent, shown);
+    else replies.delete(parent);
+  }
+  return messages.filter((message) => !dropped.has(message.id));
+};
+
 const threadsOf = (replica, chat) => {
   const posts = [];
   const messages = [];
@@ -379,7 +432,8 @@ const threadsOf = (replica, chat) => {
     }
   }
   for (const thread of replies.values()) thread.sort(byTime);
-  const timeline = messages.concat(calls, recordings);
+  const shownMessages = dropDeleted(messages, records, replies);
+  const timeline = shownMessages.concat(calls, recordings);
   const shown = isFeedChannel ? posts : timeline;
   return { items: shown.toSorted(byTime), records, replies };
 };
@@ -441,7 +495,8 @@ const unreadOf = (replica, reader, readAt) => {
       const chat = containerOf(record);
       const isOthers = record.author !== reader;
       const isNew = record.timestamp > readAt(chat);
-      if (chat === undefined || !isOthers || !isNew) continue;
+      const isShown = isOthers && isNew && !isDeleted(record);
+      if (chat === undefined || !isShown) continue;
       unread.set(chat, (unread.get(chat) ?? 0) + 1);
     }
   }
@@ -482,7 +537,8 @@ export { pairOf, isPair, directUnit };
 export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
 export { createFolder, setVisibility, placeItem };
-export { createMessage, createPost, startCall, endCall };
+export { createMessage, editMessage, deleteMessage, isDeleted };
+export { createPost, startCall, endCall };
 export { startRecording, stopRecording };
 export { attachFile, setReaction, pin };
 export { listChannels, listAuthors, folderTree, activityOf };
