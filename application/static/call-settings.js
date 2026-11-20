@@ -15,6 +15,8 @@ const DEFAULTS = {
   recordingLayout: 'speakers',
   recordingAudio: 'all',
   recordingQuality: '1080p30',
+  recordingTarget: 'browser',
+  recordingSegment: 10,
 };
 
 const OPTIONS = {
@@ -22,7 +24,13 @@ const OPTIONS = {
   recordingLayout: ['speaker', 'speakers', 'grid', 'pinned'],
   recordingAudio: ['all', 'onScreen', 'duck', 'custom'],
   recordingQuality: ['720p30', '1080p30', '1080p60'],
+  recordingTarget: ['browser', 'folder'],
+  recordingSegment: [5, 10, 15, 30],
 };
+
+const targetLabel = (target) =>
+  target === 'folder' ? 'Folder' : 'Browser storage';
+const segmentLabel = (minutes) => `${minutes} minutes`;
 
 const flagOf = (value, fallback) =>
   typeof value === 'boolean' ? value : fallback;
@@ -111,3 +119,4 @@ const showsToast = (count) => count <= TOAST_LIMIT;
 export { SETTINGS_KEY, OPTIONS, DEFAULTS, TOAST_LIMIT, TOAST_SHOW_MS };
 export { TOAST_MERGE_MS, validateSettings, readSettings, writeSettings };
 export { createToast, addToast, toastText, showsToast };
+export { targetLabel, segmentLabel };

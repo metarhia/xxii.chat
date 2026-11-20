@@ -24,6 +24,17 @@ test('puts the duplicate number before the final extension', async () => {
   assert.equal(suffixNameOf('team', 4), 'team (4)');
 });
 
+test('part names use the export name and two-digit ordinals', async () => {
+  const { segmentNameOf, suffixNameOf } = await load();
+  const started = new Date(2026, 10, 19, 14, 5).getTime();
+  const meta = { chatName: 'R&D / Team', started, extension: 'webm' };
+  const name = segmentNameOf(meta, 1);
+  assert.equal(name, 'xxii R&D _ Team 2026-11-19 14-05 part 01.webm');
+  assert.equal(suffixNameOf(name, 2), name.replace('.webm', ' (2).webm'));
+  assert.match(segmentNameOf(meta, 100), / part 100\.webm$/);
+  assert.equal(segmentNameOf({ extension: 'mp4' }, 2), 'program part 02.mp4');
+});
+
 test('reports 100 percent after the writable closes', async () => {
   const { exportFile } = await load();
   const closing = Promise.withResolvers();

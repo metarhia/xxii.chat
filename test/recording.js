@@ -248,7 +248,8 @@ test(
       `const panel = document.querySelector('.call-record');
       if (!panel.hasAttribute('data-open')) throw new Error('panel closed');
       return Array.from(panel.querySelectorAll('[data-record]'))
-        .map((control) => control.dataset.record);`,
+        .map((control) => control.dataset.record)
+        .filter((name) => !name.startsWith('recording'));`,
     );
     assert.deepEqual(names, FIELDS);
     await run(

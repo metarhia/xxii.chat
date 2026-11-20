@@ -13,11 +13,15 @@ test('invalid settings use the documented defaults', async () => {
     mirror: 1,
     noise: 'maximum',
     recordingAudio: 'silent',
+    recordingTarget: 'network',
+    recordingSegment: 2,
   };
   assert.deepEqual(validateSettings(invalid), DEFAULTS);
   assert.equal(DEFAULTS.pushToTalk, true);
   assert.equal(DEFAULTS.autoLower, true);
   assert.equal(DEFAULTS.recordingQuality, '1080p30');
+  assert.equal(DEFAULTS.recordingTarget, 'browser');
+  assert.equal(DEFAULTS.recordingSegment, 10);
 });
 
 test('saved settings take precedence over legacy auto-lower', async () => {
@@ -32,6 +36,8 @@ test('saved settings take precedence over legacy auto-lower', async () => {
   const settings = {
     ...DEFAULTS,
     recordingAudio: 'duck',
+    recordingTarget: 'folder',
+    recordingSegment: 15,
     noise: 'strong',
     pushToTalk: false,
   };

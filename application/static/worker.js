@@ -48,6 +48,8 @@ const ASSETS = [
   '/recorder.js',
   '/record-panel.js',
   '/call-record.js',
+  '/recording-session.js',
+  '/capture.js',
   '/call-layout.js',
   '/call-stats.js',
   '/call-volume.js',

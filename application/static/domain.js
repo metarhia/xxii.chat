@@ -34,6 +34,7 @@ import { CallSession } from './call.js';
 import { requestCallNotifications } from './notifications.js';
 import { CallStage, RingAlert } from './stage.js';
 import { Recordings } from './recordings.js';
+import { SoloCapture } from './capture.js';
 
 const TASKS = {
   clear: {
@@ -51,6 +52,7 @@ const PANELS = {
   log: 'Log',
   calls: 'Calls',
   recordings: 'Recordings',
+  capture: 'Capture',
 };
 
 const SHORTCUTS = {
@@ -395,7 +397,8 @@ const recordingLabel = (record, isLive) => {
   const nick = record.nick || 'guest';
   if (typeof record.stopped === 'number') {
     const minutes = minutesBetween(record.timestamp, record.stopped);
-    return `● ${nick} recorded ${minutes} min`;
+    const action = record.call === '' ? 'captured' : 'recorded';
+    return `● ${nick} ${action} ${minutes} min`;
   }
   return isLive ? `● ${nick} recording` : `● ${nick} recorded`;
 };
@@ -528,6 +531,8 @@ class ChatApplication extends Application {
     this.callSession = null;
     this.callToken = '';
     this.callLeaving = null;
+    this.callOpening = false;
+    this.capture = null;
     this.callHold = false;
     this.liveCalls = new Map();
     this.callBook = null;
@@ -593,6 +598,9 @@ class ChatApplication extends Application {
     this.clearMessagesBtn = byId('clear-messages-btn');
     this.callsBtn = byId('calls-btn');
     this.recordingsBtn = byId('recordings-btn');
+    this.captureBtn = byId('capture-btn');
+    this.directCaptureBtn = byId('direct-capture-btn');
+    this.capturePanel = document.querySelector('.capture-panel');
     this.clearLogBtn = byId('clear-log-btn');
     this.connectionStatus = byId('connection-status');
     this.meshStatus = byId('mesh-status');
@@ -735,6 +743,8 @@ class ChatApplication extends Application {
     this.logBtn.onclick = () => this.togglePanel('log');
     this.callsBtn.onclick = () => this.togglePanel('calls');
     this.recordingsBtn.onclick = () => this.togglePanel('recordings');
+    this.captureBtn.onclick = () => this.openCapture('');
+    this.directCaptureBtn.onclick = () => this.openCapture(this.chat);
     this.icePublicStun.addEventListener('change', () => this.saveIceFlags());
     this.iceForceRelay.addEventListener('change', () => this.saveIceFlags());
     onSubmit(this.iceForm, () => this.addIceServer());
@@ -903,6 +913,7 @@ class ChatApplication extends Application {
     window.addEventListener('pagehide', () => {
       const session = this.callSession;
       if (session) session.leave().catch((error) => this.report(error));
+      if (this.panel === 'capture') this.hidePanel(false);
       this.mesh.stop();
     });
   }
@@ -1996,14 +2007,14 @@ class ChatApplication extends Application {
   }
 
   closeLayer(name) {
-    LAYERS[name](this);
+    if (LAYERS[name](this) === false) return;
     this.popLayer(name);
   }
 
   handlePopState() {
     if (this.pops > 0) return void this.pops--;
     const name = this.layers.pop();
-    if (name) LAYERS[name](this);
+    if (name && LAYERS[name](this) === false) this.pushLayer(name);
   }
 
   toggleSidebar() {
@@ -2121,6 +2132,7 @@ class ChatApplication extends Application {
     this.logBtn.classList.toggle('active', this.panel === 'log');
     this.callsBtn.classList.toggle('active', this.panel === 'calls');
     this.recordingsBtn.classList.toggle('active', this.panel === 'recordings');
+    this.renderCaptureButtons();
     if (!this.panel) return;
     this.panelTitle.textContent = PANELS[this.panel];
     if (this.panel === 'pins') this.renderPins();
@@ -2188,6 +2200,7 @@ class ChatApplication extends Application {
   }
 
   showPanel(name) {
+    if (name !== 'capture' && !this.releaseCapture()) return;
     const isOpen = this.panel !== '';
     if (this.panel === 'recordings' && name !== 'recordings') {
       this.recordings.close();
@@ -2199,10 +2212,71 @@ class ChatApplication extends Application {
     if (!isOpen && isNarrow()) this.pushLayer('panel');
   }
 
-  hidePanel() {
+  hidePanel(confirm = true) {
+    if (!this.releaseCapture(confirm)) return false;
     if (this.panel === 'recordings') this.recordings.close();
     this.panel = '';
     this.renderPanel();
+    return true;
+  }
+
+  renderCaptureButtons() {
+    const supported = typeof MediaRecorder === 'function';
+    const inCall = Boolean(this.callOpening || this.callSession);
+    const direct = isPair(this.chat);
+    const title = inCall ? 'Use the record control in your call' : '';
+    const captureChat = this.capture?.context().chat;
+    this.captureBtn.classList.toggle('hidden', !supported);
+    this.directCaptureBtn.classList.toggle('hidden', !supported || !direct);
+    this.captureBtn.classList.toggle('active', captureChat === '');
+    this.directCaptureBtn.classList.toggle('active', captureChat === this.chat);
+    for (const button of [this.captureBtn, this.directCaptureBtn]) {
+      button.disabled = inCall;
+      button.title = title;
+    }
+  }
+
+  openCapture(chat) {
+    if (
+      typeof MediaRecorder !== 'function' ||
+      this.callOpening ||
+      this.callSession ||
+      (chat && !isPair(chat))
+    ) {
+      return;
+    }
+    if (this.capture?.context().chat === chat) return void this.closePanel();
+    if (!this.releaseCapture()) return;
+    const context = {
+      chat,
+      chatName: chat ? this.callTitle(chat) : 'capture',
+      call: '',
+    };
+    const hooks = {
+      endpoint: `${this.peerId}:${tabId()}`,
+      nick: () => this.username,
+      notice: (text) => this.showNotification(text, 'warning'),
+      fail: (error) => this.report(error),
+      saved: (info, meta) => this.recordCapture(info, meta),
+    };
+    this.capture = new SoloCapture(
+      this.capturePanel,
+      context,
+      this.preferences.settings,
+      hooks,
+    );
+    this.showPanel('capture');
+    this.panelCloseBtn.focus();
+  }
+
+  releaseCapture(confirm = true) {
+    const capture = this.capture;
+    if (!capture) return true;
+    const text = 'You are recording. Stop the recording and close Capture?';
+    if (confirm && capture.isActive && !window.confirm(text)) return false;
+    this.capture = null;
+    capture.dispose().catch((error) => this.report(error));
+    return true;
   }
 
   refreshRecordings() {
@@ -2677,7 +2751,9 @@ class ChatApplication extends Application {
     if (event.isComposing) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (this.panel === 'recordings') return void this.closePanel();
+      if (this.panel === 'recordings' || this.panel === 'capture') {
+        return void this.closePanel();
+      }
       return void this.closeTop();
     }
     if (event.target.closest?.('.recordings-player')) return;
@@ -3611,7 +3687,9 @@ class ChatApplication extends Application {
     );
     const isBusy = this.lightbox.isOpen || this.menu.isOpen;
     const isFree = !hasFiles && !isBusy && !this.switcher.isOpen;
-    return isFree && !this.editing && super.canRestart();
+    return (
+      isFree && !this.editing && !this.capture?.isActive && super.canRestart()
+    );
   }
 
   clearDatabase() {
@@ -4000,6 +4078,10 @@ class ChatApplication extends Application {
   }
 
   presentCallLink(link) {
+    if (this.panel === 'capture') {
+      this.closePanel();
+      if (this.panel === 'capture') return;
+    }
     this.attachCallEvents();
     const endpoint = `${this.peerId}:${tabId()}`;
     const ice = () => this.iceConfiguration();
@@ -4051,6 +4133,22 @@ class ChatApplication extends Application {
   }
 
   async startCall(chat, options = {}) {
+    if (this.callOpening) return;
+    if (this.panel === 'capture') {
+      this.closePanel();
+      if (this.panel === 'capture') return;
+    }
+    this.callOpening = true;
+    this.renderCaptureButtons();
+    try {
+      await this.enterCall(chat, options);
+    } finally {
+      this.callOpening = false;
+      this.renderCaptureButtons();
+    }
+  }
+
+  async enterCall(chat, options) {
     await this.closeCall();
     await this.bindCalls();
     this.attachCallEvents();
@@ -4111,6 +4209,24 @@ class ChatApplication extends Application {
 
   recordRecordingStop({ id, chat, stopped }) {
     saveRecordingStop(this.replicaOf(chat), id, { stopped });
+    this.refreshRecordings();
+  }
+
+  recordCapture({ id, chat, started }, { stopped }) {
+    if (chat) {
+      const author = this.peerId;
+      const nick = this.username;
+      const record = {
+        id,
+        chat,
+        call: '',
+        author,
+        nick,
+        timestamp: started,
+        stopped,
+      };
+      saveRecording(this.replicaOf(chat), record);
+    }
     this.refreshRecordings();
   }
 

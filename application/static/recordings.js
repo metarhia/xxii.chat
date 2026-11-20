@@ -1,10 +1,23 @@
 import { META_FILE, POSTER_FILE } from './recording-files.js';
 import { programFileOf, recordingUrlOf, routeOf } from './recording-files.js';
 import { stampOf, timeText, sizeText } from './recording-files.js';
-import { readMeta, recordingsOf } from './recording-files.js';
+import {
+  isFolderRecording,
+  readMeta,
+  recordingsOf,
+} from './recording-files.js';
 import { exportNameOf, downloadUrlOf, exportFile } from './recording-export.js';
-import { pickExportFile, exportToFolder } from './recording-export.js';
-import { folderHandle } from './recording-folder.js';
+import {
+  pickExportFile,
+  exportToFolder,
+  partLabel,
+} from './recording-export.js';
+import {
+  canPickFolder,
+  folderHandle,
+  folderRecord,
+  folderPermission,
+} from './recording-folder.js';
 import { cloneTemplate } from './view.js';
 import { RecordingWriter } from './recorder.js';
 
@@ -16,6 +29,7 @@ const STATE_LABELS = {
 };
 const STORAGE_UNAVAILABLE = 'Storage usage is unavailable.';
 const REPAIR_CHANNEL = 'xxii-recording-repair';
+const DOWNLOAD_URL_MS = 30000;
 
 const startedOf = ({ started }) => (Number.isFinite(started) ? started : 0);
 
@@ -53,9 +67,35 @@ const storageText = (estimate = {}) => {
 const canChange = (meta) =>
   meta?.state === 'done' || meta?.state === 'interrupted';
 
-const rememberedFolder = async () => {
-  if (!globalThis.showDirectoryPicker || !globalThis.indexedDB) return null;
-  return folderHandle();
+const missingPart = (entry) => `Part not found in ${entry.folder}.`;
+
+const partFileOf = async (entry, part, isCurrent) => {
+  const folder = await folderHandle(undefined, entry.id);
+  if (!isCurrent()) return null;
+  if (!folder) throw new Error(missingPart(entry));
+  const permission = await folderPermission(folder, 'read', isCurrent);
+  if (!isCurrent()) return null;
+  if (permission !== 'granted') {
+    throw new Error(`Allow access to ${entry.folder} to open this part.`);
+  }
+  try {
+    const handle = await folder.getFileHandle(part.name);
+    return await handle.getFile();
+  } catch (error) {
+    if (error.name === 'NotFoundError' || error.name === 'TypeMismatchError') {
+      throw new Error(missingPart(entry));
+    }
+    throw error;
+  }
+};
+
+const downloadPart = (file, name) => {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_MS);
 };
 
 const readEntry = async (directory) => {
@@ -95,6 +135,9 @@ class Recordings {
     this.template = document.getElementById('recording-item-template');
     this.recordings = null;
     this.selected = '';
+    this.selectedPart = '';
+    this.playUrl = '';
+    this.playRequest = 0;
     this.revision = 0;
     this.isChanging = false;
     const canBroadcast = typeof BroadcastChannel === 'function';
@@ -103,7 +146,9 @@ class Recordings {
       : null;
     this.repairChannel?.addEventListener('message', onRepair);
     this.player.addEventListener('error', () => {
-      if (this.selected) this.setStatus('Could not play this recording.');
+      if (this.selected && this.player.error) {
+        this.setStatus('Could not play this recording.');
+      }
     });
   }
 
@@ -149,8 +194,13 @@ class Recordings {
     try {
       const recordings = await recordingsOf(storage);
       const entries = await entriesOf(recordings);
-      const folder = await rememberedFolder().catch(() => null);
+      const folder = canPickFolder()
+        ? await folderRecord().catch(() => null)
+        : null;
       if (revision !== this.revision) return;
+      if (this.selected && !entries.some((item) => item.id === this.selected)) {
+        this.stopPlayback();
+      }
       this.recordings = recordings;
       this.list.replaceChildren(
         ...entries.map((entry) => this.createRow(entry, folder)),
@@ -173,30 +223,53 @@ class Recordings {
   close() {
     this.revision++;
     this.stopPlayback();
+    this.list.replaceChildren();
+    this.setStatus('');
   }
 
   stopPlayback() {
+    this.playRequest++;
     if (!this.selected) return;
     this.selected = '';
+    this.selectedPart = '';
     this.player.classList.add('hidden');
     this.player.removeAttribute('src');
     this.player.removeAttribute('poster');
     this.player.load();
+    if (this.playUrl) URL.revokeObjectURL(this.playUrl);
+    this.playUrl = '';
   }
 
-  play(entry) {
-    if (!navigator.serviceWorker?.controller) {
+  async play(entry, part) {
+    if (!part && !navigator.serviceWorker?.controller) {
       this.setStatus('Recording playback is unavailable. Reload to try again.');
       return;
     }
-    const file = programFileOf(entry.extension);
     this.setStatus('');
     this.stopPlayback();
+    const request = this.playRequest;
     this.selected = entry.id;
+    this.selectedPart = part?.name ?? '';
+    const isCurrent = () => request === this.playRequest;
+    let url = recordingUrlOf(entry.id, programFileOf(entry.extension));
+    if (part) {
+      try {
+        const file = await partFileOf(entry, part, isCurrent);
+        if (!file || !isCurrent()) return;
+        url = URL.createObjectURL(file);
+        this.playUrl = url;
+      } catch (error) {
+        if (isCurrent()) {
+          this.stopPlayback();
+          this.setStatus(error.message);
+        }
+        return;
+      }
+    }
     const { title } = labelsOf(entry);
     this.player.setAttribute('aria-label', title);
     if (entry.posterUrl) this.player.poster = entry.posterUrl;
-    this.player.src = recordingUrlOf(entry.id, file);
+    this.player.src = url;
     this.player.classList.remove('hidden');
     this.player.focus();
     this.player.play().catch(() => {});
@@ -211,8 +284,14 @@ class Recordings {
     row.querySelector('.recording-chat').textContent = `${chat} · ${date}`;
     const details = row.querySelector('.recording-details');
     details.textContent = `${duration} · ${size} · ${state} · ${location}`;
+    const isFolder = isFolderRecording(entry);
     if (entry.state === 'interrupted') {
-      row.querySelector('.recording-note').hidden = false;
+      const note = row.querySelector('.recording-note');
+      if (isFolder) {
+        note.textContent =
+          'Recording ended unexpectedly. The last part was lost.';
+      }
+      note.hidden = false;
     }
     const poster = row.querySelector('img');
     if (entry.posterUrl) {
@@ -225,16 +304,93 @@ class Recordings {
     const rename = row.querySelector('.recording-rename');
     const remove = row.querySelector('.recording-delete');
     const isFinished = canChange(entry);
-    const hasVideo = ['mp4', 'webm'].includes(entry.extension);
+    const hasVideo =
+      ['mp4', 'webm'].includes(entry.extension) &&
+      (!isFolder || entry.segments.length > 0);
     const canWrite = globalThis.FileSystemFileHandle?.prototype.createWritable;
     play.disabled = !isFinished || !hasVideo;
     rename.disabled = !isFinished || !canWrite;
     remove.disabled = !isFinished || !this.recordings.removeEntry;
-    play.onclick = () => this.play(entry);
+    if (isFolder) {
+      if (isFinished && hasVideo) this.addPartActions(row, entry, play);
+    } else {
+      play.onclick = () => this.play(entry);
+      if (isFinished && hasVideo) this.addExports(row, entry, chat, folder);
+    }
     rename.onclick = () => this.openRename(row, entry);
     remove.onclick = () => this.deleteEntry(entry);
-    if (isFinished && hasVideo) this.addExports(row, entry, chat, folder);
     return row;
+  }
+
+  addPartActions(row, entry, play) {
+    const select = row.querySelector('.recording-part');
+    select.hidden = false;
+    for (const [index, part] of entry.segments.entries()) {
+      const option = document.createElement('option');
+      option.value = part.name;
+      option.textContent = partLabel(index + 1);
+      select.append(option);
+    }
+    if (this.selected === entry.id && this.selectedPart) {
+      select.value = this.selectedPart;
+    }
+    const partOf = () => entry.segments[select.selectedIndex];
+    play.onclick = () => this.play(entry, partOf());
+    let selection = 0;
+    select.onchange = () => {
+      selection++;
+      row.querySelector('progress').hidden = true;
+      if (this.selected === entry.id) this.play(entry, partOf());
+    };
+    const partAction = (action) => {
+      const { revision } = this;
+      const choice = selection;
+      const part = partOf();
+      const isCurrent = () =>
+        revision === this.revision && choice === selection;
+      return part ? action(part, isCurrent) : null;
+    };
+    const download = row.querySelector('.recording-download');
+    download.href = '#';
+    download.hidden = false;
+    download.onclick = (event) => {
+      event.preventDefault();
+      return partAction(async (part, isCurrent) => {
+        this.setStatus('');
+        try {
+          const file = await partFileOf(entry, part, isCurrent);
+          if (file && isCurrent()) downloadPart(file, part.name);
+        } catch (error) {
+          if (isCurrent()) this.setStatus(error.message);
+        }
+      });
+    };
+    const canWrite = globalThis.FileSystemFileHandle?.prototype.createWritable;
+    if (
+      !canWrite ||
+      !globalThis.TransformStream ||
+      typeof globalThis.showSaveFilePicker !== 'function'
+    ) {
+      return;
+    }
+    const saveAs = row.querySelector('.recording-save-as');
+    saveAs.hidden = false;
+    saveAs.onclick = () =>
+      partAction((part, isCurrent) =>
+        this.save(
+          row,
+          async (progress) => {
+            const file = await partFileOf(entry, part, isCurrent);
+            if (!file || !isCurrent()) return;
+            if (navigator.userActivation?.isActive === false) {
+              throw new Error('Folder access granted. Click Save as again.');
+            }
+            const target = await pickExportFile(part.name, entry.extension);
+            if (target && isCurrent()) await exportFile(file, target, progress);
+          },
+          isCurrent,
+        ),
+      );
   }
 
   addExports(row, entry, chat, folder) {
@@ -257,13 +413,14 @@ class Recordings {
           if (target) await exportFile(await sourceFile(), target, progress);
         });
     }
-    const canRequest = folder?.queryPermission && folder.requestPermission;
-    if (canRequest && folder.removeEntry) {
+    const handle = folder?.handle;
+    const canRequest = handle?.queryPermission && handle.requestPermission;
+    if (canRequest && handle.removeEntry) {
       saveFolder.hidden = false;
       saveFolder.title = `Save to ${folder.name}`;
       saveFolder.onclick = () =>
         this.save(row, (progress) =>
-          exportToFolder(folder, name, sourceFile, progress),
+          exportToFolder(handle, name, sourceFile, progress),
         );
     }
   }
@@ -275,7 +432,7 @@ class Recordings {
     return handle.getFile();
   }
 
-  async save(row, copy) {
+  async save(row, copy, isCurrent) {
     const progress = row.querySelector('.recording-export-progress');
     const saveAs = row.querySelector('.recording-save-as');
     const saveFolder = row.querySelector('.recording-save-folder');
@@ -284,12 +441,16 @@ class Recordings {
     saveFolder.disabled = true;
     try {
       await copy((percent) => {
+        if (isCurrent && !isCurrent()) return;
         progress.value = percent;
         progress.hidden = false;
       });
-    } catch {
+    } catch (error) {
+      if (isCurrent && !isCurrent()) return;
       progress.hidden = true;
-      this.setStatus('Could not save this recording.');
+      this.setStatus(
+        isCurrent ? error.message : 'Could not save this recording.',
+      );
     } finally {
       saveAs.disabled = false;
       saveFolder.disabled = false;
@@ -363,12 +524,18 @@ class Recordings {
   async deleteEntry(entry) {
     if (this.isChanging) return;
     const { title } = labelsOf(entry);
-    if (!window.confirm(`Delete “${title}” from browser storage?`)) return;
+    const isFolder = isFolderRecording(entry);
+    const message = isFolder
+      ? `Delete “${title}” from the library? Files stay in ${entry.folder}.`
+      : `Delete “${title}” from browser storage?`;
+    if (!window.confirm(message)) return;
+    const revision = this.revision;
     const removed = await this.change(entry, 'delete', async () => {
       if (this.selected === entry.id) this.stopPlayback();
       await this.recordings.removeEntry(entry.id, { recursive: true });
+      if (isFolder) await folderHandle(null, entry.id).catch(() => {});
     });
-    if (removed) await this.refresh();
+    if (removed && revision === this.revision) await this.refresh();
   }
 }
 

@@ -2,8 +2,15 @@ import { RECORDINGS, META_FILE, POSTER_FILE } from './recording-files.js';
 import { programFileOf, nextMeta } from './recording-files.js';
 import { scheduleOf, markedOf } from './recording-files.js';
 import { isOpen, readMeta, recordingsOf } from './recording-files.js';
+import { isFolderRecording } from './recording-files.js';
 import { durationSlotOf, durationBytesOf } from './recording-webm.js';
 import { storedDurationOf } from './recording-duration.js';
+import { folderHandle } from './recording-folder.js';
+import {
+  createAvailableFile,
+  removeEmptyExport,
+  segmentNameOf,
+} from './recording-export.js';
 
 const encoder = new TextEncoder();
 const sessions = new Map();
@@ -73,9 +80,22 @@ const writeFile = async (directory, name, bytes) => {
   }
 };
 
-const saveMeta = (session) => {
-  const text = JSON.stringify(session.meta, null, 2);
-  return writeFile(session.directory, META_FILE, encoder.encode(text));
+const saveMeta = async (session) => {
+  const { directory, meta } = session;
+  const text = JSON.stringify(meta, null, 2);
+  if (!isFolderRecording(meta)) {
+    await writeFile(directory, META_FILE, encoder.encode(text));
+    return;
+  }
+  const file = await directory.getFileHandle(META_FILE, { create: true });
+  const writable = await file.createWritable();
+  try {
+    await writable.write(text);
+    await writable.close();
+  } catch (error) {
+    await writable.abort().catch(() => {});
+    throw error;
+  }
 };
 
 const sessionOf = (recording) => {
@@ -84,25 +104,29 @@ const sessionOf = (recording) => {
   return session;
 };
 
-const headOf = (session, bytes) => {
-  const isFirst = session.at === 0 && session.meta.extension === 'webm';
+const headOf = (target, extension, bytes) => {
+  const isFirst = target.at === 0 && extension === 'webm';
   if (!isFirst) return bytes;
   const slot = durationSlotOf(bytes);
   if (!slot) return bytes;
-  session.slot = slot;
+  target.slot = slot;
   return slot.bytes;
 };
 
-const openRecording = async ({ recording, meta }) => {
+const openRecording = async ({ recording, meta, folder }) => {
   requireStorage();
   const release = await holdLock(recording);
   let handle = null;
   try {
     const directory = await directoryOf(recording);
-    const name = programFileOf(meta.extension);
-    const file = await directory.getFileHandle(name, { create: true });
-    handle = await file.createSyncAccessHandle();
-    handle.truncate(0);
+    if (folder) {
+      await folderHandle(folder, recording);
+    } else {
+      const name = programFileOf(meta.extension);
+      const file = await directory.getFileHandle(name, { create: true });
+      handle = await file.createSyncAccessHandle();
+      handle.truncate(0);
+    }
     const now = Date.now();
     const marks = { flushedAt: now, metaAt: now };
     const session = {
@@ -113,6 +137,8 @@ const openRecording = async ({ recording, meta }) => {
       marks,
       slot: null,
       release,
+      folder,
+      part: null,
     };
     await saveMeta(session);
     sessions.set(recording, session);
@@ -127,9 +153,62 @@ const openRecording = async ({ recording, meta }) => {
   }
 };
 
+const openFolderPart = async (session) => {
+  const { folder, meta } = session;
+  const name = segmentNameOf(meta, meta.segments.length + 1);
+  const target = await createAvailableFile(folder, name);
+  try {
+    const writer = await target.createWritable();
+    return { target, writer, at: 0, slot: null };
+  } catch (error) {
+    await removeEmptyExport(folder, target).catch(() => {});
+    throw error;
+  }
+};
+
+const writeFolderChunk = async (session, chunk) => {
+  session.part ??= await openFolderPart(session);
+  const { part, meta } = session;
+  const bytes = headOf(part, meta.extension, chunk);
+  await part.writer.write(bytes);
+  part.at += bytes.length;
+  return { size: meta.size + part.at };
+};
+
+const finishFolderPart = async (session, duration) => {
+  const part = session.part;
+  if (!part) return;
+  const { target, writer, at, slot } = part;
+  if (slot) {
+    const data = durationBytesOf(duration, slot.scale);
+    await writer.write({ type: 'write', position: slot.offset, data });
+  }
+  await writer.close();
+  session.part = null;
+  const segment = { name: target.name, size: at, duration };
+  session.meta = nextMeta(session.meta, { type: 'segment', segment });
+};
+
+const discardFolderPart = async (session) => {
+  const part = session.part;
+  if (!part) return;
+  session.part = null;
+  await part.writer.abort().catch(() => {});
+  await removeEmptyExport(session.folder, part.target).catch(() => {});
+};
+
+const closeSegment = async ({ recording, duration }) => {
+  const session = sessionOf(recording);
+  await finishFolderPart(session, duration);
+  await saveMeta(session);
+  return { meta: session.meta };
+};
+
 const writeChunk = async ({ recording, chunk, duration }) => {
   const session = sessionOf(recording);
-  const bytes = headOf(session, new Uint8Array(chunk));
+  const source = new Uint8Array(chunk);
+  if (session.folder) return writeFolderChunk(session, source);
+  const bytes = headOf(session, session.meta.extension, source);
   writeAll(session.handle, bytes, session.at);
   session.at += bytes.length;
   const now = Date.now();
@@ -172,12 +251,28 @@ const endRecording =
     sessions.delete(recording);
     try {
       duration ??= session.meta.duration;
-      const size = finish(session, duration);
+      let size = session.meta.size;
+      if (session.folder) {
+        if (type === 'close') {
+          await finishFolderPart(session, duration - session.meta.duration);
+        } else {
+          await discardFolderPart(session);
+        }
+      } else {
+        size = finish(session, duration);
+      }
       const time = Date.now();
       const event = { type, size, duration, time, people };
       session.meta = nextMeta(session.meta, event);
       await saveMeta(session);
       return { meta: session.meta };
+    } catch (error) {
+      if (session.folder) {
+        await discardFolderPart(session);
+        session.meta = nextMeta(session.meta, { type: 'interrupt' });
+        await saveMeta(session).catch(() => {});
+      }
+      throw error;
     } finally {
       await session.release();
     }
@@ -203,6 +298,7 @@ const readRecording = async (directory) => {
 
 const interruptedEvent = async (directory, meta) => {
   const type = 'interrupt';
+  if (isFolderRecording(meta)) return { type };
   const name = programFileOf(meta.extension);
   let file;
   try {
@@ -268,6 +364,7 @@ const repair = async () => {
 const HANDLERS = {
   open: openRecording,
   write: writeChunk,
+  segment: closeSegment,
   pause: change('pause'),
   resume: change('resume'),
   close: endRecording('close'),
@@ -282,7 +379,8 @@ const dispatch = async (message) => {
     const result = await HANDLERS[type](message);
     self.postMessage({ request, ok: true, ...result });
   } catch (error) {
-    if (SESSION_WRITES.includes(type) && sessions.has(message.recording)) {
+    const session = sessions.get(message.recording);
+    if (SESSION_WRITES.includes(type) && session && !session.folder) {
       await abortRecording(message).catch(() => {});
     }
     const text = error?.message ?? 'The recording failed';

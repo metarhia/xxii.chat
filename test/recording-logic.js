@@ -143,6 +143,30 @@ test('closing and interrupting end the recording once', async () => {
   assert.equal(nextMeta(meta, { type: 'unknown' }), meta);
 });
 
+test('folder metadata totals include only closed parts', async () => {
+  const { createMeta, nextMeta } = await loadFiles();
+  const meta = createMeta({ ...input, folder: 'Videos' });
+  assert.equal(meta.folder, 'Videos');
+  assert.deepEqual(meta.segments, []);
+  const progress = { type: 'progress', size: 9, duration: 10 };
+  assert.equal(nextMeta(meta, progress), meta);
+  const first = { name: 'part 01.webm', size: 400, duration: 3000 };
+  const second = { name: 'part 02.webm', size: 333, duration: 2500 };
+  const paused = nextMeta(meta, { type: 'pause' });
+  const closed = nextMeta(paused, { type: 'segment', segment: first });
+  assert.equal(closed.state, 'paused');
+  const both = nextMeta(closed, { type: 'segment', segment: second });
+  assert.deepEqual(both.segments, [first, second]);
+  assert.deepEqual(meta.segments, []);
+  assert.equal(both.size, 733);
+  assert.equal(both.duration, 5500);
+  const interrupted = nextMeta(both, { ...progress, type: 'interrupt' });
+  const done = nextMeta(both, { ...progress, type: 'close', time: 9 });
+  assert.deepEqual(interrupted, { ...both, state: 'interrupted' });
+  assert.deepEqual(done, { ...both, state: 'done', stopped: 9 });
+  assert.equal(nextMeta(done, { type: 'segment', segment: first }), done);
+});
+
 test('writes flush every 5 s and save meta every 10 s', async () => {
   const { scheduleOf, markedOf, FLUSH_MS, META_MS } = await loadFiles();
   assert.equal(FLUSH_MS, 5000);

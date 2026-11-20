@@ -1465,7 +1465,8 @@ svg {
 .app[data-panel='members'] .panel-body[data-panel='members'],
 .app[data-panel='log'] .panel-body[data-panel='log'],
 .app[data-panel='calls'] .panel-body[data-panel='calls'],
-.app[data-panel='recordings'] .panel-body[data-panel='recordings'] {
+.app[data-panel='recordings'] .panel-body[data-panel='recordings'],
+.app[data-panel='capture'] .panel-body[data-panel='capture'] {
   display: flex;
 }
 
@@ -2305,6 +2306,12 @@ svg {
   background: var(--bg);
 }
 
+.capture-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
 .record-state {
   color: var(--muted);
 }
@@ -2906,6 +2913,8 @@ svg {
 }
 
 .call-device-fields [hidden],
+.record-defaults [hidden],
+.record-fields [hidden],
 .close-call-chat,
 [data-action='close-sheet'],
 .call-topbar [data-action='people'],
