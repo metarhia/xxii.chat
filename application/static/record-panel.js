@@ -1,6 +1,12 @@
 import { PEOPLE, SCREENS, PLACEMENTS, OTHERS, POSITIONS } from './layout.js';
 import { NO_VIDEO, QUALITIES, MIN_SPEAKERS, MAX_SPEAKERS } from './layout.js';
-import { OPTIONS } from './call-settings.js';
+import {
+  DEFAULTS,
+  OPTIONS,
+  targetLabel,
+  segmentLabel,
+} from './call-settings.js';
+import { canPickFolder } from './recording-folder.js';
 
 const SURFACE_COLOR = '#0f1418';
 const VOLUME_MAX = 200;
@@ -11,6 +17,27 @@ const range = (from, to) => {
   for (let value = from; value <= to; value++) values.push(value);
   return values;
 };
+
+const SHARED_FIELDS = [
+  {
+    name: 'quality',
+    label: 'Quality',
+    kind: 'choice',
+    values: Object.keys(QUALITIES),
+  },
+  {
+    name: 'recordingTarget',
+    label: 'Save recordings to',
+    kind: 'choice',
+    values: OPTIONS.recordingTarget,
+  },
+  {
+    name: 'recordingSegment',
+    label: 'Part length',
+    kind: 'count',
+    values: OPTIONS.recordingSegment,
+  },
+];
 
 const FIELDS = [
   { name: 'people', label: 'People on screen', kind: 'choice', values: PEOPLE },
@@ -44,12 +71,7 @@ const FIELDS = [
   { name: 'screenAudio', label: 'Screen audio', kind: 'flag' },
   { name: 'names', label: 'Names', kind: 'flag' },
   { name: 'noVideo', label: 'No video', kind: 'choice', values: NO_VIDEO },
-  {
-    name: 'quality',
-    label: 'Quality',
-    kind: 'choice',
-    values: Object.keys(QUALITIES),
-  },
+  ...SHARED_FIELDS,
 ];
 
 const LABELS = {
@@ -89,12 +111,21 @@ const defaultsOf = (settings) => ({
   names: true,
   noVideo: 'avatar',
   quality: settings?.recordingQuality ?? '1080p30',
+  recordingTarget:
+    canPickFolder() && settings?.recordingTarget === 'folder'
+      ? 'folder'
+      : 'browser',
+  recordingSegment: settings?.recordingSegment ?? DEFAULTS.recordingSegment,
   background: '',
   pinned: [],
   volumes: {},
 });
 
-const labelOf = (name, value) => LABELS[name]?.[value] ?? `${value}`;
+const labelOf = (name, value) => {
+  if (name === 'recordingTarget') return targetLabel(value);
+  if (name === 'recordingSegment') return segmentLabel(value);
+  return LABELS[name]?.[value] ?? `${value}`;
+};
 
 const valueOf = (control) => {
   if (control.type === 'checkbox') return control.checked;
@@ -118,7 +149,7 @@ const createSelect = (field) => {
   for (const value of field.values) {
     const option = document.createElement('option');
     option.value = `${value}`;
-    option.textContent = labelOf(field.name, value);
+    option.textContent = field.labels?.[value] ?? labelOf(field.name, value);
     select.append(option);
   }
   return select;
@@ -183,16 +214,17 @@ const createList = (name, label) => {
   return box;
 };
 
-const createRecordPanel = () => {
-  const aside = document.createElement('aside');
-  aside.className = 'call-record';
-  aside.setAttribute('aria-label', 'Recording');
-  const head = document.createElement('div');
-  head.className = 'record-head';
-  const title = document.createElement('p');
-  title.className = 'chat-title';
-  title.textContent = 'Record';
-  head.append(title, createButton('record-panel', 'close'));
+const createRecordFields = (options = SHARED_FIELDS) => {
+  const fields = document.createElement('div');
+  fields.className = 'record-fields';
+  for (const field of options) {
+    const isFolderField = field.name.startsWith('recording');
+    if (!isFolderField || canPickFolder()) fields.append(createField(field));
+  }
+  return fields;
+};
+
+const createProgramControls = () => {
   const preview = document.createElement('div');
   preview.className = 'record-preview';
   const state = document.createElement('p');
@@ -206,11 +238,22 @@ const createRecordPanel = () => {
   const note = document.createElement('p');
   note.className = 'call-note record-note hidden';
   note.setAttribute('role', 'status');
-  const fields = document.createElement('div');
-  fields.className = 'record-fields';
-  for (const field of FIELDS) fields.append(createField(field));
+  return [preview, state, actions, note];
+};
+
+const createRecordPanel = () => {
+  const aside = document.createElement('aside');
+  aside.className = 'call-record';
+  aside.setAttribute('aria-label', 'Recording');
+  const head = document.createElement('div');
+  head.className = 'record-head';
+  const title = document.createElement('p');
+  title.className = 'chat-title';
+  title.textContent = 'Record';
+  head.append(title, createButton('record-panel', 'close'));
+  const fields = createRecordFields(FIELDS);
   fields.append(createBackground());
-  aside.append(head, preview, state, actions, note, fields);
+  aside.append(head, ...createProgramControls(), fields);
   aside.append(createList('pinned', 'Chosen people'));
   aside.append(createList('volumes', 'Volume per person'));
   return aside;
@@ -270,8 +313,15 @@ const syncControl = (control, options, view) => {
   const name = control.dataset.record;
   if (name === 'image') return;
   const value = options[name];
-  const isLocked = name === 'quality' && view.state !== 'idle';
+  const isFolderField =
+    name === 'recordingTarget' || name === 'recordingSegment';
+  const isLocked =
+    (name === 'quality' || isFolderField) &&
+    (view.state !== 'idle' || view.isBusy);
   control.disabled = isLocked;
+  if (name === 'recordingSegment') {
+    control.closest('label').hidden = options.recordingTarget !== 'folder';
+  }
   if (control.type === 'checkbox') control.checked = value;
   else if (name === 'background') control.value = value || SURFACE_COLOR;
   else control.value = `${value}`;
@@ -340,7 +390,8 @@ const paintLists = (root, options, people) => {
 };
 
 const paintRecordPanel = (root, view) => {
-  const panel = root.querySelector('.call-record');
+  const isCall = !root.matches('.capture-panel');
+  const panel = isCall ? root.querySelector('.call-record') : root;
   if (!panel) return;
   const state = panel.querySelector('.record-state');
   const isActive = view.state !== 'idle';
@@ -352,8 +403,10 @@ const paintRecordPanel = (root, view) => {
   for (const control of panel.querySelectorAll('[data-record]')) {
     syncControl(control, view.options, view);
   }
-  paintLists(panel, view.options, view.people);
-  panel.toggleAttribute('data-open', view.isOpen);
+  if (isCall) {
+    paintLists(panel, view.options, view.people);
+    panel.toggleAttribute('data-open', view.isOpen);
+  }
 };
 
 const paintRecordControl = (root, view) => {
@@ -368,3 +421,4 @@ const paintRecordControl = (root, view) => {
 
 export { FIELDS, SURFACE_COLOR, VOLUME_STEP, defaultsOf, labelOf, valueOf };
 export { createRecordPanel, createRecordControl, paintRecordControl };
+export { createProgramControls, createRecordFields, createField };

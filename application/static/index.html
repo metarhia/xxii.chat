@@ -108,6 +108,9 @@
           <div class="tools">
             <button id="calls-btn" class="link-btn">calls</button>
             <button id="recordings-btn" class="link-btn">recordings</button>
+            <button id="capture-btn" class="link-btn hidden" type="button">
+              capture
+            </button>
             <button id="install-btn" class="link-btn hidden">install</button>
             <button
               id="version-btn"
@@ -177,6 +180,9 @@
               data-action="call"
             >
               call
+            </button>
+            <button id="direct-capture-btn" class="link-btn hidden" type="button">
+              capture
             </button>
             <button id="search-btn" class="link-btn">Search</button>
             <button id="pins-btn" class="link-btn">Pin list</button>
@@ -403,16 +409,18 @@
           </section>
           <section class="section">
             <h3 class="small">RECORDINGS</h3>
-            <div class="record-defaults"></div>
+            <div class="record-defaults">
+              <button class="record-folder link-btn" type="button">
+                choose folder
+              </button>
+            </div>
             <p class="settings-note">
               Opting out of a recording is honored by the recorder's app; a
               modified app could ignore it.
             </p>
-            <button class="record-folder link-btn" type="button">
-              choose folder
-            </button>
           </section>
         </section>
+        <section class="panel-body capture-panel" data-panel="capture"></section>
         <section class="panel-body" data-panel="recordings">
           <p class="recordings-storage muted"></p>
           <p class="recordings-status muted hidden" role="status"></p>
@@ -512,6 +520,8 @@
             Recording ended unexpectedly.
           </p>
           <div class="recording-actions">
+            <select class="recording-part" aria-label="Recording part" hidden>
+            </select>
             <button class="recording-play link-btn" type="button">play</button>
             <a class="recording-download link-btn" hidden>download</a>
             <button class="recording-save-as link-btn" type="button" hidden>

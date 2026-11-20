@@ -240,10 +240,27 @@ offer file and folder pickers, **Save as** lets you pick a file and **Save to
 folder** copies to the folder remembered in Calls settings. Both show progress,
 and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate names.
 
+In Chromium with a folder picker, **Save recordings to** in Calls settings or
+the Record panel can send recordings straight to a chosen folder. Choose
+5-, 10-, 15-, or 30-minute parts, with 10 minutes by default. Paused time
+doesn't count toward the part length. Each part is a playable file. In the
+library, select a part to play, download, or save a copy. Browser storage
+holds the library entry and its poster. Deleting that entry leaves the
+files in the folder.
+
+Use **capture** in the session block or a direct chat to record without a call.
+Select a camera, microphone, screen or window, and screen audio, and preview
+camera only, screen only, or a screen with a camera bubble. Save to browser
+storage or a chosen folder. Closing Capture while recording asks whether to
+stop. A finished capture started from a direct chat adds a **captured** card
+there.
+
 On app start, a recording left open after a crash is marked **Interrupted**.
-The app recovers the stored file size and duration and fills in the existing WebM
-duration field. If the file does not provide timing, the library uses the last
-saved duration. Each active or paused recording holds a browser lock, so opening
+For browser recordings, the app recovers the stored file size and duration
+and fills in the existing WebM duration field. If the file does not provide
+timing, the library uses the last saved duration. Folder entries keep the
+parts closed before the interruption. Each active or paused recording
+holds a browser lock, so opening
 another tab leaves it alone. Interrupted recordings can be played, renamed,
 deleted, and exported. Recording and startup repair require browser Web Locks
 and synchronous OPFS access in a worker.
@@ -444,7 +461,11 @@ server) with `files/have`, `get`, and `put`.
   toggle without renegotiation, the stats path, and camera off (scenario 23);
   `test/recording-route.js` checks byte ranges (scenario 16),
   `test/recording-repair.js` checks startup recovery and playback (scenario 17),
-  and `test/recording-export.js` checks picker and folder export (scenario 18).
+  `test/recording-export.js` checks picker and folder export (scenario 18),
+  and `test/recording-folder.js` checks direct-to-folder parts, permissions,
+  and repair (scenario 19).
+  `test/capture-logic.js` checks the solo layouts, and `test/capture.js` checks
+  solo capture, storage targets, the direct-chat card, and source cleanup.
   `test/recording-duration.js` covers timing in WebM and fragmented MP4.
   `npm run test:app` reserves two different free ports and passes them as
   `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so

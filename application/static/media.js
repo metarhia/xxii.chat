@@ -720,9 +720,14 @@ class MediaCapture {
     this.#notify();
   }
 
-  async toggleMic() {
+  async toggleMic(release = false) {
     if (this.micOn) {
       this.micOn = false;
+      if (release) {
+        this.#micGen++;
+        this.useMic(null);
+        return;
+      }
       if (this.micTrack) this.micTrack.enabled = false;
       this.#armMute();
       this.#notify();

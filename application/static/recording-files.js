@@ -122,28 +122,33 @@ const rangeOf = (header, size) => {
   return { status: 206, start, end };
 };
 
-const createMeta = (input) => ({
-  id: input.id,
-  title: input.title,
-  chat: input.chat,
-  chatName: input.chatName,
-  call: input.call,
-  started: input.started,
-  stopped: 0,
-  duration: 0,
-  size: 0,
-  mime: input.mime,
-  extension: input.extension,
-  state: 'recording',
-  options: input.options,
-  people: input.people,
-  folder: '',
-});
+const createMeta = (input) => {
+  const meta = {
+    id: input.id,
+    title: input.title,
+    chat: input.chat,
+    chatName: input.chatName,
+    call: input.call,
+    started: input.started,
+    stopped: 0,
+    duration: 0,
+    size: 0,
+    mime: input.mime,
+    extension: input.extension,
+    state: 'recording',
+    options: input.options,
+    people: input.people,
+    folder: input.folder || '',
+  };
+  return meta.folder ? { ...meta, segments: [] } : meta;
+};
 
 const isOpen = (meta) => OPEN_STATES.includes(meta?.state);
 
+const isFolderRecording = (meta) => Array.isArray(meta.segments);
+
 const progressOf = (meta, event) => {
-  if (!isOpen(meta)) return meta;
+  if (!isOpen(meta) || isFolderRecording(meta)) return meta;
   return { ...meta, size: event.size, duration: event.duration };
 };
 
@@ -152,15 +157,33 @@ const peopleOf = (meta, event) =>
 
 const closeOf = (meta, event) => {
   if (!isOpen(meta)) return meta;
-  const { size, duration, time } = event;
+  const { size, duration } = isFolderRecording(meta) ? meta : event;
   const people = peopleOf(meta, event);
-  return { ...meta, state: 'done', stopped: time, size, duration, people };
+  return {
+    ...meta,
+    state: 'done',
+    stopped: event.time,
+    size,
+    duration,
+    people,
+  };
 };
 
 const interruptOf = (meta, event) => {
   if (!isOpen(meta)) return meta;
-  const { size, duration } = event;
+  const { size, duration } = isFolderRecording(meta) ? meta : event;
   return { ...meta, state: 'interrupted', size, duration };
+};
+
+const segmentOf = (meta, { segment }) => {
+  if (!isOpen(meta) || !isFolderRecording(meta)) return meta;
+  const { size, duration } = segment;
+  return {
+    ...meta,
+    segments: meta.segments.concat(segment),
+    size: meta.size + size,
+    duration: meta.duration + duration,
+  };
 };
 
 const pauseOf = (meta) =>
@@ -175,6 +198,7 @@ const TRANSITIONS = {
   interrupt: interruptOf,
   pause: pauseOf,
   resume: resumeOf,
+  segment: segmentOf,
 };
 
 const nextMeta = (meta, event) => {
@@ -223,4 +247,4 @@ export { stampOf, fileNameOf, titleOf, programFileOf, dispositionOf };
 export { recordingUrlOf, timeText, sizeText };
 export { typeOf, extensionOf, routeOf, rangeOf };
 export { createMeta, nextMeta, isOpen, scheduleOf, markedOf, spaceOf };
-export { readMeta, recordingsOf };
+export { isFolderRecording, readMeta, recordingsOf };

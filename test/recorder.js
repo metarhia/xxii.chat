@@ -9,7 +9,7 @@ const loadLayout = () => import('../application/static/layout.js');
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-const createRecording = (supported) => {
+const createRecording = (supported, extra) => {
   const created = [];
   class FakeRecording {
     constructor(stream, options) {
@@ -18,6 +18,7 @@ const createRecording = (supported) => {
       this.state = 'inactive';
       this.listeners = new Map();
       this.slice = 0;
+      this.number = created.length + 1;
       created.push(this);
     }
 
@@ -47,6 +48,7 @@ const createRecording = (supported) => {
     start(slice) {
       this.slice = slice;
       this.state = 'recording';
+      extra.transitions?.push(`start ${this.number}`);
     }
 
     pause() {
@@ -59,7 +61,12 @@ const createRecording = (supported) => {
 
     stop() {
       this.state = 'inactive';
-      setImmediate(() => this.emit('stop', {}));
+      extra.transitions?.push(`stop ${this.number}`);
+      setImmediate(() => {
+        const data = extra.finalChunk?.(this.number);
+        if (data) this.emit('dataavailable', { data });
+        this.emit('stop', {});
+      });
     }
   }
   return { FakeRecording, created };
@@ -96,6 +103,10 @@ const createWriter = (extra = {}) => {
     async poster(recording, bytes) {
       calls.push(['poster', recording, bytes.byteLength]);
     },
+    async segment(recording, duration) {
+      calls.push(['segment', recording, duration]);
+      return { id: recording, state: 'recording' };
+    },
     async close(recording, duration, people) {
       calls.push(['close', recording, duration, people]);
       return { id: recording, state: 'done', duration, size: 99 };
@@ -113,7 +124,7 @@ const posterBlob = { arrayBuffer: async () => new ArrayBuffer(8) };
 const createSetup = async (supported, extra = {}) => {
   const { Recorder } = await load();
   const { QUALITIES } = await loadLayout();
-  const { FakeRecording, created } = createRecording(supported);
+  const { FakeRecording, created } = createRecording(supported, extra);
   const writer = createWriter(extra);
   const time = { now: 1000 };
   const canvas = {
@@ -127,6 +138,8 @@ const createSetup = async (supported, extra = {}) => {
     Recording: FakeRecording,
     streamOf: (tracks) => ({ tracks }),
     now: () => time.now,
+    folder: extra.folder,
+    segmentMs: extra.segmentMs,
   });
   return { recorder, writer, time, created };
 };
@@ -307,6 +320,78 @@ test('a paused recording can stop and counts only recorded time', async () => {
   await recorder.stop();
   const close = writer.calls.find((call) => call[0] === 'close');
   assert.equal(close[2], 1500);
+});
+
+test('rollover counts active time and drains the old part first', async () => {
+  const transitions = [];
+  const extra = {
+    transitions,
+    folder: { name: 'videos' },
+    segmentMs: 3000,
+    finalChunk: (number) => slowBlob(`end ${number}`, 1),
+  };
+  const { recorder, writer, time, created } = await createSetup(
+    ['video/webm;codecs=vp8,opus'],
+    extra,
+  );
+  await recorder.start(info);
+  time.now = 3000;
+  recorder.pause();
+  time.now = 10000;
+  created[0].emit('dataavailable', { data: slowBlob('first', 10) });
+  assert.equal(created.length, 1);
+  recorder.resume();
+  time.now = 10999;
+  created[0].emit('dataavailable', { data: slowBlob('old', 10) });
+  assert.equal(created.length, 1);
+  time.now = 11000;
+  created[0].emit('dataavailable', { data: slowBlob('boundary', 10) });
+  assert.deepEqual(transitions, ['start 1', 'start 2', 'stop 1']);
+  assert.equal(created[0].stream, created[1].stream);
+  time.now = 12000;
+  created[1].emit('dataavailable', { data: slowBlob('next', 1) });
+  await recorder.stop();
+  const writes = writer.calls.filter((call) =>
+    ['segment', 'write', 'close'].includes(call[0]),
+  );
+  assert.deepEqual(writes, [
+    ['write', 'first', 2000],
+    ['write', 'old', 2999],
+    ['write', 'boundary', 3000],
+    ['write', 'end 1', 3000],
+    ['segment', info.id, 3000],
+    ['write', 'next', 4000],
+    ['write', 'end 2', 4000],
+    ['close', info.id, 4000, undefined],
+  ]);
+});
+
+test('a folder write failure keeps an earlier closed part', async () => {
+  const extra = {
+    folder: { name: 'videos' },
+    segmentMs: 3000,
+    failOn: 'bad',
+  };
+  const { recorder, writer, created, time } = await createSetup(
+    ['video/webm;codecs=vp8,opus'],
+    extra,
+  );
+  await recorder.start(info);
+  time.now = 4000;
+  created[0].emit('dataavailable', { data: slowBlob('closed', 1) });
+  time.now = 5000;
+  created[1].emit('dataavailable', { data: slowBlob('bad', 1) });
+  await recorder.stop();
+  const stages = writer.calls.map((call) => call[0]);
+  assert.deepEqual(stages, [
+    'open',
+    'write',
+    'segment',
+    'write',
+    'poster',
+    'abort',
+  ]);
+  assert.equal(recorder.meta.state, 'interrupted');
 });
 
 test('a writer failure aborts the recording and reports it', async () => {

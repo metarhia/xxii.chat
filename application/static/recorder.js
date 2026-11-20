@@ -31,14 +31,36 @@ const optionsOf = (format, quality) => ({
 
 const ignore = () => undefined;
 
+const unlisten = ({ recorder, onData, onError }) => {
+  recorder.removeEventListener('dataavailable', onData);
+  recorder.removeEventListener('error', onError);
+};
+
+const drainPart = async (part) => {
+  const { recorder, queue } = part;
+  const isActive = recorder.state !== 'inactive';
+  const stopped = new Promise((resolve) => {
+    if (!isActive) return void resolve();
+    recorder.addEventListener('stop', resolve, { once: true });
+  });
+  try {
+    if (isActive) recorder.stop();
+    await stopped;
+  } finally {
+    unlisten(part);
+  }
+  await queue.drain();
+};
+
 class ChunkQueue {
-  #tail = Promise.resolve();
+  #tail = null;
   #send = null;
   #onError = null;
 
-  constructor(send, onError) {
+  constructor(send, onError, ready = Promise.resolve()) {
     this.#send = send;
     this.#onError = onError;
+    this.#tail = ready;
     this.error = null;
   }
 
@@ -79,8 +101,8 @@ class RecordingWriter {
     this.#worker.addEventListener('error', this.#onError);
   }
 
-  open(recording, meta) {
-    return this.#request({ type: 'open', recording, meta });
+  open(recording, meta, folder) {
+    return this.#request({ type: 'open', recording, meta, folder });
   }
 
   async write(recording, chunk, duration) {
@@ -103,6 +125,11 @@ class RecordingWriter {
 
   poster(recording, bytes) {
     return this.#request({ type: 'poster', recording, bytes }, [bytes]);
+  }
+
+  async segment(recording, duration) {
+    const reply = await this.#request({ type: 'segment', recording, duration });
+    return reply.meta;
   }
 
   async close(recording, duration, people) {
@@ -132,7 +159,12 @@ class RecordingWriter {
     const request = ++this.#next;
     return new Promise((resolve, reject) => {
       this.#pending.set(request, { resolve, reject });
-      worker.postMessage({ ...message, request }, transfer);
+      try {
+        worker.postMessage({ ...message, request }, transfer);
+      } catch (error) {
+        this.#pending.delete(request);
+        reject(error);
+      }
     });
   }
 
@@ -162,15 +194,18 @@ class Recorder extends Emitter {
   #Recording = null;
   #streamOf = null;
   #now = null;
-  #recorder = null;
-  #queue = null;
-  #listeners = null;
+  #folder = null;
+  #folderName = '';
+  #segmentMs = 0;
+  #segmentTimer = 0;
+  #makeRecorder = null;
+  #part = null;
   #meta = null;
   #stopping = null;
   #posterTimer = 0;
   #poster = null;
   #accrued = 0;
-  #since = 0;
+  #since = null;
 
   constructor(options) {
     super();
@@ -182,7 +217,10 @@ class Recorder extends Emitter {
     this.#formats = options.formats ?? FORMATS;
     this.#Recording = options.Recording ?? null;
     this.#streamOf = options.streamOf ?? ((tracks) => new MediaStream(tracks));
-    this.#now = options.now ?? (() => Date.now());
+    this.#now = options.now ?? (() => performance.now());
+    this.#folder = options.folder;
+    this.#folderName = options.folderName || this.#folder?.name || 'Folder';
+    this.#segmentMs = options.segmentMs ?? 0;
     this.state = 'idle';
     this.format = null;
     this.id = '';
@@ -191,7 +229,7 @@ class Recorder extends Emitter {
   }
 
   get activeMs() {
-    const isRunning = this.state === 'recording';
+    const isRunning = this.#since !== null;
     return this.#accrued + (isRunning ? this.#now() - this.#since : 0);
   }
 
@@ -210,43 +248,46 @@ class Recorder extends Emitter {
     if (!format) throw new Error('This browser cannot record video');
     const tracks = [this.#compositor.track, this.#mixer.track];
     const options = optionsOf(format, this.#quality);
-    const recorder = new Recording(this.#streamOf(tracks), options);
+    const stream = this.#streamOf(tracks);
+    this.#makeRecorder = () => new Recording(stream, options);
+    const recorder = this.#makeRecorder();
     const { mime, extension } = format;
-    const meta = createMeta({ ...info, mime, extension });
-    await this.#writer.open(meta.id, meta);
+    const folder = this.#folder;
+    const folderName = folder ? this.#folderName : '';
+    const meta = createMeta({ ...info, mime, extension, folder: folderName });
+    await this.#writer.open(meta.id, meta, folder);
     this.format = format;
     this.id = meta.id;
     this.#meta = meta;
-    this.#recorder = recorder;
-    const send = (chunk, duration) => this.#store(chunk, duration);
-    this.#queue = new ChunkQueue(send, (error) => this.#fail(error));
-    this.#listen(recorder);
+    this.#part = this.#listen(recorder, 0);
     try {
       recorder.start(TIMESLICE_MS);
     } catch (error) {
-      this.#unlisten(recorder);
+      unlisten(this.#part);
       await this.#writer.abort(meta.id, 0).catch(ignore);
       throw error;
     }
     this.#since = this.#now();
     this.#setState('recording');
+    this.#scheduleSegment();
     this.#posterTimer = setTimeout(() => this.#takePoster(), POSTER_MS);
     return meta;
   }
 
   pause() {
-    if (this.state !== 'recording') return;
-    this.#accrued += this.#now() - this.#since;
-    this.#recorder.pause();
+    if (this.state !== 'recording' || this.#stopping) return;
+    this.#freeze();
+    this.#part.recorder.pause();
     this.#setState('paused');
     this.#writer.pause(this.id).catch((error) => this.#fail(error));
   }
 
   resume() {
-    if (this.state !== 'paused') return;
+    if (this.state !== 'paused' || this.#stopping) return;
     this.#since = this.#now();
-    this.#recorder.resume();
+    this.#part.recorder.resume();
     this.#setState('recording');
+    this.#scheduleSegment();
     this.#writer.resume(this.id).catch((error) => this.#fail(error));
   }
 
@@ -258,28 +299,74 @@ class Recorder extends Emitter {
   }
 
   async #store(chunk, duration) {
+    if (this.#folder && this.error) return;
     this.size = await this.#writer.write(this.id, chunk, duration);
     this.emit('progress', { size: this.size, duration });
   }
 
-  #listen(recorder) {
+  #listen(recorder, started, ready) {
+    const send = (chunk, duration) => this.#store(chunk, duration);
+    const queue = new ChunkQueue(send, (error) => this.#fail(error), ready);
+    const part = { recorder, queue, started, ended: null };
     const onData = ({ data }) => {
-      if (data.size > 0) this.#queue.push(data, this.activeMs);
+      const duration = part.ended ?? this.activeMs;
+      if (data.size > 0) queue.push(data, duration);
+      if (part === this.#part) this.#rollover(duration);
     };
     const onError = (event) => {
       this.#fail(event.error ?? new Error('The recorder failed'));
     };
     recorder.addEventListener('dataavailable', onData);
     recorder.addEventListener('error', onError);
-    this.#listeners = { onData, onError };
+    return Object.assign(part, { onData, onError });
   }
 
-  #unlisten(recorder) {
-    const listeners = this.#listeners;
-    if (!listeners) return;
-    recorder.removeEventListener('dataavailable', listeners.onData);
-    recorder.removeEventListener('error', listeners.onError);
-    this.#listeners = null;
+  #freeze() {
+    this.#accrued = this.activeMs;
+    this.#since = null;
+    clearTimeout(this.#segmentTimer);
+  }
+
+  #scheduleSegment() {
+    if (!this.#segmentMs || this.#since === null) return;
+    clearTimeout(this.#segmentTimer);
+    const deadline = this.#part.started + this.#segmentMs;
+    const remaining = Math.max(0, deadline - this.activeMs);
+    this.#segmentTimer = setTimeout(() => {
+      this.#rollover(this.activeMs);
+      if (this.#part.started < deadline) this.#scheduleSegment();
+    }, remaining);
+  }
+
+  #rollover(active) {
+    if (!this.#segmentMs || this.#since === null || this.error) return;
+    const previous = this.#part;
+    const duration = active - previous.started;
+    if (duration < this.#segmentMs) return;
+    try {
+      const ready = Promise.withResolvers();
+      const recorder = this.#makeRecorder();
+      const next = this.#listen(recorder, active, ready.promise);
+      try {
+        recorder.start(TIMESLICE_MS);
+      } catch (error) {
+        unlisten(next);
+        throw error;
+      }
+      this.#part = next;
+      previous.ended = active;
+      drainPart(previous)
+        .then(async () => {
+          if (!this.error) {
+            this.#meta = await this.#writer.segment(this.id, duration);
+          }
+        })
+        .catch((error) => this.#fail(error))
+        .finally(ready.resolve);
+      this.#scheduleSegment();
+    } catch (error) {
+      this.#fail(error);
+    }
   }
 
   #setState(state) {
@@ -314,22 +401,15 @@ class Recorder extends Emitter {
   }
 
   async #finish(extra) {
-    const recorder = this.#recorder;
-    if (this.state === 'recording') this.#accrued += this.#now() - this.#since;
+    const part = this.#part;
+    this.#freeze();
     clearTimeout(this.#posterTimer);
-    const isActive = recorder.state !== 'inactive';
-    const stopped = new Promise((resolve) => {
-      if (!isActive) return void resolve();
-      recorder.addEventListener('stop', resolve, { once: true });
-    });
-    if (isActive) recorder.stop();
-    await stopped;
     try {
-      await this.#queue.drain();
+      await drainPart(part);
       await this.#takePoster();
       const duration = this.#accrued;
       const id = this.id;
-      const failed = this.#queue.error !== null;
+      const failed = part.queue.error !== null || (this.#folder && this.error);
       const people = extra.people;
       const meta = failed
         ? await this.#writer.abort(id, duration)
@@ -337,7 +417,6 @@ class Recorder extends Emitter {
       this.#meta = meta;
       return meta;
     } finally {
-      this.#unlisten(recorder);
       this.#setState('stopped');
     }
   }

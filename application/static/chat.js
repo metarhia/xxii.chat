@@ -250,14 +250,10 @@ const endCall = (replica, id, { ended, peak, names }) => {
 };
 
 const startRecording = (replica, record) => {
-  const { id, chat, call, author, nick, timestamp } = record;
-  return replica.assign('recording', id, {
-    chat,
-    call,
-    author,
-    nick,
-    timestamp,
-  });
+  const { id, chat, call, author, nick, timestamp, stopped } = record;
+  const fields = { chat, call, author, nick, timestamp };
+  if (typeof stopped === 'number') fields.stopped = stopped;
+  return replica.assign('recording', id, fields);
 };
 
 const stopRecording = (replica, id, { stopped }) =>
@@ -425,7 +421,12 @@ const threadsOf = (replica, chat) => {
       const record = replica.get(id);
       const hasTime = typeof record.timestamp === 'number';
       const isShown = record.chat === chat && hasTime;
-      if (!isShown) continue;
+      if (
+        !isShown ||
+        (record.call === '' && !Number.isFinite(record.stopped))
+      ) {
+        continue;
+      }
       const recording = { id, kind: 'recording', ...record };
       recordings.push(recording);
       records.set(id, recording);
