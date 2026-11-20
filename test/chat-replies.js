@@ -129,9 +129,11 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       const quote = row.querySelector('.quote');
       const hasQuote = !quote.classList.contains('hidden');
       const text = quote.querySelector('.quote-text').textContent;
+      const mark = quote.querySelector('.quote-mark').textContent;
       const expected = ${JSON.stringify(expected)};
       return expected
-        ? hasQuote && text === expected && record.quote === expected
+        ? hasQuote && text === expected && record.quote === expected &&
+          mark === '“' && getComputedStyle(quote).boxShadow === 'none'
         : !hasQuote && record.quote === undefined && Boolean(record.replyTo);`,
     );
 
@@ -177,7 +179,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       assert.match(row.token, /^var\(--thread-\d+\)$/);
       assert.equal(row.token, rows.B0.token, name);
       assert.equal(row.nick, rows.B0.nick, name);
-      assert.match(row.stripe, / 3px 0px 0px 0px inset$/);
+      assert.match(row.stripe, / 6px 0px 0px 0px inset$/);
       assert.equal(row.text, rows.P0.text, name);
     }
     assert.equal(rows.P0.threaded, false);
@@ -201,18 +203,15 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       bob,
       `const root = ${rowOf('B0')};
       const counter = root.querySelector('.replies');
-      const initials = counter.querySelector('.initials');
       const path = counter.querySelector('path');
       const nested = ${rowOf('B1')}.querySelector('.replies');
       return {
-        count: counter.querySelector('.count').textContent,
+        count: counter.textContent.trim(),
         label: counter.getAttribute('aria-label'),
         arrow: path.getAttribute('d'),
         stroke: getComputedStyle(path).stroke,
         color: getComputedStyle(counter.querySelector('.count')).color,
         nick: getComputedStyle(root.querySelector('.author')).color,
-        initials: initials.textContent,
-        showInitials: getComputedStyle(initials).display !== 'none',
         hideNested: nested.classList.contains('hidden'),
       };`,
     );
@@ -221,15 +220,13 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     assert.equal(info.arrow, REPLY_ARROW);
     assert.equal(info.stroke, info.nick);
     assert.equal(info.color, info.nick);
-    assert.equal(info.initials, 'A');
-    assert.equal(info.showInitials, true);
     assert.equal(info.hideNested, true);
     await resize(bob, PHONE);
     await wait(
       bob,
       `const counter = ${rowOf('B0')}.querySelector('.replies');
-      return getComputedStyle(counter.querySelector('.initials')).display
-        === 'none' && getComputedStyle(counter).display !== 'none';`,
+      return counter.textContent.trim() === '2' &&
+        getComputedStyle(counter).display !== 'none';`,
     );
     await resize(bob, DESKTOP);
   });
@@ -312,21 +309,30 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
         app.selection.offset, app.messageList.matches('.selecting')];`,
     );
     assert.deepEqual(selected, [b, '2 of 3', 'polite', false, before, true]);
+    const barAtTop = await run(
+      bob,
+      `const bar = app.selectionBar.getBoundingClientRect();
+      const messages = app.chatMessages.getBoundingClientRect();
+      return bar.height > 0 && bar.bottom <= messages.top &&
+        app.replyBar.matches('.hidden');`,
+    );
+    assert.equal(barAtTop, true);
     assert.equal((await states(bob)).P0.opacity, '0.35');
     await run(
       bob,
       `app.chatMessages.scrollTop = 0;
       ${rowOf('B0')}.querySelector('.content').click();`,
     );
-    assert.equal(await run(bob, 'return app.replyText.textContent;'), 'B0');
+    assert.equal(await run(bob, 'return app.targetId();'), b);
     await run(bob, `${rowOf('A0')}.querySelector('.content').click();`);
     const switched = await run(
       bob,
       `return [app.selection.root, app.selection.offset, app.selection.moved,
         app.layers.filter((layer) => layer === 'selection').length,
-        app.replyText.textContent];`,
+        app.targetId(), app.replyBar.matches('.hidden')];`,
     );
-    assert.deepEqual(switched, [a, before, false, 1, 'A1']);
+    const a1 = await idOf(bob, 'A1');
+    assert.deepEqual(switched, [a, before, false, 1, a1, true]);
     await run(bob, `${rowOf('P0')}.querySelector('.content').click();`);
     await wait(bob, `return app.selection === null && app.pops === 0;`);
     assert.equal(await run(bob, 'return app.chatMessages.scrollTop;'), 0);
@@ -356,9 +362,12 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     );
     const manual = await run(bob, 'return app.chatMessages.scrollTop;');
     assert.ok(manual > 0);
+    const position = `return ${rowOf('B1')}.getBoundingClientRect().top;`;
+    const top = await run(bob, position);
     await press(bob, 'Escape');
     await wait(bob, `return app.selection === null && app.pops === 0;`);
-    assert.equal(await run(bob, 'return app.chatMessages.scrollTop;'), manual);
+    const after = await run(bob, position);
+    assert.ok(Math.abs(after - top) <= 1);
     await run(
       bob,
       `app.chatMessages.scrollTop = app.chatMessages.scrollHeight;`,
@@ -412,9 +421,11 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     await press(bob, 'Escape');
     const defaults = await run(
       bob,
-      `return [app.selection.chosen, app.replyText.textContent];`,
+      `return [app.selection.chosen, app.targetId(),
+        app.replyBar.matches('.hidden')];`,
     );
-    assert.deepEqual(defaults, [chosen, 'B2']);
+    const latest = await idOf(bob, 'B2');
+    assert.deepEqual(defaults, [chosen, latest, true]);
     const retargeted = await run(
       bob,
       `const row = ${rowOf('P0')};
@@ -426,15 +437,9 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       selection.removeAllRanges();
       ${rowOf('B0')}.querySelector('.content').click();
       return [quoted, app.selection.chosen, app.targetId(),
-        app.replyText.textContent, app.replyWithQuote.matches('.hidden')];`,
+        app.replyBar.matches('.hidden'), app.fragments.has(app.chat)];`,
     );
-    assert.deepEqual(retargeted, ['P', root, root, 'B0', true]);
-    await press(bob, 'Escape');
-    const cleared = await run(
-      bob,
-      `return [app.selection.chosen, app.replyText.textContent];`,
-    );
-    assert.deepEqual(cleared, [root, 'B2']);
+    assert.deepEqual(retargeted, ['P', root, root, true, false]);
     await press(bob, 'Escape');
     await wait(bob, `return app.selection === null && app.pops === 0;`);
   });
@@ -514,7 +519,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     assert.match(rows.D1.stripe, /6px 0px 0px 0px inset/);
     assert.equal(rows.D2.chain, false);
     assert.equal(rows.D2.opacity, '1');
-    assert.match(rows.D2.stripe, /3px 0px 0px 0px inset/);
+    assert.match(rows.D2.stripe, /6px 0px 0px 0px inset/);
     assert.ok(Number(rows.B0.opacity) < 1);
   });
 
@@ -590,59 +595,67 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     );
   });
 
-  await t.test('the composer targets the latest by default', async () => {
-    await run(
-      bob,
-      `${rowOf('D0')}.querySelector('.replies').click();
+  await t.test(
+    'the composer replies in the thread without quoting',
+    async () => {
+      await run(
+        bob,
+        `${rowOf('D0')}.querySelector('.replies').click();
       return true;`,
-    );
-    await wait(bob, `return app.selection !== null;`);
-    const bar = await run(
-      bob,
-      `return [
+      );
+      await wait(bob, `return app.selection !== null;`);
+      const latest = await idOf(bob, 'D3');
+      const bar = await run(
+        bob,
+        `return [
         app.replyBar.classList.contains('hidden'),
-        app.replyPrefix.textContent,
-        app.replyAuthor.textContent,
-        app.replyText.textContent,
+        app.targetId(),
+        app.messageInput.placeholder,
       ];`,
-    );
-    assert.deepEqual(bar, [false, '↩ to thread:', 'ada', 'D3']);
-    await run(bob, `${rowOf('D2')}.querySelector('.content').click();`);
-    await wait(bob, `return app.replyText.textContent === 'D2';`);
-    await run(
-      bob,
-      `app.username = 'bob';
+      );
+      assert.deepEqual(bar, [true, latest, '> reply to ada']);
+      await run(bob, `${rowOf('D2')}.querySelector('.content').click();`);
+      const to = await idOf(bob, 'D2');
+      await wait(bob, `return app.targetId() === '${to}';`);
+      await run(
+        bob,
+        `app.username = 'bob';
       app.messageInput.value = 'D4';
       await app.sendMessage();
       return true;`,
-    );
-    const to = await idOf(bob, 'D2');
-    const reply = await idOf(bob, 'D4');
-    const sent = await run(bob, `return app.replica.get('${reply}').replyTo;`);
-    assert.equal(sent, to);
-    await wait(
-      bob,
-      `app.render();
-      return app.selection !== null && app.replyText.textContent === 'D4'
+      );
+      const reply = await idOf(bob, 'D4');
+      const sent = await run(
+        bob,
+        `return app.replica.get('${reply}').replyTo;`,
+      );
+      assert.equal(sent, to);
+      await quoteIn(bob, 'D4', '');
+      await wait(
+        bob,
+        `app.render();
+      return app.selection !== null && app.targetId() === '${reply}'
+        && app.replyBar.matches('.hidden')
         && app.selectionPosition.textContent === '5 of 5'
         && !${rowOf('D4')}.classList.contains('dim');`,
-    );
-    await run(bob, `app.replyCancel.click(); return true;`);
-    await wait(bob, `return app.replyBar.classList.contains('hidden');`);
-    await run(
-      bob,
-      `app.messageInput.value = 'plain';
+      );
+      await run(bob, `app.selectionClose.click(); return true;`);
+      await wait(bob, `return app.selection === null && app.pops === 0;`);
+      await run(
+        bob,
+        `app.messageInput.value = 'plain';
       await app.sendMessage();
       return true;`,
-    );
-    const plain = await idOf(bob, 'plain');
-    const record = await run(
-      bob,
-      `return app.replica.get('${plain}').replyTo ?? null;`,
-    );
-    assert.equal(record, null);
-    await wait(bob, `return app.selection === null;`);
-  });
+      );
+      const plain = await idOf(bob, 'plain');
+      const record = await run(
+        bob,
+        `return app.replica.get('${plain}').replyTo ?? null;`,
+      );
+      assert.equal(record, null);
+      await wait(bob, `return app.selection === null;`);
+    },
+  );
 
   await t.test('a quote and the root counter select the thread', async () => {
     await run(bob, `app.render(); return true;`);
@@ -658,12 +671,9 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     const counter = await run(
       bob,
       `const counter = ${rowOf('D0')}.querySelector('.replies');
-      return [
-        counter.querySelector('.count').textContent,
-        counter.querySelector('.initials').textContent,
-      ];`,
+      return counter.textContent.trim();`,
     );
-    assert.deepEqual(counter, ['4', 'A B']);
+    assert.equal(counter, '4');
     await run(bob, `${rowOf('D0')}.querySelector('.replies').click();`);
     await wait(bob, `return app.selection?.root === '${root}';`);
     await press(bob, 'Escape');
@@ -812,7 +822,28 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     assert.equal((await target(bob))[1], 'alpha beta gamma');
     await sendReply(bob, 'plain menu reply');
     await quoteIn(bob, 'plain menu reply', '');
-    await replyInMenu(bob, row, 'reply-quote', one);
+    const point = await run(
+      bob,
+      `${row}.scrollIntoView({ block: 'center' });
+      ${one}
+      const { x, y, width, height } = range.getBoundingClientRect();
+      return { x: x + width / 2, y: y + height / 2 };`,
+    );
+    const right = { ...point, button: 'right', clickCount: 1 };
+    const rightClick = (type, buttons) =>
+      browser.request(
+        'Input.dispatchMouseEvent',
+        { ...right, type, buttons },
+        bob,
+      );
+    await rightClick('mousePressed', 2);
+    await rightClick('mouseReleased', 0);
+    await wait(bob, `return app.menu.target === ${row}.dataset.id;`);
+    await run(
+      bob,
+      `window.getSelection().removeAllRanges();
+      app.menuElement.querySelector('[data-action="reply-quote"]').click();`,
+    );
     await wait(
       bob,
       `return app.replyText.textContent === 'beta'
@@ -835,7 +866,10 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     const prefix = `alpha beta gamma ${padding}`.slice(0, 300);
     await wait(
       bob,
-      `return app.replyText.textContent === ${JSON.stringify(prefix)}
+      `const mark = app.replyTarget.querySelector('.quote-mark');
+      return mark.textContent === '“'
+        && getComputedStyle(app.replyTarget).boxShadow === 'none'
+        && app.replyText.textContent === ${JSON.stringify(prefix)}
         && !app.replyWithQuote.classList.contains('hidden');`,
     );
     await sendReply(bob, 'prefix reply');
@@ -883,8 +917,8 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     assert.equal(rows['new sibling'].chain, false);
     assert.equal(rows['new sibling'].dim, false);
     assert.equal(rows['new standalone'].dim, true);
-    const reply = await run(bob, 'return app.replyText.textContent');
-    assert.equal(reply, 'new sibling');
+    const sibling = await idOf(bob, 'new sibling');
+    assert.equal(await run(bob, 'return app.targetId();'), sibling);
     await run(bob, `app.searchBtn.click();`);
     await wait(bob, `return app.selection === null && app.pops === 0;`);
     await run(bob, `app.searchBtn.click();`);
@@ -954,6 +988,17 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       bob,
       `return app.menu.isOpen && app.selection?.chosen === '${chosen}';`,
     );
+    const fits = await run(
+      bob,
+      `const bar = app.menuElement.querySelector('.menu-reactions');
+      const bounds = bar.getBoundingClientRect();
+      return bar.children.length === 9 && [...bar.children].every((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.left >= bounds.left && rect.right <= bounds.right &&
+          rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+      });`,
+    );
+    assert.equal(fits, true);
     await run(bob, `history.back();`);
     await wait(
       bob,

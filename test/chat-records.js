@@ -328,3 +328,97 @@ test('feeds have no recordings', async () => {
   });
   assert.equal(threadsOf(store, 'news').items.length, 0);
 });
+
+const say = (store, createMessage, id, author, extra = {}) =>
+  createMessage(store, {
+    id,
+    chat: 'room',
+    author,
+    nick: author,
+    content: `text ${id}`,
+    timestamp: Number(id.slice(1)),
+    ...extra,
+  });
+
+test('validate accepts edits, deletes, and forwards', async () => {
+  const { validate } = await load();
+  const base = {
+    chat: lww('room'),
+    author: lww('ada'),
+    nick: lww('Ada'),
+    content: lww('hi'),
+    timestamp: lww(10),
+  };
+  const check = (data) => validate({ entity: 'message', data });
+  const forwarded = lww('m1');
+  assert.equal(check({ ...base, forwarded, origin: lww('Bob') }), true);
+  assert.equal(check({ ...base, forwarded }), true);
+  assert.equal(check({ ...base, origin: lww('Bob') }), false);
+  assert.equal(check({ forwarded: lww(1) }), false);
+  assert.equal(check({ content: lww('fixed'), edited: lww(20) }), true);
+  assert.equal(check({ content: lww('fixed'), edited: lww('20') }), false);
+  assert.equal(check({ content: lww(''), deleted: lww(30) }), true);
+  assert.equal(check({ deleted: lww(true) }), false);
+});
+
+test('edit, delete, and forward write their fields', async () => {
+  const { createMessage, editMessage, deleteMessage } = await load();
+  const store = replica();
+  say(store, createMessage, 'm1', 'ada');
+  editMessage(store, 'm1', { content: 'fixed', edited: 20 });
+  assert.equal(store.get('m1').content, 'fixed');
+  assert.equal(store.get('m1').edited, 20);
+  say(store, createMessage, 'm2', 'ada');
+  store.assign('message', 'm2', { pinned: true });
+  deleteMessage(store, { id: 'm2', pinned: true }, 30);
+  assert.equal(store.get('m2').content, '');
+  assert.equal(store.get('m2').deleted, 30);
+  assert.equal(store.get('m2').pinned, false);
+  deleteMessage(store, { id: 'm1' }, 40);
+  assert.equal(Object.hasOwn(store.get('m1'), 'pinned'), false);
+  const forwarded = { forwarded: 'x1', origin: 'Bob' };
+  say(store, createMessage, 'm3', 'ada', forwarded);
+  assert.equal(store.get('m3').forwarded, 'x1');
+  assert.equal(store.get('m3').origin, 'Bob');
+  say(store, createMessage, 'm4', 'ada', { origin: 'Bob' });
+  assert.equal(Object.hasOwn(store.get('m4'), 'origin'), false);
+});
+
+test('threadsOf keeps a deleted message only for its replies', async () => {
+  const { createMessage, deleteMessage, threadsOf } = await load();
+  const store = replica();
+  say(store, createMessage, 'm1', 'ada');
+  say(store, createMessage, 'm2', 'bob', { replyTo: 'm1' });
+  say(store, createMessage, 'm3', 'ada');
+  say(store, createMessage, 'm4', 'ada');
+  say(store, createMessage, 'm5', 'bob', { replyTo: 'm4' });
+  say(store, createMessage, 'm6', 'ada', { replyTo: 'm5' });
+  deleteMessage(store, { id: 'm1' }, 90);
+  deleteMessage(store, { id: 'm3' }, 90);
+  deleteMessage(store, { id: 'm5' }, 90);
+  deleteMessage(store, { id: 'm6' }, 90);
+  const view = threadsOf(store, 'room');
+  const ids = view.items.map((item) => item.id);
+  assert.deepEqual(ids, ['m1', 'm2', 'm4']);
+  assert.equal(view.records.has('m3'), false);
+  assert.equal(view.records.has('m5'), false);
+  assert.equal(view.replies.has('m4'), false);
+  assert.equal(view.replies.has('m5'), false);
+  assert.deepEqual(
+    view.replies.get('m1').map((reply) => reply.id),
+    ['m2'],
+  );
+  say(store, createMessage, 'm7', 'bob', { replyTo: 'm6' });
+  const kept = threadsOf(store, 'room').items.map((item) => item.id);
+  assert.deepEqual(kept, ['m1', 'm2', 'm4', 'm5', 'm6', 'm7']);
+});
+
+test('unreadOf skips deleted messages', async () => {
+  const { createMessage, deleteMessage, unreadOf } = await load();
+  const store = replica();
+  say(store, createMessage, 'm150', 'bob');
+  say(store, createMessage, 'm160', 'bob');
+  deleteMessage(store, { id: 'm160' }, 170);
+  const unread = unreadOf(store, 'ada', () => 100);
+  assert.equal(unread.get('room'), 1);
+});

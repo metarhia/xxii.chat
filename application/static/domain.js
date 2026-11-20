@@ -6,6 +6,7 @@ import { isFeed, isPost, labelOf, parseTitle } from './chat.js';
 import { saveAuthor, createChannel, describe } from './chat.js';
 import { createFolder, setVisibility, placeItem } from './chat.js';
 import { createMessage, createPost, setReaction, pin } from './chat.js';
+import { editMessage, deleteMessage, isDeleted } from './chat.js';
 import { startCall as saveCall, endCall as saveCallEnd } from './chat.js';
 import { startRecording as saveRecording } from './chat.js';
 import { stopRecording as saveRecordingStop } from './chat.js';
@@ -84,6 +85,19 @@ const readCallLink = () => {
   return { call, token: params.get('t') ?? '' };
 };
 
+const messageUrl = (chat, id) => {
+  const params = new URLSearchParams({ chat, message: id });
+  return `${location.origin}/?${params}`;
+};
+
+const readMessageLink = () => {
+  const params = new URLSearchParams(location.search);
+  const chat = params.get('chat') ?? '';
+  const message = params.get('message') ?? '';
+  if (chat === '' || message === '') return null;
+  return { chat, message };
+};
+
 const fragmentOf = (id) => {
   const selection = window.getSelection();
   const text = selection.toString().trim();
@@ -107,6 +121,12 @@ const MESSAGE_ACTIONS = {
   menu: (app, id, button) => app.toggleMenuAt(id, button),
   pin: (app, id) => app.togglePin(id),
   copy: (app, id) => app.copyText(id),
+  share: (app, id) => app.shareMessage(id),
+  forward: (app, id) => app.forwardMessages([id]),
+  edit: (app, id) => app.startEdit(id),
+  delete: (app, id) => app.deleteMessages([id]),
+  pick: (app, id) => app.startPicking(id),
+  origin: (app, id) => app.openOrigin(id),
   view: (app, id, { dataset }) => app.viewImage(dataset.file),
   download: (app, id, { dataset }) => app.downloadFile(dataset.file),
   heading: (app, id, { dataset }) => app.scrollToHeading(dataset.heading),
@@ -123,7 +143,10 @@ const ITEM_KEYS = {
     app.startReply(id, fragmentOf(id));
   },
   f: (app, item) => app.selectThread(item.dataset.id),
+  e: (app, item) => app.startEdit(item.dataset.id),
 };
+
+const LAYER_ACTIONS = new Set(['selection', 'forward', 'pick']);
 
 const THREAD_KEYS = { '[': -1, ']': 1, ArrowUp: -1, ArrowDown: 1 };
 
@@ -136,6 +159,7 @@ const LAYERS = {
   call: (app) => app.callStage?.collapse(),
   callSheet: (app) => app.callStage?.hideSheet(),
   selection: (app) => app.leaveThread(),
+  picking: (app) => app.leavePicking(),
   article: (app) => app.leaveArticle(),
 };
 
@@ -170,7 +194,6 @@ const FLASH_MS = 1600;
 const MENU_INDENT_PX = 48;
 const BOTTOM_PX = 40;
 const SELECTION_PAGES = 10;
-const MAX_INITIALS = 3;
 const PREVIEW_WIDTH = 320;
 const PREVIEW_HEIGHT = 240;
 const INPUT_RATIO = 0.4;
@@ -246,6 +269,27 @@ const fillPostHeader = (element, post) => {
   element.querySelector('.date').textContent = dateOf(post.timestamp);
 };
 
+const noteOf = (message) => {
+  if (isDeleted(message)) return 'message deleted';
+  return typeof message.edited === 'number' ? 'edited' : '';
+};
+
+const originOf = (message) => {
+  if (!message.forwarded) return '';
+  return message.origin ? `from ${message.origin}` : 'forwarded';
+};
+
+const fillTime = (element, message) => {
+  const time = element.querySelector('.time');
+  time.textContent = timeOf(message.timestamp);
+  const sent = dateOf(message.timestamp);
+  const { edited } = message;
+  const isEdited = typeof edited === 'number' && !isDeleted(message);
+  time.title = isEdited ? `${sent}, edited ${dateOf(edited)}` : sent;
+};
+
+const pickLine = (record) => `${record.nick}: ${record.content}`;
+
 const createHeadingLink = (index, text) => {
   const button = document.createElement('button');
   button.type = 'button';
@@ -259,7 +303,7 @@ const createHeadingLink = (index, text) => {
 const replyTargetOf = (event) => {
   const item = event.target.closest('.message');
   if (!item?.dataset.id) return null;
-  const isControl = event.target.closest('button, a') !== null;
+  const isControl = event.target.closest('button, a, .message-editor') !== null;
   return isControl ? null : item;
 };
 
@@ -277,16 +321,6 @@ const quoteOf = (id, view, fragment = '') => {
 const articleInfo = (view) => {
   const count = plural(view.shown.length - 1, 'reply', 'replies');
   return `post · ${count}`;
-};
-
-const initialsOf = (thread) => {
-  const initials = [];
-  for (const reply of thread) {
-    const initial = Array.from(reply.nick ?? '')[0]?.toUpperCase();
-    if (!initial || initials.includes(initial)) continue;
-    initials.push(initial);
-  }
-  return initials.slice(0, MAX_INITIALS);
 };
 
 const readDrafts = () => {
@@ -367,16 +401,16 @@ const recordingLabel = (record, isLive) => {
 };
 
 const callLabel = (record, live) => {
-  const nick = record.nick ?? '';
+  const nick = record.nick || 'guest';
   if (typeof record.ended === 'number') {
     const missed = record.peak === 1 && isPair(record.chat);
     if (missed) return `📞 missed call from ${nick}`;
     const minutes = minutesOf(record);
     const names = record.names ?? '';
-    return `📞 call · ${minutes} min · ${names}`;
+    return `📞 ${nick} · ${minutes} min · ${names}`;
   }
   const time = timeOf(record.timestamp);
-  const started = `📞 call · ${nick} · started ${time}`;
+  const started = `📞 ${nick} · started ${time}`;
   if (!live) return started;
   return `${started} · ${live.count} in call`;
 };
@@ -460,6 +494,11 @@ class ChatApplication extends Application {
     this.selection = null;
     this.threadTarget = '';
     this.timelineOffset = 0;
+    this.picked = null;
+    this.pickAnchor = '';
+    this.editing = '';
+    this.forwarding = [];
+    this.linked = '';
     this.view = null;
     this.readAt = readMap(READ_KEY);
     this.drafts = readDrafts();
@@ -606,6 +645,12 @@ class ChatApplication extends Application {
     this.selectionPrev = byId('selection-prev');
     this.selectionNext = byId('selection-next');
     this.selectionClose = byId('selection-close');
+    this.pickBar = byId('pick-bar');
+    this.pickCount = byId('pick-count');
+    this.pickCopy = byId('pick-copy');
+    this.pickForward = byId('pick-forward');
+    this.pickDelete = byId('pick-delete');
+    this.pickClose = byId('pick-close');
     this.attachBtn = byId('attach-btn');
     this.fileInput = byId('file-input');
     this.emojiBtn = byId('emoji-btn');
@@ -638,12 +683,18 @@ class ChatApplication extends Application {
       download: (file) => this.downloadFile(file.id),
     });
     this.switcher = new Switcher(byId('switcher'), (entry) => {
-      this.selectEntry(entry);
+      if (this.forwarding.length > 0) this.forwardTo(entry);
+      else this.selectEntry(entry);
     });
     this.contactTemplate = byId('contact-item-template');
     this.chatTemplate = byId('chat-item-template');
     this.folderTemplate = byId('folder-item-template');
     this.messageTemplate = byId('message-template');
+    this.menuIcons = byId('message-menu-icons').content;
+    const editor = byId('message-editor-template');
+    this.editForm = cloneTemplate(editor, '.message-editor');
+    this.editInput = this.editForm.querySelector('textarea');
+    this.editInput.maxLength = MAX_LENGTH;
     this.postTemplate = byId('post-template');
     this.articleTemplate = byId('article-template');
     this.pinTemplate = byId('pin-item-template');
@@ -701,6 +752,19 @@ class ChatApplication extends Application {
     this.selectionPrev.onclick = () => this.stepThread(-1);
     this.selectionNext.onclick = () => this.stepThread(1);
     this.selectionClose.onclick = () => this.closeThread();
+    this.pickCopy.onclick = () => this.copyPicked();
+    this.pickForward.onclick = () => this.forwardPicked();
+    this.pickDelete.onclick = () => this.deletePicked();
+    this.pickClose.onclick = () => this.closePicking();
+    this.editForm.querySelector('[type="button"]').onclick = () =>
+      this.cancelEdit();
+    this.editInput.addEventListener('input', () => resizeInput(this.editInput));
+    onSubmit(this.editForm, () => this.saveEdit());
+    onSendKey(
+      this.editInput,
+      (event) => !event.shiftKey,
+      () => this.saveEdit(),
+    );
     this.loadMoreBtn.onclick = () => this.loadOlder();
     this.jumpBtn.onclick = () => this.jumpToLatest();
     this.backPill.onclick = () => this.goBack();
@@ -764,6 +828,7 @@ class ChatApplication extends Application {
       if (event.detail > 1 && replyTargetOf(event)) event.preventDefault();
     });
     this.messageList.addEventListener('dblclick', (event) => {
+      if (this.picked) return;
       const item = replyTargetOf(event);
       if (!item) return;
       const { id } = item.dataset;
@@ -805,6 +870,11 @@ class ChatApplication extends Application {
     this.on('ready', () => {
       const link = readCallLink();
       if (link) this.presentCallLink(link);
+      const message = readMessageLink();
+      if (message) {
+        history.replaceState(history.state, '', location.pathname);
+        this.openLink(message);
+      }
       this.startSync();
       this.bindCalls().catch((error) => this.report(error));
     });
@@ -1228,12 +1298,12 @@ class ChatApplication extends Application {
     const isArticle = id === this.article;
     const threadRoot = threadRootOf(view, id, this.article);
     const hasCounter = threadRoot === id || (isPost(message) && !isArticle);
-    const thread = hasCounter ? threadOf(view.replies, id) : [];
-    const replyCount = thread.length;
-    const initials = initialsOf(thread);
+    const replyCount = hasCounter ? threadOf(view.replies, id).length : 0;
     const quote = fragment && replyTo ? quoteOf(replyTo, view, fragment) : null;
-    const files = view.attachments.get(id) ?? [];
-    const byReaction = view.reactions.get(id);
+    const isGone = isDeleted(message);
+    const attached = view.attachments.get(id) ?? [];
+    const files = isGone ? [] : attached;
+    const byReaction = isGone ? null : view.reactions.get(id);
     const reactions = this.summarize(byReaction, view.nicks);
     const isContinued = false;
     const isThreadContinued = false;
@@ -1241,7 +1311,6 @@ class ChatApplication extends Application {
       isArticle,
       threadRoot,
       replyCount,
-      initials,
       quote,
       files,
       reactions,
@@ -1264,9 +1333,9 @@ class ChatApplication extends Application {
     const isArticleShown = view.records.has(this.article);
     const limit = isArticleShown ? Infinity : this.limit;
     const visible = view.shown.slice(-limit);
-    const focused = isItem(document.activeElement)
-      ? document.activeElement.dataset.id
-      : '';
+    const active = document.activeElement;
+    const focused = isItem(active) ? active.dataset.id : '';
+    const editorFocused = this.editForm.contains(active);
     const cache = new Map();
     const sections = [];
     let section = null;
@@ -1316,14 +1385,18 @@ class ChatApplication extends Application {
     this.cache = cache;
     if (sections.length === 0) sections.push(this.createEmpty());
     this.messageList.replaceChildren(...sections);
+    if (this.editing) this.placeEditor();
+    if (editorFocused && this.editing) active.focus({ preventScroll: true });
     const hasOlder = view.shown.length > limit;
     this.loadMoreBtn.classList.toggle('hidden', !hasOlder);
     this.renderHeader(view);
     const box = this.chatMessages;
     if (isAtBottom) box.scrollTop = box.scrollHeight;
     this.renderSelection();
+    this.renderPicked();
     this.updateJump();
     if (focused) this.selectById(focused, false);
+    this.revealLinked();
   }
 
   isNew(message) {
@@ -1486,7 +1559,8 @@ class ChatApplication extends Application {
     const isPostMode = this.isPostMode();
     const quote = this.currentQuote();
     const root = this.view?.records.get(this.article);
-    const to = quote?.nick || root?.nick;
+    const recipient = this.view?.records.get(this.targetId());
+    const to = recipient?.nick || root?.nick;
     const noun = isPostMode ? 'post' : 'message';
     const target = to ? `reply to ${to}` : `new ${noun} to ${this.chatName()}`;
     this.messageInput.placeholder = `> ${target}`;
@@ -1500,7 +1574,6 @@ class ChatApplication extends Application {
     this.replyBar.classList.toggle('hidden', !quote);
     if (!quote) return;
     const inThread = this.threadItems().includes(quote.id);
-    this.replyBar.classList.toggle('in-thread', inThread);
     const prefix = inThread ? '↩ to thread:' : 'reply to';
     this.replyPrefix.textContent = prefix;
     this.replyAuthor.textContent = quote.nick;
@@ -1514,6 +1587,8 @@ class ChatApplication extends Application {
     element.dataset.id = message.id;
     element.classList.toggle('pinned', message.pinned === true);
     element.classList.toggle('continued', details.isContinued);
+    element.classList.toggle('own', message.author === this.peerId);
+    element.classList.toggle('deleted', isDeleted(message));
     const { threadRoot, isThreadContinued } = details;
     if (threadRoot) {
       const color = colorOf(threadRoot);
@@ -1521,11 +1596,14 @@ class ChatApplication extends Application {
       element.style.setProperty('--thread', `var(--thread-${color})`);
     }
     element.classList.toggle('thread-continued', isThreadContinued);
-    const time = element.querySelector('.time');
-    time.textContent = timeOf(message.timestamp);
-    time.title = dateOf(message.timestamp);
+    fillTime(element, message);
     element.querySelector('.author').textContent = message.nick;
     fillText(element.querySelector('.content'), message.content);
+    element.querySelector('.note').textContent = noteOf(message);
+    const origin = originOf(message);
+    const forwarded = element.querySelector('.forwarded');
+    forwarded.classList.toggle('hidden', origin === '');
+    forwarded.querySelector('.origin').textContent = origin;
     fillQuote(element.querySelector('.quote'), details.quote);
     this.fillFiles(element.querySelector('.attachments'), details.files);
     this.fillReactions(element.querySelector('.reactions'), details.reactions);
@@ -1533,7 +1611,6 @@ class ChatApplication extends Application {
     const replies = element.querySelector('.replies');
     replies.classList.toggle('hidden', replyCount === 0);
     replies.querySelector('.count').textContent = replyCount;
-    replies.querySelector('.initials').textContent = details.initials.join(' ');
     const count = plural(replyCount, 'reply', 'replies');
     replies.setAttribute('aria-label', `${count}, select thread`);
     return element;
@@ -1617,15 +1694,16 @@ class ChatApplication extends Application {
 
   summarize(byReaction, nicks) {
     const summary = [];
+    let total = 0;
     for (const reaction in REACTIONS) {
-      const authors = byReaction?.get(reaction);
-      if (!authors || authors.size === 0) continue;
+      const authors = byReaction?.get(reaction) ?? new Set();
       const names = Array.from(authors, (id) => nicks.get(id) ?? shortId(id));
       const mine = authors.has(this.peerId);
       const count = authors.size;
+      total += count;
       summary.push({ reaction, count, mine, names: names.toSorted() });
     }
-    return summary;
+    return total > 0 ? summary : [];
   }
 
   fillReactions(container, reactions) {
@@ -1639,8 +1717,10 @@ class ChatApplication extends Application {
     button.dataset.reaction = reaction;
     button.dataset.count = count;
     button.classList.toggle('mine', mine);
+    button.classList.toggle('none', count === 0);
     button.setAttribute('aria-pressed', `${mine}`);
-    button.title = `${names.join(', ')} reacted with ${emoji}`;
+    const who = `${names.join(', ')} reacted with ${emoji}`;
+    button.title = count === 0 ? `React with ${emoji}` : who;
     button.querySelector('.emoji').textContent = emoji;
     button.querySelector('.count').textContent = count;
     return button;
@@ -1722,12 +1802,18 @@ class ChatApplication extends Application {
     const action = MESSAGE_ACTIONS[button?.dataset.action];
     const actionItem = action ? target.closest('[data-id]') : null;
     if (actionItem) return void action(this, actionItem.dataset.id, button);
-    if (target.closest('button, a, img, .attachments')) return;
+    if (target.closest('button, a, img, .attachments, .message-editor')) return;
     if (!window.getSelection().isCollapsed) return;
     const item = target.closest(`${ITEMS}, .call-card`);
     const id = item?.dataset.id ?? '';
+    if (this.picked) {
+      const isMessage = item?.classList.contains('message') ?? false;
+      if (isMessage) this.togglePick(id, event.shiftKey);
+      return;
+    }
     if (item?.classList.contains('post')) return void this.openArticle(id);
     const isMessage = item?.classList.contains('message');
+    if (isMessage && event.detail > 1) return;
     this.clickThread(isMessage ? id : '');
   }
 
@@ -1750,6 +1836,7 @@ class ChatApplication extends Application {
   }
 
   startPress(event) {
+    if (event.target.closest('.message-editor')) return;
     const item = event.target.closest(ITEMS);
     if (!item?.dataset.id) return;
     const canSwipe = item.classList.contains('message');
@@ -1757,6 +1844,7 @@ class ChatApplication extends Application {
   }
 
   handleContextMenu(event) {
+    if (event.target.closest('.message-editor')) return;
     const item = event.target.closest(ITEMS);
     if (!item?.dataset.id) return;
     if (this.menu.isLifted) return void event.preventDefault();
@@ -1767,19 +1855,22 @@ class ChatApplication extends Application {
     }
     const isTouch = this.pointerType === 'touch';
     const isLink = event.target.closest('a') !== null;
-    const hasSelection = window.getSelection().toString() !== '';
-    if (!isTouch && (isLink || hasSelection)) return;
+    const hasSelection = !window.getSelection().isCollapsed;
+    const fragment = fragmentOf(item.dataset.id);
+    if (!isTouch && !fragment && (isLink || hasSelection)) return;
     event.preventDefault();
     this.press.cancel();
     const point = { x: event.clientX, y: event.clientY };
-    this.openMenu(item, point, isTouch);
+    this.openMenu(item, point, isTouch, fragment);
   }
 
   toggleMenuAt(id, button) {
     if (this.menu.target === id) return void this.closeMenu();
-    const rect = button.getBoundingClientRect();
-    const point = { x: rect.left, y: rect.bottom };
-    this.openMenu(button.closest(ITEMS), point, false);
+    const item = button.closest(ITEMS);
+    const isShown = button.offsetParent !== null;
+    const rect = (isShown ? button : item).getBoundingClientRect();
+    const x = isShown ? rect.left : rect.left + MENU_INDENT_PX;
+    this.openMenu(item, { x, y: rect.bottom }, false);
   }
 
   openMenuFor(item) {
@@ -1789,8 +1880,10 @@ class ChatApplication extends Application {
     this.menu.focus();
   }
 
-  openMenu(item, point, isLifted) {
+  openMenu(item, point, isLifted, fragment = fragmentOf(item.dataset.id)) {
+    if (item.classList.contains('deleted')) return;
     const { id } = item.dataset;
+    this.menuFragment = fragment;
     const items = this.menuItems(item);
     const mine = this.mineOf(id);
     this.menuItem?.classList.remove('targeted');
@@ -1807,15 +1900,15 @@ class ChatApplication extends Application {
     const record = this.recordOf(id);
     const kind = kindOf(item);
     const items = [];
-    this.menuFragment = fragmentOf(id);
     if (kind === 'post') {
       items.push({ action: 'article', label: 'Open post' });
     } else {
       items.push({ action: 'reply', label: 'Reply' });
-      items.push({ action: 'reply-quote', label: 'Reply with quote' });
+      items.push({ action: 'reply-quote', label: 'Quote' });
     }
     if (kind === 'message') {
-      items.push({ action: 'selection', label: 'Select thread' });
+      items.push({ action: 'selection', label: 'Thread' });
+      items.push(...this.messageTools(record));
     }
     const pinLabel = record?.pinned ? 'Unpin' : 'Pin';
     items.push({ action: 'pin', label: pinLabel });
@@ -1825,7 +1918,29 @@ class ChatApplication extends Application {
       const label = `Download ${file.name}`;
       items.push({ action: 'download', label, file: file.id });
     }
+    for (const entry of items) {
+      const action = entry.action === 'reply' ? 'reply-hover' : entry.action;
+      const selector = `[data-action="${action}"]`;
+      const icon =
+        this.menuIcons.querySelector(selector) ??
+        this.messageTemplate.content.querySelector(
+          `.message-tools ${selector} svg`,
+        );
+      entry.glyph = icon?.cloneNode(true);
+    }
     return items;
+  }
+
+  messageTools(record) {
+    const isOwn = record?.author === this.peerId;
+    const tools = [
+      { action: 'share', label: 'Share' },
+      { action: 'forward', label: 'Forward' },
+      { action: 'edit', label: 'Edit', isOwn: true },
+      { action: 'delete', label: 'Delete', isOwn: true },
+      { action: 'pick', label: 'Select' },
+    ];
+    return tools.filter((tool) => isOwn || !tool.isOwn);
   }
 
   handleMenuClick(event) {
@@ -1833,7 +1948,7 @@ class ChatApplication extends Application {
     if (!button) return;
     const id = this.menu.target;
     const { action } = button.dataset;
-    const selectAfterPop = action === 'selection' && this.menu.isLifted;
+    const selectAfterPop = LAYER_ACTIONS.has(action) && this.menu.isLifted;
     const run = () => MESSAGE_ACTIONS[action](this, id, button);
     if (selectAfterPop && this.layers.at(-1) === 'menu') {
       window.addEventListener('popstate', run, { once: true });
@@ -1935,6 +2050,7 @@ class ChatApplication extends Application {
 
   hideSwitcher() {
     this.switcher.close();
+    this.forwarding = [];
     this.updateBackdrop();
   }
 
@@ -2020,7 +2136,8 @@ class ChatApplication extends Application {
 
   renderPins() {
     const records = Array.from(this.view.records.values());
-    const pinned = records.filter((record) => record.pinned === true);
+    const isPinned = (record) => record.pinned === true && !isDeleted(record);
+    const pinned = records.filter(isPinned);
     const messages = pinned.toSorted((a, b) => a.timestamp - b.timestamp);
     const items = messages.map((message) => this.createPinItem(message));
     if (items.length === 0) {
@@ -2215,6 +2332,7 @@ class ChatApplication extends Application {
   }
 
   selectThread(id, scroll = true) {
+    if (this.itemOf(id)?.matches('.chosen')) return void this.closeThread();
     const message = this.view?.records.get(id);
     const isMessage = message && !isPost(message);
     const root = isMessage ? threadRootOf(this.view, id, this.article) : '';
@@ -2271,34 +2389,39 @@ class ChatApplication extends Application {
     this.closeSearch();
     this.hideBack();
     const { selection, chatMessages: box } = this;
+    const top = box.getBoundingClientRect().top;
     const fromBottom = box.scrollHeight - box.scrollTop;
     const offset = selection?.offset ?? fromBottom;
     const moved = selection?.moved ?? false;
     this.selection = { root, chosen, offset, moved, cleared: false };
-    this.threadTarget = '';
     if (!selection && this.layers.at(-1) !== 'selection') {
       this.pushLayer('selection');
     }
     const limit = this.limit;
     if (!this.article) this.loadThrough(root);
-    if (this.limit !== limit) {
-      this.renderMessages(false);
-      box.scrollTop = box.scrollHeight - fromBottom;
-    } else {
-      this.renderSelection();
+    if (this.limit !== limit) this.renderMessages(false);
+    else this.renderSelection();
+    this.setQuote('');
+    const shift = box.getBoundingClientRect().top - top;
+    if (shift || this.limit !== limit) {
+      box.scrollTop = box.scrollHeight - fromBottom + shift;
     }
-    this.renderComposer();
   }
 
   leaveThread() {
     const { selection, chatMessages: box } = this;
     if (!selection) return;
+    const top = box.getBoundingClientRect().top;
+    const offset = box.scrollHeight - box.scrollTop;
     this.selection = null;
     this.threadTarget = '';
     this.hideBack();
     this.renderSelection();
     this.renderComposer();
-    if (selection.moved) box.scrollTop = box.scrollHeight - selection.offset;
+    const shift = box.getBoundingClientRect().top - top;
+    box.scrollTop = selection.moved
+      ? box.scrollHeight - selection.offset
+      : box.scrollHeight - offset + shift;
     this.updateJump();
   }
 
@@ -2332,6 +2455,7 @@ class ChatApplication extends Application {
       const isMember = members.has(id);
       const isDimmed = selection !== null && !isMember && !isArticle;
       item.classList.toggle('dim', isDimmed);
+      item.classList.toggle('inside', isMember);
       item.classList.toggle('chain', isMember && chain.has(id));
       item.classList.toggle('chosen', isMember && id === chosen);
     }
@@ -2385,6 +2509,7 @@ class ChatApplication extends Application {
     const root = id ? threadRootOf(this.view, id, this.article) : '';
     if (!root) return void this.closeThread();
     if (root !== this.selection?.root) return void this.enterThread(root, id);
+    if (this.itemOf(id)?.matches('.chosen')) return void this.closeThread();
     this.selection.chosen = id;
     this.selection.cleared = false;
     this.quotes.delete(this.chat);
@@ -2401,7 +2526,7 @@ class ChatApplication extends Application {
   }
 
   currentQuote() {
-    const id = this.targetId();
+    const id = this.quotes.get(this.chat);
     const fragment = this.fragments.get(this.chat);
     return id && this.view ? quoteOf(id, this.view, fragment) : null;
   }
@@ -2423,7 +2548,7 @@ class ChatApplication extends Application {
 
   startReply(id, fragment = '') {
     const record = this.recordOf(id);
-    if (!record) return;
+    if (!record || isDeleted(record)) return;
     const isCard = isPost(record) && id !== this.article;
     if (isCard) return void this.openArticle(id);
     const isPlain = id === this.article && !this.selection && !fragment;
@@ -2618,8 +2743,9 @@ class ChatApplication extends Application {
     if (isTopicOpen) return void this.closeDescription();
     const isSearchOpen = !this.searchBar.classList.contains('hidden');
     if (isSearchOpen) return void this.toggleSearch();
-    const hasTarget = this.quotes.has(this.chat) || this.threadTarget !== '';
-    if (hasTarget) return void this.setQuote('');
+    if (this.editing) return void this.cancelEdit();
+    if (this.picked) return void this.closePicking();
+    if (this.quotes.has(this.chat)) return void this.setQuote('');
     if (this.selection) return void this.closeThread();
     if (this.backTo) return void this.goBack();
     if (isItem(document.activeElement)) return void this.messageInput.focus();
@@ -2638,6 +2764,9 @@ class ChatApplication extends Application {
     this.divider = { chat: id, at };
     writeSetting(CHAT_KEY, id);
     this.closeSidebar();
+    this.dropPicking();
+    this.dropEdit();
+    this.linked = '';
     this.dropArticle();
     this.hideBack();
     this.closeMenu();
@@ -3046,15 +3175,10 @@ class ChatApplication extends Application {
     this.logger.log(`${verb} reaction:`, reaction, 'to message:', id);
   }
 
-  async copyText(id) {
+  copyText(id) {
     const record = this.recordOf(id);
     const parts = [record?.title, record?.content].filter(Boolean);
-    try {
-      await navigator.clipboard.writeText(parts.join('\n'));
-      this.showNotification('Copied to clipboard');
-    } catch (error) {
-      this.report(error);
-    }
+    this.writeClipboard(parts.join('\n'), 'Copied to clipboard');
   }
 
   downloadFile(id) {
@@ -3097,6 +3221,310 @@ class ChatApplication extends Application {
     const record = this.recordOf(id);
     if (!record) return;
     pin(this.replicaOf(this.chat), record, record.pinned !== true);
+  }
+
+  async writeClipboard(text, notice) {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.showNotification(notice);
+    } catch (error) {
+      this.report(error);
+    }
+  }
+
+  shareMessage(id) {
+    const url = messageUrl(this.chat, id);
+    this.writeClipboard(url, 'Link copied');
+  }
+
+  findRecord(id) {
+    const record = this.replica.get(id);
+    if (record) return { id, ...record };
+    for (const { replica } of this.directs.values()) {
+      const direct = replica.get(id);
+      if (direct) return { id, ...direct };
+    }
+    return null;
+  }
+
+  openOrigin(id) {
+    const original = this.recordOf(id)?.forwarded ?? '';
+    const record = original ? this.findRecord(original) : null;
+    const chat = record?.chat;
+    if (!chat || isDeleted(record)) {
+      const text = 'The original message is not available';
+      return void this.showNotification(text, 'warning');
+    }
+    this.openLink({ chat, message: original });
+  }
+
+  openLink({ chat, message }) {
+    const peer = this.peerOf(chat);
+    if (isPair(chat) && !peer) {
+      const text = 'This link points to a direct chat of other people';
+      return void this.showNotification(text, 'warning');
+    }
+    if (peer && chat !== this.chat) this.selectDirect(peer);
+    else if (chat !== this.chat) this.selectChat(chat);
+    this.linked = message;
+    this.revealLinked();
+  }
+
+  revealLinked() {
+    const id = this.linked;
+    if (!id || !this.view?.records.has(id)) return;
+    this.linked = '';
+    queueMicrotask(() => this.revealMessage(id));
+  }
+
+  ownRecords(ids) {
+    const records = [];
+    for (const id of ids) {
+      const record = this.recordOf(id);
+      const isOwn = record?.author === this.peerId;
+      const isMessage = isOwn && !isPost(record) && !isDeleted(record);
+      if (isMessage) records.push(record);
+    }
+    return records;
+  }
+
+  deleteMessages(ids) {
+    const records = this.ownRecords(ids);
+    if (records.length === 0) return false;
+    const count = plural(records.length, 'message', 'messages');
+    const question = records.length === 1 ? 'this message' : count;
+    if (!window.confirm(`Delete ${question}?`)) return false;
+    const replica = this.replicaOf(this.chat);
+    const deleted = Date.now();
+    const target = this.targetId();
+    for (const record of records) {
+      deleteMessage(replica, record, deleted);
+      if (record.id === this.editing) this.dropEdit();
+      if (record.id === target) this.setQuote('');
+    }
+    this.logger.log('Deleted:', count);
+    return true;
+  }
+
+  startEdit(id) {
+    const [record] = this.ownRecords([id]);
+    if (!record || !this.itemOf(id)) return;
+    const input = this.editInput;
+    if (this.editing === id) return void input.focus();
+    this.dropEdit();
+    this.editing = id;
+    input.value = record.content;
+    this.placeEditor();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  placeEditor() {
+    const row = this.itemOf(this.editing);
+    if (!row || row.classList.contains('deleted')) return void this.dropEdit();
+    this.editForm.closest('.message')?.classList.remove('editing');
+    row.classList.add('editing');
+    const line = row.querySelector('.line');
+    if (this.editForm.parentElement !== line) line.append(this.editForm);
+    resizeInput(this.editInput);
+  }
+
+  cancelEdit() {
+    const id = this.editing;
+    if (!id) return;
+    this.dropEdit();
+    this.selectById(id, false);
+  }
+
+  dropEdit() {
+    if (!this.editing) return;
+    this.editForm.closest('.message')?.classList.remove('editing');
+    this.editForm.remove();
+    this.editing = '';
+  }
+
+  saveEdit() {
+    const id = this.editing;
+    const [record] = this.ownRecords([id]);
+    if (!record) return void this.cancelEdit();
+    const content = this.editInput.value.trim();
+    const hasFiles = (this.view?.attachments.get(id) ?? []).length > 0;
+    if (content === '' && !hasFiles) {
+      const text = 'A message needs text or files, use Delete to remove it';
+      return void this.showNotification(text, 'warning');
+    }
+    this.cancelEdit();
+    if (content === record.content) return;
+    const replica = this.replicaOf(this.chat);
+    editMessage(replica, id, { content, edited: Date.now() });
+    this.logger.log('Edited message:', content);
+  }
+
+  forwardMessages(ids) {
+    const records = ids
+      .map((id) => this.recordOf(id))
+      .filter((record) => record && !isPost(record) && !isDeleted(record));
+    if (records.length === 0) return;
+    this.forwarding = records.map((record) => record.id);
+    const count = plural(records.length, 'message', 'messages');
+    const prompt = `Forward ${count} to`;
+    this.switcher.open(this.forwardEntries(), prompt);
+    this.updateBackdrop();
+    this.pushLayer('switcher');
+  }
+
+  forwardEntries() {
+    const isTarget = (entry) => entry.kind !== 'feed' && entry.id !== this.chat;
+    return this.switchEntries().filter(isTarget);
+  }
+
+  forwardTo(entry) {
+    const ids = this.forwarding;
+    const source = this.chat;
+    const attachments = this.view?.attachments ?? new Map();
+    this.closeLayer('switcher');
+    const chat = entry.peer ? pairOf(this.peerId, entry.peer) : entry.id;
+    const replica = this.replicaOf(chat);
+    for (const id of ids) {
+      const record = this.replicaOf(source).get(id);
+      if (!record || isDeleted(record)) continue;
+      const files = attachments.get(id) ?? [];
+      this.forwardOne(replica, chat, { id, ...record }, files);
+    }
+    const count = plural(ids.length, 'message', 'messages');
+    this.showNotification(`Forwarded ${count} to ${entry.label}`);
+    this.logger.log(`Forwarded ${count} to`, entry.label);
+  }
+
+  forwardOne(replica, chat, record, files) {
+    const id = generateUUID();
+    this.attachFiles(replica, chat, id, files);
+    const forwarded = record.forwarded ?? record.id;
+    const original = record.origin ?? '';
+    const origin = record.forwarded ? original : record.nick;
+    createMessage(replica, {
+      id,
+      chat,
+      author: this.peerId,
+      nick: this.username,
+      content: record.content,
+      timestamp: Date.now(),
+      forwarded,
+      origin,
+    });
+  }
+
+  startPicking(id) {
+    if (this.picked) return void this.togglePick(id);
+    const record = this.view?.records.get(id);
+    if (!record || isPost(record) || isDeleted(record)) return;
+    const isSelectionOnTop = this.layers.at(-1) === 'selection';
+    if (this.selection) {
+      this.dropThread(true);
+      this.renderSelection();
+      this.renderComposer();
+    }
+    if (isSelectionOnTop) this.layers[this.layers.length - 1] = 'picking';
+    else this.pushLayer('picking');
+    this.picked = new Set([id]);
+    this.pickAnchor = id;
+    this.renderPicked();
+  }
+
+  pickRange(from, to) {
+    const rows = Array.from(this.messageList.querySelectorAll('.message'));
+    const ids = rows.map((row) => row.dataset.id);
+    const start = ids.indexOf(from);
+    const end = ids.indexOf(to);
+    if (start < 0 || end < 0) return [to];
+    const range = ids.slice(Math.min(start, end), Math.max(start, end) + 1);
+    return range.filter((id) => !isDeleted(this.view.records.get(id) ?? {}));
+  }
+
+  togglePick(id, isRange = false) {
+    const record = this.view?.records.get(id);
+    if (!this.picked || !record || isDeleted(record)) return;
+    if (isRange && this.pickAnchor) {
+      for (const each of this.pickRange(this.pickAnchor, id)) {
+        this.picked.add(each);
+      }
+    } else if (this.picked.has(id)) {
+      this.picked.delete(id);
+    } else {
+      this.picked.add(id);
+    }
+    this.pickAnchor = id;
+    if (this.picked.size === 0) return void this.closePicking();
+    this.renderPicked();
+  }
+
+  pickedIds() {
+    const picked = this.picked;
+    if (!picked || !this.view) return [];
+    const isPicked = (record) => picked.has(record.id) && !isDeleted(record);
+    return this.view.shown.filter(isPicked).map((record) => record.id);
+  }
+
+  renderPicked() {
+    const { picked } = this;
+    this.messageList.classList.toggle('picking', picked !== null);
+    this.pickBar.classList.toggle('hidden', picked === null);
+    if (!picked) {
+      for (const row of this.messageList.querySelectorAll('.picked')) {
+        row.classList.remove('picked');
+      }
+      return;
+    }
+    const ids = this.pickedIds();
+    const shown = new Set(ids);
+    for (const row of this.messageList.querySelectorAll('.message')) {
+      row.classList.toggle('picked', shown.has(row.dataset.id));
+    }
+    this.pickCount.textContent = `${ids.length} selected`;
+    const isOwn = this.ownRecords(ids).length === ids.length;
+    this.pickDelete.disabled = ids.length === 0 || !isOwn;
+    this.pickCopy.disabled = ids.length === 0;
+    this.pickForward.disabled = ids.length === 0;
+  }
+
+  leavePicking() {
+    if (!this.picked) return;
+    this.picked = null;
+    this.pickAnchor = '';
+    this.renderPicked();
+  }
+
+  closePicking() {
+    if (this.picked) this.closeLayer('picking');
+  }
+
+  dropPicking() {
+    if (!this.picked) return;
+    this.leavePicking();
+    this.popLayer('picking');
+  }
+
+  afterPop(run) {
+    if (this.pops === 0) return void run();
+    window.addEventListener('popstate', () => run(), { once: true });
+  }
+
+  copyPicked() {
+    const lines = this.pickedIds().map((id) => pickLine(this.recordOf(id)));
+    const count = plural(lines.length, 'message', 'messages');
+    this.closePicking();
+    this.writeClipboard(lines.join('\n'), `Copied ${count}`);
+  }
+
+  forwardPicked() {
+    const ids = this.pickedIds();
+    this.closePicking();
+    this.afterPop(() => this.forwardMessages(ids));
+  }
+
+  deletePicked() {
+    const isDone = this.deleteMessages(this.pickedIds());
+    if (isDone) this.closePicking();
   }
 
   showLinks() {
@@ -3183,7 +3611,7 @@ class ChatApplication extends Application {
     );
     const isBusy = this.lightbox.isOpen || this.menu.isOpen;
     const isFree = !hasFiles && !isBusy && !this.switcher.isOpen;
-    return isFree && super.canRestart();
+    return isFree && !this.editing && super.canRestart();
   }
 
   clearDatabase() {

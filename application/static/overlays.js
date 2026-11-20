@@ -31,11 +31,12 @@ const markMine = (buttons, mine) => {
   }
 };
 
-const createMenuItem = ({ action, label, file }) => {
+const createMenuItem = ({ action, label, file, glyph }) => {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'menu-item';
   button.textContent = label;
+  if (glyph) button.prepend(glyph);
   button.dataset.action = action;
   if (file) button.dataset.file = file;
   return button;
@@ -322,10 +323,12 @@ class Switcher {
   #matches = [];
   #index = 0;
   #onSelect = null;
+  #placeholder = '';
 
   constructor(element, onSelect) {
     this.#element = element;
     this.#input = element.querySelector('input');
+    this.#placeholder = this.#input.placeholder;
     this.#list = element.querySelector('ul');
     this.#onSelect = onSelect;
     this.#input.addEventListener('input', () => this.#render());
@@ -344,9 +347,10 @@ class Switcher {
     return !this.#element.classList.contains('hidden');
   }
 
-  open(entries) {
+  open(entries, placeholder = this.#placeholder) {
     this.#entries = entries;
     this.#input.value = '';
+    this.#input.placeholder = placeholder;
     this.#element.classList.remove('hidden');
     this.#render();
     this.#input.focus();

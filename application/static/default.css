@@ -629,16 +629,19 @@ svg {
 .call-card {
   display: flex;
   align-items: center;
+  align-self: flex-start;
   gap: 8px;
-  margin-top: 6px;
-  padding: 6px 8px;
-  border-radius: 4px;
+  max-width: calc(100% - 12px);
+  margin: 6px 0 0 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
   background: var(--button);
   color: var(--light);
 }
 
 .call-card .link-btn {
-  margin-left: auto;
+  margin-right: -6px;
+  border-radius: 10px;
 }
 
 .recording-card {
@@ -649,9 +652,9 @@ svg {
 .message {
   position: relative;
   display: grid;
-  grid-template-columns: 60px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  padding: 3px 4px;
+  padding: 3px 8px 3px 12px;
   border-radius: 4px;
 }
 
@@ -660,7 +663,8 @@ svg {
   cursor: pointer;
 }
 
-.selection-bar {
+.selection-bar,
+.pick-bar {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -670,27 +674,26 @@ svg {
   font-size: 11px;
 }
 
-.selection-bar .selection-close {
+.selection-bar .selection-close,
+.pick-bar .pick-close {
   margin-left: auto;
 }
 
-.reply-bar.in-thread .reply-text::before {
-  content: '«';
+.pick-count {
+  min-width: 72px;
+  color: var(--light);
 }
 
-.reply-bar.in-thread .reply-text::after {
-  content: '»';
+.picking .message {
+  cursor: pointer;
 }
 
-.replies .initials {
-  color: var(--muted);
-  font-size: 11px;
+.picking .message.picked {
+  background: var(--mine);
 }
 
-@media (max-width: 640px) {
-  .replies .initials {
-    display: none;
-  }
+.picking .message-tools {
+  display: none;
 }
 
 .message:not(.continued, .thread-continued) {
@@ -715,83 +718,155 @@ svg {
 .message.threaded {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  box-shadow: inset 3px 0 0 var(--thread);
-}
-
-.selecting .message.chain {
-  background: var(--button);
   box-shadow: inset 6px 0 0 var(--thread);
 }
 
-.selecting .message.chosen {
-  background: var(--button-hover);
+.selecting .message.threaded.dim {
+  box-shadow: inset 6px 0 0 color-mix(in srgb, var(--thread) 45%, var(--bg));
 }
 
-.more {
+.selecting .message.inside {
+  background: color-mix(in srgb, var(--thread) 10%, transparent);
+}
+
+.selecting .message.chain {
+  background: color-mix(in srgb, var(--thread) 20%, transparent);
+}
+
+.selecting .message.chosen {
+  background: color-mix(in srgb, var(--thread) 30%, transparent);
+}
+
+.post > .more,
+.post-article > .more {
   position: absolute;
   top: 2px;
-  left: 2px;
+  right: 6px;
   width: 20px;
   height: 20px;
   border-radius: 4px;
   color: var(--muted);
   line-height: 18px;
   visibility: hidden;
-}
-
-.post > .more,
-.post-article > .more {
-  right: 6px;
-  left: auto;
 }
 
 .post > .more {
   top: 6px;
 }
 
-.message:hover > .more,
-.message:hover > .reply-btn,
-.message.targeted > .reply-btn,
 .post:hover > .more,
 .post-article:hover > .more,
 .targeted > .more {
   visibility: visible;
 }
 
-.reply-btn {
+.more:hover,
+.tool:hover {
+  background: var(--button-hover);
+  color: var(--text);
+}
+
+.message-tools {
   position: absolute;
-  top: 2px;
-  left: 24px;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  color: var(--muted);
-  line-height: 18px;
+  top: 1px;
+  right: 6px;
+  z-index: 1;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
   visibility: hidden;
 }
 
-.reply-btn:hover {
-  background: var(--button-hover);
-  color: var(--text);
+.tool {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--muted);
 }
 
-.more:hover {
-  background: var(--button-hover);
-  color: var(--text);
+.tool svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tool svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.message:not(.own) .tool.own,
+.message.deleted > .message-tools {
+  display: none;
+}
+
+@media (hover: hover) {
+  .message:hover > .message-tools,
+  .message.targeted > .message-tools {
+    visibility: visible;
+  }
+
+  .message:not(.deleted):hover > .time,
+  .message.targeted > .time {
+    visibility: hidden;
+  }
+
+  .picking .message:hover > .time {
+    visibility: visible;
+  }
 }
 
 .message .time {
+  align-self: start;
+  padding-top: 1px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.message.continued .time,
+.picking .message.continued:hover .time {
+  visibility: hidden;
+}
+
+.line .note {
+  flex: none;
+  align-self: flex-end;
+  color: var(--placeholder);
+  font-size: 11px;
+}
+
+.line .note:empty {
+  display: none;
+}
+
+.message.deleted .note {
+  align-self: auto;
+  color: var(--muted);
+  font-size: inherit;
+  font-style: italic;
+}
+
+.forwarded {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
   color: var(--muted);
   font-size: 11px;
 }
 
-.message.continued .time {
-  visibility: hidden;
-  font-size: 10px;
+.forwarded svg {
+  width: 12px;
+  height: 12px;
 }
 
-.message.continued:hover .time {
-  visibility: visible;
+.forwarded:hover {
+  color: var(--text);
 }
 
 .message.continued .author {
@@ -818,6 +893,31 @@ svg {
 
 .line .content:empty {
   display: none;
+}
+
+.message.editing .line > :is(.content, .note) {
+  display: none;
+}
+
+.message-editor {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-editor textarea {
+  display: block;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  resize: none;
+  overflow-y: auto;
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .author {
@@ -853,15 +953,21 @@ svg {
   min-width: 0;
   max-width: 100%;
   padding: 1px 8px;
-  border-radius: 0 4px 4px 0;
+  border-radius: 4px;
   background: var(--button);
-  box-shadow: inset 3px 0 0 var(--link);
   font-size: 11px;
   text-align: left;
 }
 
 .quote {
   align-self: flex-start;
+}
+
+.quote-mark {
+  flex: none;
+  color: var(--link);
+  font-family: Georgia, serif;
+  font-size: 22px;
 }
 
 .quote:hover,
@@ -923,6 +1029,29 @@ svg {
 
 .reaction.mine .count {
   color: var(--text);
+}
+
+.reaction.none {
+  display: none;
+  background: color-mix(in srgb, var(--button) 50%, transparent);
+}
+
+@media (hover: hover) {
+  :is(.message, .post, .post-article):hover:not(.lift) .reaction.none {
+    display: inline-flex;
+  }
+}
+
+.reaction.none:not(:hover, :focus-visible) .emoji {
+  opacity: 0.65;
+}
+
+.reaction.none:not(:hover, :focus-visible) .count {
+  color: var(--placeholder);
+}
+
+.reaction.none:is(:hover, :focus-visible) {
+  background: var(--button-hover);
 }
 
 .attachments {
@@ -1541,7 +1670,7 @@ svg {
   z-index: 25;
   display: flex;
   flex-direction: column;
-  min-width: 220px;
+  min-width: min(268px, calc(100vw - 16px));
   max-width: calc(100vw - 16px);
   padding: 4px;
   border-radius: 8px;
@@ -1566,12 +1695,25 @@ svg {
   font-size: 16px;
 }
 
+.menu > .menu-reactions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.menu > .menu-reactions button {
+  padding-inline: 0;
+}
+
 .menu-items {
   display: flex;
   flex-direction: column;
 }
 
 .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 4px 10px;
   border-radius: 4px;
   overflow: hidden;
@@ -1579,6 +1721,12 @@ svg {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.menu-item svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
 }
 
 .menu.lifted {
@@ -1595,6 +1743,7 @@ svg {
 
 .menu.lifted .menu-reactions {
   flex: none;
+  align-self: stretch;
   margin: 0;
   padding: 4px;
   border-radius: 24px;
@@ -1603,9 +1752,9 @@ svg {
 }
 
 .menu.lifted .menu-reactions button {
-  padding: 6px 8px;
+  padding: 6px 0;
   border-radius: 18px;
-  font-size: 24px;
+  font-size: clamp(16px, 5.75vw, 24px);
 }
 
 .lift {
@@ -1846,13 +1995,6 @@ svg {
   gap: 6px;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .message {
-    grid-template-columns: 44px minmax(0, 1fr);
-    padding-left: 24px;
-  }
-}
-
 @media (hover: none) {
   .remove-btn,
   .folder-actions {
@@ -1860,7 +2002,7 @@ svg {
   }
 
   .more,
-  .reply-btn {
+  .message-tools {
     display: none;
   }
 
@@ -1927,7 +2069,8 @@ svg {
     padding: 8px;
   }
 
-  .composer textarea {
+  .composer textarea,
+  .message-editor textarea {
     font-size: 16px;
   }
 }
@@ -1984,10 +2127,6 @@ svg {
   .actions {
     flex-basis: 100%;
     justify-content: space-between;
-  }
-
-  .message {
-    grid-template-columns: 44px minmax(0, 1fr);
   }
 
   .lightbox-stage {
