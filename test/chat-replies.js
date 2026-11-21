@@ -822,6 +822,32 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     assert.equal((await target(bob))[1], 'alpha beta gamma');
     await sendReply(bob, 'plain menu reply');
     await quoteIn(bob, 'plain menu reply', '');
+    await run(
+      bob,
+      `const box = app.chatMessages;
+      const QUIET_MS = 500;
+      let changedAt = performance.now();
+      let top = box.scrollTop;
+      const observer = new MutationObserver(() => {
+        changedAt = performance.now();
+      });
+      observer.observe(app.messageList, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      await new Promise((resolve) => {
+        const tick = () => {
+          if (box.scrollTop !== top) changedAt = performance.now();
+          top = box.scrollTop;
+          if (performance.now() - changedAt > QUIET_MS) resolve();
+          else requestAnimationFrame(tick);
+        };
+        tick();
+      });
+      observer.disconnect();
+      return true;`,
+    );
     const point = await run(
       bob,
       `${row}.scrollIntoView({ block: 'center' });
