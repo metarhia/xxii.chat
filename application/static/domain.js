@@ -21,8 +21,10 @@ import { readBlob, onFileStored } from './files.js';
 import { timeOf, dateOf, dayKey, dayOf, dayLabel, plural } from './view.js';
 import { formatSize, fitSize, readSetting, writeSetting } from './view.js';
 import { readMap, writeMap, cloneTemplate, setBadge } from './view.js';
-import { fillText, parseBlocks, excerptOf, isEditable } from './view.js';
-import { isReducedMotion } from './view.js';
+import { isEditable, isReducedMotion } from './view.js';
+import { parseMarkdown, plainOf, plainInline } from './markdown.js';
+import { hasOpenFence } from './markdown.js';
+import { renderMarkdown, renderBlock, formatKey } from './markdown-view.js';
 import { CallPreferences } from './call-preferences.js';
 import { isIceUrl, readIce, writeIce, buildIce } from './ice.js';
 import { Press, Menu, Lightbox, Switcher } from './overlays.js';
@@ -303,10 +305,12 @@ const createHeadingLink = (index, text) => {
   return button;
 };
 
+const CONTROLS = 'button, a, input, .message-editor';
+
 const replyTargetOf = (event) => {
   const item = event.target.closest('.message');
   if (!item?.dataset.id) return null;
-  const isControl = event.target.closest('button, a, .message-editor') !== null;
+  const isControl = event.target.closest(CONTROLS) !== null;
   return isControl ? null : item;
 };
 
@@ -316,7 +320,7 @@ const quoteOf = (id, view, fragment = '') => {
   if (!parent) return { id, nick: '', text: 'message is not loaded yet' };
   const files = view.attachments.get(id) ?? [];
   const names = files.map((file) => file.name).join(', ');
-  const line = (parent.title ?? parent.content).split('\n')[0];
+  const line = (parent.title ?? plainOf(parent.content)).split('\n')[0];
   const text = line || (names ? `📎 ${names}` : '');
   return { id, nick: parent.nick, text };
 };
@@ -727,6 +731,9 @@ class ChatApplication extends Application {
       input.addEventListener('keydown', (event) => {
         const isEnter = event.key === 'Enter' && !event.isComposing;
         if (!isEnter || !isSendKey(event)) return;
+        const isCommand = event.ctrlKey || event.metaKey;
+        const before = input.value.slice(0, input.selectionStart);
+        if (!isCommand && hasOpenFence(before)) return;
         event.preventDefault();
         action();
       });
@@ -778,6 +785,9 @@ class ChatApplication extends Application {
       (event) => !event.shiftKey,
       () => this.saveEdit(),
     );
+    for (const input of [this.messageInput, this.editInput]) {
+      input.addEventListener('keydown', (event) => formatKey(event, input));
+    }
     this.loadMoreBtn.onclick = () => this.loadOlder();
     this.jumpBtn.onclick = () => this.jumpToLatest();
     this.backPill.onclick = () => this.goBack();
@@ -1612,7 +1622,7 @@ class ChatApplication extends Application {
     element.classList.toggle('thread-continued', isThreadContinued);
     fillTime(element, message);
     element.querySelector('.author').textContent = message.nick;
-    fillText(element.querySelector('.content'), message.content);
+    renderMarkdown(element.querySelector('.content'), message.content);
     element.querySelector('.note').textContent = noteOf(message);
     const origin = originOf(message);
     const forwarded = element.querySelector('.forwarded');
@@ -1633,7 +1643,7 @@ class ChatApplication extends Application {
   createPostCard(post, details) {
     const element = cloneTemplate(this.postTemplate, '.post');
     fillPostHeader(element, post);
-    element.querySelector('.excerpt').textContent = excerptOf(post.content);
+    element.querySelector('.excerpt').textContent = plainOf(post.content);
     this.fillFiles(element.querySelector('.attachments'), details.files);
     const count = plural(details.replyCount, 'reply', 'replies');
     element.querySelector('.replies .count').textContent = count;
@@ -1644,19 +1654,18 @@ class ChatApplication extends Application {
   createArticle(post, details) {
     const element = cloneTemplate(this.articleTemplate, '.post-article');
     fillPostHeader(element, post);
-    const blocks = parseBlocks(post.content);
-    const nodes = [];
+    const blocks = parseMarkdown(post.content);
+    const nodes = blocks.map(renderBlock);
     const links = [];
     for (let i = 0; i < blocks.length; i++) {
-      const { isHeading, text } = blocks[i];
-      const node = document.createElement(isHeading ? 'h4' : 'p');
-      fillText(node, text.trim());
-      nodes.push(node);
-      if (!isHeading) continue;
-      node.dataset.heading = i;
-      links.push(createHeadingLink(i, text));
+      const { type, level, children } = blocks[i];
+      if (type !== 'heading' || level > 3) continue;
+      nodes[i].dataset.heading = i;
+      links.push(createHeadingLink(i, plainInline(children)));
     }
-    element.querySelector('.post-text').replaceChildren(...nodes);
+    const text = element.querySelector('.post-text');
+    text.classList.add('md');
+    text.replaceChildren(...nodes);
     const outline = element.querySelector('.outline');
     outline.replaceChildren(...links);
     outline.classList.toggle('hidden', links.length < 2);
@@ -1816,7 +1825,7 @@ class ChatApplication extends Application {
     const action = MESSAGE_ACTIONS[button?.dataset.action];
     const actionItem = action ? target.closest('[data-id]') : null;
     if (actionItem) return void action(this, actionItem.dataset.id, button);
-    if (target.closest('button, a, img, .attachments, .message-editor')) return;
+    if (target.closest(`${CONTROLS}, img, .attachments`)) return;
     if (!window.getSelection().isCollapsed) return;
     const item = target.closest(`${ITEMS}, .call-card`);
     const id = item?.dataset.id ?? '';
@@ -1966,7 +1975,10 @@ class ChatApplication extends Application {
 
   toggleStudioComment(id) {
     const record = this.recordOf(id);
-    this.commentStudio(record)?.toggleComment(record);
+    const studio = this.commentStudio(record);
+    if (!studio) return;
+    const content = plainOf(record.content);
+    studio.toggleComment({ id: record.id, nick: record.nick, content });
   }
 
   messageTools(record) {
@@ -2167,7 +2179,7 @@ class ChatApplication extends Application {
   }
 
   scrollToHeading(index) {
-    const selector = `h4[data-heading="${index}"]`;
+    const selector = `[data-heading="${index}"]`;
     const heading = this.messageList.querySelector(selector);
     const behavior = scrollBehavior();
     heading?.scrollIntoView({ block: 'start', behavior });
@@ -2193,7 +2205,7 @@ class ChatApplication extends Application {
     const time = timeOf(message.timestamp);
     element.dataset.id = message.id;
     element.querySelector('.who').textContent = `${message.nick} at ${time}:`;
-    const text = message.title ?? message.content;
+    const text = message.title ?? plainOf(message.content);
     element.querySelector('.text').textContent = text || '📎 files';
     return element;
   }
@@ -2658,7 +2670,7 @@ class ChatApplication extends Application {
   }
 
   startQuotedReply(id) {
-    const text = this.recordOf(id)?.content ?? '';
+    const text = plainOf(this.recordOf(id)?.content ?? '');
     const line = text.replace(/\s+/g, ' ').trim();
     const prefix = line.slice(0, QUOTE_LENGTH).trim();
     this.startReply(id, this.menuFragment || prefix);

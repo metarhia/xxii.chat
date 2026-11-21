@@ -95,6 +95,10 @@ sync. Terminal-like UI follows the
   their active reactions. Hover over a message with reactions to see all nine
   options (👍 ❤️ 😂 😮 😢 🔥 🤔 💯 👎). Open the message menu to add the first
   reaction or to choose any reaction on a touch screen.
+- Markdown: messages and posts render headings, emphasis, lists, task
+  lists, quotes, tables, links, and fenced code with syntax highlighting.
+  The composer, the editor, and `Copy text` keep the raw text, and images
+  never load
 - Call records in the chat are compact cards: the host nick, duration, and
   people, or a live call with a join button
 - Replies to me: `↩ N` next to the unread count in the chat header and the

@@ -1,6 +1,5 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SIZE_UNITS = ['B', 'KB', 'MB'];
-const HEADING = /^#{1,3}\s+(.+)$/;
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>"']+/g;
 const URL_TAIL = /[.,;:!?)\]]+$/;
 const DATE_OPTIONS = { weekday: 'long', month: 'long', day: 'numeric' };
@@ -119,23 +118,6 @@ const fillText = (element, text) => {
   element.replaceChildren(...nodes);
 };
 
-const parseBlocks = (content = '') => {
-  const blocks = [];
-  for (const line of content.split('\n')) {
-    const heading = line.match(HEADING);
-    const last = blocks.at(-1);
-    if (heading) blocks.push({ isHeading: true, text: heading[1].trim() });
-    else if (last && !last.isHeading) last.text += `\n${line}`;
-    else blocks.push({ isHeading: false, text: line });
-  }
-  return blocks.filter((block) => block.text.trim() !== '');
-};
-
-const excerptOf = (content) => {
-  const blocks = parseBlocks(content);
-  return blocks.map((block) => block.text.trim()).join(' ');
-};
-
 const isEditable = (element) => {
   if (!element) return false;
   const isField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName);
@@ -146,5 +128,5 @@ const isReducedMotion = () => matchMedia(REDUCED_MOTION).matches;
 
 export { timeOf, dateOf, dayKey, dayOf, dayLabel, plural };
 export { formatSize, fitSize, readSetting, writeSetting, readMap, writeMap };
-export { cloneTemplate, setBadge, fillText, parseBlocks, excerptOf };
+export { cloneTemplate, setBadge, fillText };
 export { isEditable, isReducedMotion };
