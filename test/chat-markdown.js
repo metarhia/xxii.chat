@@ -13,10 +13,14 @@ const DESKTOP = { width: 1200, height: 800 };
 const PHONE = { width: 390, height: 800 };
 const CODE = 'const x = 1; // note';
 const WIDE_CODE = `const wide = '${'w'.repeat(220)}';`;
+const WIDE_CELLS = Array.from({ length: 8 }, () => 'x'.repeat(24));
+const WIDE_ROW = `| ${WIDE_CELLS.join(' | ')} |`;
+
 const WIDE_TABLE = [
   `| ${Array.from({ length: 8 }, (_, i) => `column${i}`).join(' | ')} |`,
   `|${'---|'.repeat(8)}`,
-  `| ${Array.from({ length: 8 }, () => 'x'.repeat(24)).join(' | ')} |`,
+  WIDE_ROW,
+  WIDE_ROW,
 ].join('\n');
 
 const RICH = [
@@ -503,6 +507,7 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
       `const row = ${rowOf(id)};
       row.scrollIntoView({ block: 'center' });
       const pre = row.querySelector('pre');
+      const block = row.querySelector('.code-block');
       const table = row.querySelector('.md-table');
       const root = document.documentElement;
       return {
@@ -514,6 +519,15 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
         tableOverflow: getComputedStyle(table).overflowX,
         preFits: pre.getBoundingClientRect().right <= window.innerWidth,
         tableFits: table.getBoundingClientRect().right <= window.innerWidth,
+        codeBorder: getComputedStyle(block).borderWidth,
+        cellBorders: [...table.querySelectorAll('th, td')].map(
+          (cell) => getComputedStyle(cell).borderWidth,
+        ),
+        codeBg: getComputedStyle(block).backgroundColor,
+        rowBg: getComputedStyle(row).backgroundColor,
+        cellBgs: [...table.querySelectorAll('th, td')].map(
+          (cell) => getComputedStyle(cell).backgroundColor,
+        ),
       };`,
     );
     await resize(bob, DESKTOP);
@@ -525,6 +539,12 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
     assert.equal(found.tableOverflow, 'auto');
     assert.equal(found.preFits, true);
     assert.equal(found.tableFits, true);
+    assert.equal(found.codeBorder, '0px');
+    assert.ok(found.cellBorders.length > 0);
+    for (const width of found.cellBorders) assert.equal(width, '0px');
+    assert.notEqual(found.codeBg, found.rowBg);
+    assert.notEqual(found.codeBg, 'rgba(0, 0, 0, 0)');
+    assert.ok(new Set(found.cellBgs).size >= 3);
   });
 
   await t.test('colors are defined for both palettes', async () => {
