@@ -1479,15 +1479,16 @@ svg {
 }
 
 .recordings-list {
-  gap: 0;
+  gap: 6px;
 }
 
 .recording-item {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 8px 0;
-  border-top: 1px solid var(--raised);
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--raised);
 }
 
 .recording-item img {
@@ -2329,13 +2330,16 @@ svg {
 
 .studio-options {
   min-inline-size: 0;
-  border: 1px solid var(--raised);
+  border: 0;
   border-radius: 6px;
   padding: 8px;
+  background: var(--raised);
 }
 
 .studio-options legend {
-  padding-inline: 4px;
+  float: left;
+  width: 100%;
+  padding: 0;
   color: var(--muted);
   font-size: 12px;
 }

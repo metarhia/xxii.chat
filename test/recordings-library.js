@@ -86,6 +86,13 @@ test(
       const isVisible = panel?.getClientRects().length > 0;
       return isVisible && details.includes('Recording');
     `);
+    const card = await run(`
+      const row = document.querySelector('${LIBRARY}');
+      const style = getComputedStyle(row);
+      return { border: style.borderWidth, background: style.backgroundColor };
+    `);
+    assert.equal(card.border, '0px');
+    assert.notEqual(card.background, 'rgba(0, 0, 0, 0)');
     const activeButtons = await run(`
       const row = document.querySelector('${LIBRARY}');
       const actions = row.querySelector('.recording-actions');
