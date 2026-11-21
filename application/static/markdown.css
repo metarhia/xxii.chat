@@ -1,7 +1,7 @@
 :root {
   --md-code-bg: rgba(255, 255, 255, 0.07);
   --md-block-bg: rgba(255, 255, 255, 0.1);
-  --md-border: rgba(255, 255, 255, 0.16);
+  --md-rule: rgba(255, 255, 255, 0.2);
   --md-quote: rgba(16, 185, 129, 0.5);
   --md-head-bg: rgba(255, 255, 255, 0.08);
   --md-th-bg: rgba(255, 255, 255, 0.18);
@@ -30,7 +30,7 @@
 :root[data-theme='light'] {
   --md-code-bg: rgba(0, 0, 0, 0.07);
   --md-block-bg: rgba(0, 0, 0, 0.09);
-  --md-border: rgba(0, 0, 0, 0.18);
+  --md-rule: rgba(0, 0, 0, 0.22);
   --md-quote: rgba(4, 120, 87, 0.6);
   --md-head-bg: rgba(0, 0, 0, 0.07);
   --md-th-bg: rgba(0, 0, 0, 0.16);
@@ -150,9 +150,10 @@
 }
 
 .md hr {
-  height: 0;
+  height: 3px;
   border: 0;
-  border-top: 1px solid var(--md-border);
+  border-radius: 2px;
+  background: var(--md-rule);
 }
 
 .md-table {

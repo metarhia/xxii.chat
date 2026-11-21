@@ -407,6 +407,28 @@ test(
     await change(page, '.call-record [data-record=quality]', '720p30');
     await openStudio(page);
     await wait(chosen('live'));
+    const groups = await run(`
+      return [...document.querySelectorAll('.studio-options')]
+        .filter((group) => group.getClientRects().length > 0)
+        .map((group) => {
+          const box = group.getBoundingClientRect();
+          const legend = group.querySelector('legend').getBoundingClientRect();
+          const style = getComputedStyle(group);
+          return {
+            border: style.borderWidth,
+            background: style.backgroundColor,
+            isInside: legend.top >= box.top && legend.bottom <= box.bottom,
+            isIndented: legend.left >= box.left,
+          };
+        });
+    `);
+    assert.ok(groups.length >= 2);
+    for (const group of groups) {
+      assert.equal(group.border, '0px');
+      assert.notEqual(group.background, 'rgba(0, 0, 0, 0)');
+      assert.equal(group.isInside, true);
+      assert.equal(group.isIndented, true);
+    }
     await edit(page, 'break', { name: 'Warm', color: FIRST });
     await edit(page, 'ending', { name: 'Cool', color: SECOND });
     await change(page, field('transition'), 'cut');

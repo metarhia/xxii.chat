@@ -498,7 +498,7 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
       }
       return true;`,
     );
-    const source = `${WIDE_TABLE}\n\n\`\`\`js\n${WIDE_CODE}\n\`\`\``;
+    const source = `${WIDE_TABLE}\n\n---\n\n\`\`\`js\n${WIDE_CODE}\n\`\`\``;
     await write(ada, 'ada', source);
     const id = await waitMessage(bob, source);
     await resize(bob, PHONE);
@@ -508,6 +508,7 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
       row.scrollIntoView({ block: 'center' });
       const pre = row.querySelector('pre');
       const block = row.querySelector('.code-block');
+      const rule = row.querySelector('hr');
       const table = row.querySelector('.md-table');
       const root = document.documentElement;
       return {
@@ -519,6 +520,9 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
         tableOverflow: getComputedStyle(table).overflowX,
         preFits: pre.getBoundingClientRect().right <= window.innerWidth,
         tableFits: table.getBoundingClientRect().right <= window.innerWidth,
+        ruleBorder: getComputedStyle(rule).borderWidth,
+        ruleHeight: getComputedStyle(rule).height,
+        ruleBg: getComputedStyle(rule).backgroundColor,
         codeBorder: getComputedStyle(block).borderWidth,
         cellBorders: [...table.querySelectorAll('th, td')].map(
           (cell) => getComputedStyle(cell).borderWidth,
@@ -539,6 +543,9 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
     assert.equal(found.tableOverflow, 'auto');
     assert.equal(found.preFits, true);
     assert.equal(found.tableFits, true);
+    assert.equal(found.ruleBorder, '0px');
+    assert.equal(found.ruleHeight, '3px');
+    assert.notEqual(found.ruleBg, 'rgba(0, 0, 0, 0)');
     assert.equal(found.codeBorder, '0px');
     assert.ok(found.cellBorders.length > 0);
     for (const width of found.cellBorders) assert.equal(width, '0px');
