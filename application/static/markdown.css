@@ -1,9 +1,12 @@
 :root {
   --md-code-bg: rgba(255, 255, 255, 0.07);
-  --md-block-bg: rgba(255, 255, 255, 0.04);
+  --md-block-bg: rgba(255, 255, 255, 0.1);
   --md-border: rgba(255, 255, 255, 0.16);
   --md-quote: rgba(16, 185, 129, 0.5);
-  --md-head-bg: rgba(255, 255, 255, 0.06);
+  --md-head-bg: rgba(255, 255, 255, 0.08);
+  --md-th-bg: rgba(255, 255, 255, 0.18);
+  --md-cell-odd: rgba(255, 255, 255, 0.09);
+  --md-cell-even: rgba(255, 255, 255, 0.04);
   --tok-keyword: #ff8fa3;
   --tok-string: #a5d6a7;
   --tok-number: #ffb86b;
@@ -26,10 +29,13 @@
 
 :root[data-theme='light'] {
   --md-code-bg: rgba(0, 0, 0, 0.07);
-  --md-block-bg: rgba(0, 0, 0, 0.04);
+  --md-block-bg: rgba(0, 0, 0, 0.09);
   --md-border: rgba(0, 0, 0, 0.18);
   --md-quote: rgba(4, 120, 87, 0.6);
-  --md-head-bg: rgba(0, 0, 0, 0.06);
+  --md-head-bg: rgba(0, 0, 0, 0.07);
+  --md-th-bg: rgba(0, 0, 0, 0.16);
+  --md-cell-odd: rgba(0, 0, 0, 0.08);
+  --md-cell-even: rgba(0, 0, 0, 0.035);
   --tok-keyword: #b3124f;
   --tok-string: #1f6f2b;
   --tok-number: #a14a00;
@@ -155,21 +161,28 @@
 }
 
 .md-table table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 2px;
 }
 
 .md-table th,
 .md-table td {
   padding: 3px 8px;
-  border: 1px solid var(--md-border);
+  border: 0;
+  border-radius: 3px;
+  background: var(--md-cell-odd);
   text-align: left;
   vertical-align: top;
   overflow-wrap: normal;
   word-break: normal;
 }
 
+.md-table tbody tr:nth-child(even) td {
+  background: var(--md-cell-even);
+}
+
 .md-table th {
-  background: var(--md-head-bg);
+  background: var(--md-th-bg);
   font-weight: 600;
 }
 
@@ -194,7 +207,7 @@
 .code-block {
   min-width: 0;
   max-width: 100%;
-  border: 1px solid var(--md-border);
+  border: 0;
   border-radius: 6px;
   background: var(--md-block-bg);
   overflow: hidden;
