@@ -31,14 +31,20 @@ const idOf = (name, slot) => `${name}:1/${slot}`;
 
 const noSpeech = new Map();
 
-test('members carry live tracks, speech, and opt-out', async () => {
+test('members carry live tracks, speech, opt-out, and stage', async () => {
   const { membersOf } = await loadMembers();
   const ended = track({ readyState: 'ended' });
   const camera = track();
   const mic = track();
   const people = [
     { endpoint: 'me:1', nick: 'me', camera: true, mic: true },
-    { endpoint: 'ada:1', nick: 'ada', camera: true, screen: true },
+    {
+      endpoint: 'ada:1',
+      nick: 'ada',
+      camera: true,
+      screen: true,
+      stage: false,
+    },
     { endpoint: 'bob:1', nick: '', camera: false, optOut: true },
   ];
   const remote = new Map([
@@ -78,6 +84,8 @@ test('members carry live tracks, speech, and opt-out', async () => {
   assert.equal(bob.nick, 'guest');
   assert.equal(bob.speaking, false);
   assert.equal(ada.optOut, false);
+  assert.equal(ada.stage, false);
+  assert.equal(me.stage, true);
 });
 
 test('members skip muted cameras and ended shares', async () => {
@@ -154,6 +162,48 @@ test('speech follows the roster and drops people who left', async () => {
   assert.equal(second.has('bob:1'), false);
   assert.equal(second.get('ada:1').speakingSince, BASE);
   assert.equal(first.get('ada:1').spokeAt, BASE);
+});
+
+test('backstage cameras and shares are excluded from the program', async () => {
+  const { sourcesOf } = await loadCompositor();
+  const { layoutProgram } = await loadLayout();
+  const people = [
+    member('me', { local: true, stage: false, screen: track() }),
+    member('ada', { stage: false, screen: track() }),
+    member('bob'),
+  ];
+  const options = { people: 'grid', includeMe: true };
+  const sources = sourcesOf(people, noSpeech, options);
+  assert.deepEqual(
+    sources.map(({ stage }) => stage),
+    [false, false, false, false, true],
+  );
+  const tiles = layoutProgram(options, sources, BASE);
+  assert.deepEqual(
+    tiles.map(({ id }) => id),
+    [idOf('bob', 'camera')],
+  );
+});
+
+test('backstage mic and share gain zero under every audio rule', async () => {
+  const { audioSourcesOf } = await loadMixer();
+  const ada = member('ada', { stage: false, screenAudio: track() });
+  const onScreen = new Set([idOf('ada', 'camera'), idOf('ada', 'screen')]);
+  for (const audio of ['all', 'onScreen', 'duck', 'custom']) {
+    const options = { audio, volumes: { [ada.endpoint]: 2 } };
+    const backstage = audioSourcesOf([ada], options, onScreen);
+    assert.deepEqual(
+      backstage.map(({ gain }) => gain),
+      [0, 0],
+      audio,
+    );
+    const staged = audioSourcesOf([{ ...ada, stage: true }], options, onScreen);
+    assert.deepEqual(
+      staged.map(({ gain }) => gain),
+      [audio === 'custom' ? 2 : 1, 1],
+      audio,
+    );
+  }
 });
 
 test('sources hold a camera and a screen per member', async () => {

@@ -123,6 +123,7 @@ const MESSAGE_ACTIONS = {
   menu: (app, id, button) => app.toggleMenuAt(id, button),
   pin: (app, id) => app.togglePin(id),
   copy: (app, id) => app.copyText(id),
+  'screen-comment': (app, id) => app.toggleStudioComment(id),
   share: (app, id) => app.shareMessage(id),
   forward: (app, id) => app.forwardMessages([id]),
   edit: (app, id) => app.startEdit(id),
@@ -483,6 +484,8 @@ const createIceRow = (server, index) => {
 };
 
 class ChatApplication extends Application {
+  #notificationTimer = null;
+
   constructor(config = {}) {
     super(config);
     this.peerId = loadPeerId();
@@ -1920,6 +1923,13 @@ class ChatApplication extends Application {
     if (kind === 'message') {
       items.push({ action: 'selection', label: 'Thread' });
       items.push(...this.messageTools(record));
+      const studio = this.commentStudio(record);
+      if (studio) {
+        const label = studio.isCommentShown(id)
+          ? 'Hide from screen'
+          : 'Show on screen';
+        items.push({ action: 'screen-comment', label });
+      }
     }
     const pinLabel = record?.pinned ? 'Unpin' : 'Pin';
     items.push({ action: 'pin', label: pinLabel });
@@ -1940,6 +1950,23 @@ class ChatApplication extends Application {
       entry.glyph = icon?.cloneNode(true);
     }
     return items;
+  }
+
+  commentStudio(record) {
+    const stage = this.callStage;
+    const session = stage?.session;
+    const live = stage?.mode === 'call' || stage?.mode === 'mini';
+    if (!live || !stage.studio?.enabled || !session?.chat) return null;
+    if (this.chat !== session.chat || record?.chat !== session.chat) {
+      return null;
+    }
+    if (record.deleted || typeof record.content !== 'string') return null;
+    return record.content.trim() ? stage.studio : null;
+  }
+
+  toggleStudioComment(id) {
+    const record = this.recordOf(id);
+    this.commentStudio(record)?.toggleComment(record);
   }
 
   messageTools(record) {
@@ -4196,6 +4223,7 @@ class ChatApplication extends Application {
     for (const name of names) {
       if (typeof flags[name] === 'boolean') args[name] = flags[name];
     }
+    if (typeof flags.title === 'string') args.title = flags.title;
     await this.api.call.update(args);
   }
 
@@ -4236,8 +4264,10 @@ class ChatApplication extends Application {
     if (separate) region.textContent = message;
     this.notification.textContent = message;
     this.notification.className = `notification ${type}`;
-    setTimeout(() => {
+    clearTimeout(this.#notificationTimer);
+    this.#notificationTimer = setTimeout(() => {
       this.notification.classList.add('hidden');
+      this.#notificationTimer = null;
     }, this.config.notificationTimeout);
   }
 }

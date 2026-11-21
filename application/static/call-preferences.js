@@ -5,6 +5,8 @@ import {
   writeSettings,
   targetLabel,
   segmentLabel,
+  TITLE_LIMIT,
+  validateSettings,
 } from './call-settings.js';
 import { readDevices, writeDevices, canSink } from './media.js';
 import { canPickFolder, folderRecord, pickFolder } from './recording-folder.js';
@@ -23,6 +25,7 @@ const labels = {
   noise: 'Noise suppression',
   pushToTalk: 'Push-to-talk',
   autoLower: 'Auto-lower raised hand when speaking',
+  title: 'Title for lower thirds',
   recordingLayout: 'Layout',
   recordingAudio: 'Audio mode',
   recordingQuality: 'Quality',
@@ -53,6 +56,9 @@ const settingField = (name) => {
       option.textContent = valueLabels[name]?.(value) ?? value;
       control.append(option);
     }
+  } else if (name === 'title') {
+    control.type = 'text';
+    control.maxLength = TITLE_LIMIT;
   } else {
     control.type = 'checkbox';
   }
@@ -203,7 +209,10 @@ class CallPreferences {
   }
 
   set(setting, value) {
-    this.settings = { ...readSettings(localStorage), [setting]: value };
+    this.settings = validateSettings({
+      ...readSettings(localStorage),
+      [setting]: value,
+    });
     if (!writeSettings(localStorage, this.settings)) {
       this.notice('Could not save call settings');
     }

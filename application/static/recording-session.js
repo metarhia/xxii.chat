@@ -91,15 +91,20 @@ class RecordingSession {
     return this.programOptions();
   }
 
-  paintPanel(root, isOpen, people) {
+  paintPanel(
+    root,
+    isOpen,
+    people,
+    preview = isOpen ? root.querySelector('.record-preview') : null,
+  ) {
     if (this.#isDisposed) return;
-    if (isOpen && !this.#compositor && typeof MediaRecorder === 'function') {
+    if (preview && !this.#compositor && typeof MediaRecorder === 'function') {
       try {
         this.#ensureCompositor();
       } catch (error) {
         this.notice = error.message;
       }
-    } else if (!isOpen) {
+    } else if (!preview) {
       this.#dropCompositor();
     }
     const { options, notice } = this;
@@ -111,11 +116,24 @@ class RecordingSession {
       this.#starting || this.#stopping || this.#isChoosingFolder,
     );
     const text = `${time} · ${size}`;
-    const view = { state, text, options, people, notice, isOpen, isBusy };
+    const studio = this.recordView?.();
+    const view = {
+      state,
+      text,
+      options,
+      people,
+      notice,
+      isOpen,
+      isBusy,
+      ...studio,
+    };
     paintRecordControl(root, view);
-    const preview = root.querySelector('.record-preview');
     const canvas = this.#compositor?.canvas ?? null;
-    if (!preview || preview.firstChild === canvas) return;
+    if (!preview) {
+      canvas?.remove();
+      return;
+    }
+    if (preview.firstChild === canvas) return;
     if (canvas) preview.replaceChildren(canvas);
     else preview.replaceChildren();
   }
@@ -234,6 +252,7 @@ class RecordingSession {
 
   #dropCompositor() {
     if (this.isActive || (this.#starting && !this.#isDisposed)) return;
+    this.#compositor?.canvas.remove();
     this.#compositor?.stop();
     this.#compositor = null;
   }

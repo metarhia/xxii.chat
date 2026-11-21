@@ -9,6 +9,13 @@ import { notificationClient } from './notifications.js';
 import { ViewHints } from './view-hints.js';
 import { CallRecording } from './call-record.js';
 import { createRecordPanel, createRecordControl } from './record-panel.js';
+import { createButton } from './record-panel.js';
+import {
+  Studio,
+  createStudioPanel,
+  createStageLists,
+  stageMove,
+} from './studio.js';
 import { CALL_LAYOUTS, STRIP_POSITIONS } from './call-layout.js';
 import { tileId, callLayout } from './call-layout.js';
 import { REACTIONS, REACTION_SHOW_MS, isReaction } from './call-hands.js';
@@ -29,6 +36,7 @@ import {
   showsToast,
   toastText,
   TOAST_SHOW_MS,
+  titleOf,
 } from './call-settings.js';
 
 const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
@@ -75,10 +83,8 @@ const ACTIONS = {
   'opt-out': (stage) => stage.toggleOptOut(),
   record: (stage) => stage.recording?.toggle(),
   'record-pause': (stage) => stage.recording?.togglePause(),
-  'record-panel': (stage) => {
-    stage.closeMenus();
-    stage.recording?.togglePanel();
-  },
+  'record-panel': (stage) => stage.toggleProgramPanel('record'),
+  studio: (stage) => stage.toggleProgramPanel('studio'),
   'record-background': (stage) => stage.recording?.resetBackground(),
   recordings: (stage) => {
     stage.closeMenus();
@@ -114,6 +120,9 @@ const HOST_ACTIONS = {
   promote: (stage, endpoint) => stage.command('promote', endpoint),
   demote: (stage, endpoint) => stage.command('demote', endpoint),
   remove: (stage, endpoint) => stage.command('remove', endpoint),
+  'move-to-stage': (stage, endpoint) => stage.command('stage', endpoint, true),
+  'move-to-backstage': (stage, endpoint) =>
+    stage.command('stage', endpoint, false),
   'mute-all': (stage) => stage.command('muteAll'),
   'lower-hand': (stage, endpoint) => stage.command('lowerHand', endpoint),
   'lower-hands': (stage) => stage.command('lowerHands'),
@@ -129,15 +138,6 @@ const REMOTE_REQUEST = {
 };
 
 const POLICIES = ['open', 'link', 'approval'];
-
-const createButton = (action, label) => {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'link-btn';
-  button.dataset.action = action;
-  button.textContent = label;
-  return button;
-};
 
 const createField = (id, label) => {
   const wrap = document.createElement('label');
@@ -338,8 +338,8 @@ const createPeople = () => {
   aside.className = 'call-people';
   const lobby = document.createElement('div');
   lobby.className = 'call-lobby hidden';
-  const roster = document.createElement('ul');
-  roster.className = 'call-roster';
+  const roster = document.createElement('div');
+  roster.className = 'call-people-roster';
   const copy = createButton('copy-link', 'copy link');
   copy.classList.add('hidden');
   const optOut = createButton('opt-out', 'opt out of recordings');
@@ -383,14 +383,14 @@ const createCaptureControl = (name) => {
 const createHand = () => createButton('hand', 'raise hand');
 
 const isControl = (element) =>
-  Boolean(element?.closest?.('button, summary, select, a'));
+  Boolean(element?.closest?.('button, summary, select, input, a'));
 
 const pipSupported = () => {
   const api = globalThis.documentPictureInPicture;
   return typeof api?.requestWindow === 'function';
 };
 
-const createMore = () => {
+const createMore = (hasStudio) => {
   const wrap = document.createElement('div');
   wrap.className = 'call-more';
   const menu = document.createElement('details');
@@ -416,6 +416,7 @@ const createMore = () => {
     text.textContent = row.label;
     keys.append(name, text);
   }
+  if (hasStudio) choices.append(createButton('studio', 'Studio'));
   choices.append(pip, createButton('settings', 'call settings'), note, keys);
   menu.append(summary, choices);
   wrap.append(menu);
@@ -483,7 +484,7 @@ const createKnock = (item) => {
   return toast;
 };
 
-const createCall = (title) => {
+const createCall = (title, hasStudio) => {
   const section = document.createElement('section');
   section.id = 'call-view';
   const bar = document.createElement('header');
@@ -495,6 +496,10 @@ const createCall = (title) => {
   heading.textContent = title;
   const recording = document.createElement('span');
   recording.className = 'call-recording hidden';
+  const backstage = document.createElement('span');
+  backstage.className = 'call-backstage';
+  backstage.textContent = 'backstage';
+  backstage.hidden = true;
   const optOut = createButton('opt-out', 'opt out');
   optOut.classList.add('call-opt-out', 'hidden');
   optOut.setAttribute('aria-pressed', 'false');
@@ -502,6 +507,7 @@ const createCall = (title) => {
     back,
     heading,
     recording,
+    backstage,
     optOut,
     createButton('people', 'people'),
     createButton('chat', 'chat'),
@@ -519,6 +525,7 @@ const createCall = (title) => {
   const body = document.createElement('div');
   body.className = 'call-body';
   body.append(grid, createPeople(), createRecordPanel());
+  if (hasStudio) body.append(createStudioPanel());
   const controls = document.createElement('footer');
   controls.className = 'call-controls';
   controls.append(
@@ -531,7 +538,7 @@ const createCall = (title) => {
   controls.insertBefore(createHand(), leave);
   controls.insertBefore(createReact(), leave);
   controls.insertBefore(createRecordControl(), leave);
-  controls.insertBefore(createMore(), leave);
+  controls.insertBefore(createMore(hasStudio), leave);
   const note = document.createElement('p');
   note.className = 'call-note hidden';
   note.setAttribute('role', 'status');
@@ -945,6 +952,7 @@ class CallStage {
     this.hostPeer = '';
     this.policy = '';
     this.locked = false;
+    this.joinBackstage = false;
     this.prompt = '';
     this.kind = '';
     this.mediaNote = '';
@@ -960,6 +968,8 @@ class CallStage {
     this.statsAll = false;
     this.viewHints = null;
     this.recording = null;
+    this.studio = null;
+    this.desktopPanel = '';
     this.quality = new Map();
     this.qualityNotices = new Set();
     this.levels = null;
@@ -1041,6 +1051,7 @@ class CallStage {
     this.phone = matchMedia(PHONE);
     this.preferences = this.hooks.preferences.settings;
     this.recording = new CallRecording(this, this.preferences);
+    if (typeof MediaRecorder === 'function') this.studio = new Studio(this);
     this.media.cameraOn = camera && !this.preferences.joinCameraOff;
     this.media.micOn = !this.preferences.joinMicOff;
     this.media.noise = this.preferences.noise;
@@ -1088,6 +1099,9 @@ class CallStage {
     const session = this.session;
     this.recording?.dispose();
     this.recording = null;
+    this.studio?.dispose();
+    this.studio = null;
+    this.desktopPanel = '';
     this.releaseWake();
     this.closeSheet();
     this.hooks.popLayer('call');
@@ -1156,6 +1170,7 @@ class CallStage {
     this.hostPeer = '';
     this.policy = '';
     this.locked = false;
+    this.joinBackstage = false;
     this.prompt = '';
     this.kind = '';
     this.mediaNote = '';
@@ -1196,6 +1211,8 @@ class CallStage {
       this.renderTiles();
       this.paintPeople();
       this.paintRecording();
+      this.paintBackstage();
+      this.studio?.paint();
       this.hooks.focusChat(this.chat);
       this.hooks.changed();
     }
@@ -1207,7 +1224,9 @@ class CallStage {
   }
 
   showCall(state) {
-    if (state) this.onCallState(state);
+    if (state && !this.personOf(this.session?.endpoint)) {
+      this.onCallState(state);
+    }
     this.joining = false;
     this.mount('call');
   }
@@ -1243,31 +1262,62 @@ class CallStage {
       this.hooks.popLayer('call');
     }
     this.renderTiles();
+    this.recording?.paint();
+  }
+
+  get programPanel() {
+    if (this.mode !== 'call') return '';
+    if (!this.phone?.matches) return this.desktopPanel;
+    if (this.sheet === 'record' || this.sheet === 'studio') return this.sheet;
+    return '';
+  }
+
+  toggleProgramPanel(name) {
+    if (this.mode !== 'call') return;
+    this.closeMenus();
+    const open = this.programPanel === name;
+    if (this.phone?.matches) {
+      if (open) this.closeSheet();
+      else this.openSheet(name);
+    } else {
+      this.desktopPanel = open ? '' : name;
+      this.recording?.paint();
+    }
+  }
+
+  closeProgramPanel() {
+    if (this.phone?.matches || !this.programPanel) return false;
+    this.desktopPanel = '';
+    this.recording?.paint();
+    return true;
   }
 
   openSheet(name) {
     if (!phoneView() || this.mode !== 'call') return;
+    const isFirst = this.sheet === '';
     this.sheet = name;
     this.root.dataset.callSheet = name;
-    this.hooks.pushLayer('callSheet');
+    if (isFirst) this.hooks.pushLayer('callSheet');
     const panels = {
       people: '.call-people button',
       record: '.call-record button',
+      studio: '.call-studio button',
     };
+    this.recording?.paint();
     const panel = panels[name];
     const close = panel
       ? this.host.querySelector(panel)
       : this.root.querySelector('.close-call-chat');
     close?.focus();
-    this.recording?.paint();
   }
 
   hideSheet() {
     if (!this.sheet) return;
-    const isRecord = this.sheet === 'record';
-    const selector = isRecord
-      ? '.call-record-control [data-action="record"]'
-      : `[data-action="${this.sheet}"]`;
+    const triggers = {
+      record: '.call-record-control [data-action="record"]',
+      studio: '.call-more summary',
+    };
+    const selector = triggers[this.sheet] ?? `[data-action="${this.sheet}"]`;
     const trigger = this.host?.querySelector(selector);
     this.sheet = '';
     delete this.root.dataset.callSheet;
@@ -1386,7 +1436,7 @@ class CallStage {
       event.stopImmediatePropagation();
       return;
     }
-    if (event.key === 'Escape' && this.recording?.closePanel()) {
+    if (event.key === 'Escape' && this.closeProgramPanel()) {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
@@ -1507,7 +1557,7 @@ class CallStage {
       if (status === 'lobby') {
         this.showLobby();
       } else if (status === 'joined') {
-        await this.updateServer();
+        await this.updateServer(true);
         this.showCall(result.state);
       } else {
         this.joining = false;
@@ -1552,7 +1602,7 @@ class CallStage {
     if (phase === 'joined' && this.mode === 'lobby') this.showCall();
     const showing = this.mode === 'call' || this.mode === 'mini';
     if (phase === 'joined' && showing) {
-      this.updateServer().catch((error) => this.hooks.fail(error));
+      this.updateServer(true).catch((error) => this.hooks.fail(error));
     }
     const idle = phase === 'idle';
     const open = this.mode !== 'prejoin' && this.mode !== '';
@@ -1582,17 +1632,23 @@ class CallStage {
         hand,
         recording: item.recording === true,
         optOut: item.optOut === true,
+        stage: item.stage !== false,
+        title: titleOf(item.title),
       });
     }
     if (this.mode === 'call' || this.mode === 'mini') {
       this.announceChanges(people);
     }
+    const me = this.session.endpoint;
+    const wasBackstage = this.personOf(me)?.stage === false;
+    const local = people.find((person) => person.endpoint === me);
     this.people = people;
     this.hands = orderOf(people);
     this.isAdmin = isAdmin;
     this.hostPeer = typeof state.host === 'string' ? state.host : '';
     this.policy = typeof state.policy === 'string' ? state.policy : '';
     this.locked = state.locked === true;
+    this.joinBackstage = state.joinBackstage === true;
     this.kind = typeof state.kind === 'string' ? state.kind : '';
     this.lobby = Array.isArray(state.lobby) ? state.lobby : [];
     this.spotlight = typeof state.spotlight === 'string' ? state.spotlight : '';
@@ -1626,7 +1682,20 @@ class CallStage {
     }
     this.paintPeople();
     this.paintRecording();
+    this.paintBackstage();
+    this.studio?.paint();
     this.paintKnocks();
+    if (local && wasBackstage !== !local.stage) {
+      const text = local.stage
+        ? 'You are on stage'
+        : 'You are backstage, not in the recording or stream';
+      this.hooks.notice?.(text, this.announcements);
+    }
+  }
+
+  paintBackstage() {
+    const chip = this.host?.querySelector('.call-backstage');
+    if (chip) chip.hidden = !this.isBackstage(this.session?.endpoint);
   }
 
   paintRecording() {
@@ -1811,7 +1880,7 @@ class CallStage {
     session.setTrack('screenAudio', screenAudio);
   }
 
-  async updateServer() {
+  async updateServer(includeTitle = false) {
     const session = this.session;
     const media = this.media;
     if (!session || !media) return;
@@ -1821,6 +1890,7 @@ class CallStage {
     const camera = media.cameraOn && !media.cameraPaused;
     const screen = media.screenShared && Boolean(media.screenTrack);
     const flags = { mic, camera, screen };
+    if (includeTitle) flags.title = this.preferences.title;
     if (this.recording?.isActive) flags.recording = true;
     await this.hooks.update(flags);
   }
@@ -1857,6 +1927,11 @@ class CallStage {
 
   onClick(event) {
     if (this.soundBlocked) this.resumeAudio();
+    const studioAction = event.target.closest('[data-studio-action]');
+    if (studioAction) {
+      this.studio?.action(studioAction).catch(this.hooks.fail);
+      return;
+    }
     const button = event.target.closest('[data-action]');
     if (!button) return;
     if (button.dataset.action === 'tile-menu') {
@@ -1879,12 +1954,16 @@ class CallStage {
   viewOf(mode, title) {
     if (mode === 'prejoin') return createPrejoin(title, this.hooks.hasNick());
     if (mode === 'lobby') return createLobby();
-    return createCall(title);
+    return createCall(title, Boolean(this.studio));
   }
 
   onDevice(event) {
     const select = event.target;
-    const { record, pin, volume } = select.dataset;
+    const { record, pin, volume, studio } = select.dataset;
+    if (studio || select.closest('[data-studio-section="editor"]')) {
+      this.studio?.change(select).catch((error) => this.hooks.fail(error));
+      return;
+    }
     if (record || pin || volume) return void this.recording?.change(select);
     if (select.dataset.setting || select.dataset.device) {
       this.hooks.preferences.change(select);
@@ -2153,7 +2232,11 @@ class CallStage {
 
   applyPreferences(settings) {
     if (!settings.pushToTalk) this.talkStep('up');
+    const changedTitle = settings.title !== this.preferences.title;
     this.preferences = settings;
+    if (changedTitle && this.session?.phase === 'joined') {
+      this.hooks.update({ title: settings.title }).catch(this.hooks.fail);
+    }
     this.lowerState = createAutoLower();
     this.media
       ?.setNoise(settings.noise)
@@ -2295,6 +2378,14 @@ class CallStage {
     return null;
   }
 
+  isBackstage(endpoint) {
+    return this.personOf(endpoint)?.stage === false;
+  }
+
+  backstageSuffix(endpoint) {
+    return this.isBackstage(endpoint) ? ' · backstage' : '';
+  }
+
   nickOf(peer) {
     if (typeof peer !== 'string' || peer === '') return 'someone';
     for (const person of this.people) {
@@ -2363,31 +2454,66 @@ class CallStage {
   }
 
   paintRoster(aside) {
-    const list = aside.querySelector('.call-roster');
-    list.replaceChildren();
-    for (const person of rosterOf(this.people)) {
-      const item = document.createElement('li');
-      item.dataset.endpoint = person.endpoint;
-      const name = document.createElement('span');
-      name.textContent = person.nick || person.endpoint;
-      item.append(name);
-      const order = this.hands.get(person.endpoint);
-      if (order) {
-        const hand = document.createElement('span');
-        hand.className = 'roster-hand';
-        hand.textContent = `✋ ${order}`;
-        hand.setAttribute('aria-label', `hand raised, number ${order}`);
-        item.append(hand);
-        if (this.isAdmin) item.append(createButton('lower-hand', 'lower'));
-      }
-      if (person.optOut) {
-        const opted = document.createElement('span');
-        opted.className = 'roster-opted';
-        opted.textContent = 'opted out';
-        item.append(opted);
-      }
-      list.append(item);
+    const roster = aside.querySelector('.call-people-roster');
+    const people = rosterOf(this.people);
+    const group =
+      this.joinBackstage || people.some(({ stage }) => stage === false);
+    const key = JSON.stringify([
+      this.isAdmin,
+      group,
+      people.map((person) => ({
+        endpoint: person.endpoint,
+        nick: person.nick,
+        stage: person.stage,
+        optOut: person.optOut,
+        order: this.hands.get(person.endpoint),
+      })),
+    ]);
+    if (roster.dataset.key === key) return;
+    roster.dataset.key = key;
+    const row = (person) => this.createRosterRow(person);
+    if (group) {
+      roster.replaceChildren(...createStageLists(people, row));
+    } else {
+      const list = document.createElement('ul');
+      list.className = 'call-roster';
+      list.append(...people.map(row));
+      roster.replaceChildren(list);
     }
+  }
+
+  createRosterRow(person) {
+    const item = document.createElement('li');
+    item.dataset.endpoint = person.endpoint;
+    const name = document.createElement('span');
+    name.textContent = person.nick || person.endpoint;
+    item.append(name);
+    const order = this.hands.get(person.endpoint);
+    if (order) {
+      const hand = document.createElement('span');
+      hand.className = 'roster-hand';
+      hand.textContent = `✋ ${order}`;
+      hand.setAttribute('aria-label', `hand raised, number ${order}`);
+      item.append(hand);
+      if (this.isAdmin) item.append(createButton('lower-hand', 'lower'));
+    }
+    if (person.optOut) {
+      const opted = document.createElement('span');
+      opted.className = 'roster-opted';
+      opted.textContent = 'opted out';
+      item.append(opted);
+    }
+    if (this.isAdmin) {
+      const menu = document.createElement('details');
+      menu.className = 'roster-menu';
+      const summary = document.createElement('summary');
+      summary.textContent = '⋯';
+      summary.setAttribute('aria-label', `Options for ${name.textContent}`);
+      const { action, label } = stageMove(person);
+      menu.append(summary, createButton(action, label));
+      item.append(menu);
+    }
+    return item;
   }
 
   ensureKnocks() {
@@ -2647,7 +2773,10 @@ class CallStage {
       : this.people.find((person) => person.endpoint === endpoint)?.mic;
     const paused = local && this.media?.cameraOn && this.media?.cameraPaused;
     const status = paused ? ' · camera paused' : '';
-    if (chip) chip.textContent = `${name} · mic ${mic ? 'on' : 'off'}${status}`;
+    const tags = status + this.backstageSuffix(endpoint);
+    if (chip) {
+      chip.textContent = `${name} · mic ${mic ? 'on' : 'off'}${tags}`;
+    }
     const poor =
       !local &&
       this.quality.get(endpoint)?.poor === true &&
@@ -2756,8 +2885,9 @@ class CallStage {
       const local = endpoint === this.session?.endpoint;
       const localOnly = local && !this.media.screenShared;
       const label = localOnly ? 'captured, not shared' : 'screen';
+      const backstage = this.backstageSuffix(endpoint);
       tile.querySelector('.call-name').textContent =
-        `${this.nameOf(endpoint)} · ${label}`;
+        `${this.nameOf(endpoint)} · ${label}${backstage}`;
     }
   }
 
@@ -2780,7 +2910,7 @@ class CallStage {
       paintPerson(root, this.videoTrack(endpoint), name, color);
       this.paintSpeakingTile(root, endpoint);
       const chip = root.querySelector('.pip-name');
-      if (chip) chip.textContent = name;
+      if (chip) chip.textContent = name + this.backstageSuffix(endpoint);
     }
   }
 

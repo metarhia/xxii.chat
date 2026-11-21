@@ -3,6 +3,16 @@ import { drawArgsOf, selectSpeakers } from './layout.js';
 import { onScreenOf, layoutProgram } from './layout.js';
 import { colorOf, initialsOf } from './avatar.js';
 import { idOf } from './members.js';
+import {
+  brandFont,
+  chipStyleOf,
+  countdownText,
+  logoRect,
+  overlayRect,
+  tickerOffset,
+  commentLines,
+  clipSource,
+} from './studio-layout.js';
 
 const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
@@ -47,7 +57,7 @@ const nextSpeech = (previous, members, now) => {
 
 const cameraSource = (member, speech, includeMe) => {
   const heard = speech.get(member.endpoint);
-  const isStaged = member.local ? includeMe : true;
+  const isStaged = member.stage !== false && (!member.local || includeMe);
   return {
     id: idOf(member.endpoint, 'camera'),
     endpoint: member.endpoint,
@@ -73,7 +83,7 @@ const screenSource = (member) => ({
   spokeAt: 0,
   speakingSince: 0,
   optOut: member.optOut,
-  stage: true,
+  stage: member.stage !== false,
   track: member.optOut ? null : member.screen,
 });
 
@@ -166,13 +176,21 @@ const releaseVideo = (video) => {
   video.srcObject = null;
 };
 
-const paintBackground = (context, background, width, height) => {
-  context.fillStyle = SURFACE;
+const paintBackground = (
+  context,
+  background,
+  width,
+  height,
+  color = SURFACE,
+) => {
+  context.fillStyle = color;
   if (typeof background === 'string') context.fillStyle = background;
   context.fillRect(0, 0, width, height);
   if (typeof background === 'string' || !background) return;
-  const sourceWidth = background.naturalWidth || background.width;
-  const sourceHeight = background.naturalHeight || background.height;
+  const sourceWidth =
+    background.naturalWidth || background.videoWidth || background.width;
+  const sourceHeight =
+    background.naturalHeight || background.videoHeight || background.height;
   if (!sourceWidth || !sourceHeight) return;
   const area = { x: 0, y: 0, width, height };
   const args = drawArgsOf(sourceWidth, sourceHeight, area, 'cover');
@@ -208,7 +226,45 @@ const paintOptedOut = (context, tile) => {
   context.fillText('opted out', x, y, tile.width);
 };
 
-const paintName = (context, tile, source, scale) => {
+const paintChip = (context, tile, scale, frame = null, nameOnly = false) => {
+  const pad = Math.round(CHIP_PAD * scale);
+  const limit = tile.height * (nameOnly ? 0.6 : CHIP_RATIO);
+  const size = Math.round(Math.min(CHIP_SIZE * scale, limit));
+  if ((!nameOnly && tile.height < CHIP_MIN_HEIGHT * scale) || size < MIN_FONT) {
+    return;
+  }
+  const brand = frame?.brand;
+  context.font = brand ? brandFont(frame.font, size) : fontOf(size);
+  const measure = (text) => context.measureText(text).width;
+  const text = ellipsize(measure, tile.label, tile.width - 4 * pad);
+  if (text === '') return;
+  const box = {
+    x: tile.x + pad,
+    y: nameOnly
+      ? tile.y + (tile.height - size - pad) / 2
+      : tile.y + tile.height - pad - (size + pad),
+    width: measure(text) + 2 * pad,
+    height: size + pad,
+  };
+  const style = brand && chipStyleOf(brand.chipStyle, box.height);
+  context.fillStyle = brand?.chip ?? CHIP;
+  pathOf(context, box, style?.radius ?? box.height / 4);
+  context.fill();
+  if (style?.bar) {
+    context.fillStyle = brand.accent;
+    context.fillRect(box.x, box.y, style.bar, box.height);
+  }
+  context.fillStyle = brand?.text ?? LIGHT;
+  context.textAlign = 'left';
+  context.textBaseline = 'middle';
+  context.fillText(text, box.x + pad, box.y + box.height / 2);
+};
+
+const paintName = (context, tile, source, scale, frame) => {
+  if (frame) {
+    paintChip(context, tile, scale, frame, true);
+    return;
+  }
   const pad = Math.round(CHIP_PAD * scale);
   const size = Math.round(Math.min(tile.height * 0.6, CHIP_SIZE * scale));
   if (size < MIN_FONT) return;
@@ -227,39 +283,15 @@ const PLACEHOLDERS = {
   name: paintName,
 };
 
-const paintContent = (context, tile, source, video, scale) => {
+const paintContent = (context, tile, source, video, scale, frame) => {
   const paint = PLACEHOLDERS[tile.placeholder];
-  if (paint) return void paint(context, tile, source, scale);
+  if (paint) return void paint(context, tile, source, scale, frame);
   if (isReady(video)) {
     const { videoWidth, videoHeight } = video;
     const args = drawArgsOf(videoWidth, videoHeight, tile, tile.fit);
     return void context.drawImage(video, ...args);
   }
   if (source.kind === 'camera') paintAvatar(context, tile, source);
-};
-
-const paintChip = (context, tile, scale) => {
-  const pad = Math.round(CHIP_PAD * scale);
-  const limit = tile.height * CHIP_RATIO;
-  const size = Math.round(Math.min(CHIP_SIZE * scale, limit));
-  if (tile.height < CHIP_MIN_HEIGHT * scale || size < MIN_FONT) return;
-  context.font = fontOf(size);
-  const measure = (text) => context.measureText(text).width;
-  const text = ellipsize(measure, tile.label, tile.width - 4 * pad);
-  if (text === '') return;
-  const box = {
-    x: tile.x + pad,
-    y: tile.y + tile.height - pad - (size + pad),
-    width: measure(text) + 2 * pad,
-    height: size + pad,
-  };
-  context.fillStyle = CHIP;
-  pathOf(context, box, box.height / 4);
-  context.fill();
-  context.fillStyle = LIGHT;
-  context.textAlign = 'left';
-  context.textBaseline = 'middle';
-  context.fillText(text, box.x + pad, box.y + box.height / 2);
 };
 
 const paintRing = (context, tile, scale) => {
@@ -277,17 +309,137 @@ const paintRing = (context, tile, scale) => {
   context.stroke();
 };
 
-const paintTile = (context, tile, source, video, scale) => {
+const paintTile = (context, tile, source, video, scale, frame) => {
   context.save();
   pathOf(context, tile, tile.radius);
   context.clip();
   context.fillStyle = PANEL;
   context.fillRect(tile.x, tile.y, tile.width, tile.height);
-  paintContent(context, tile, source, video, scale);
+  paintContent(context, tile, source, video, scale, frame);
   context.restore();
   const hasChip = tile.label !== '' && tile.placeholder !== 'name';
-  if (hasChip) paintChip(context, tile, scale);
+  if (hasChip) paintChip(context, tile, scale, frame);
   if (tile.speaking) paintRing(context, tile, scale);
+};
+
+const paintBrandBox = (context, box, brand) => {
+  const style = chipStyleOf(brand.chipStyle, box.height);
+  pathOf(context, box, style.radius);
+  context.clip();
+  context.fillStyle = brand.chip;
+  context.fillRect(box.x, box.y, box.width, box.height);
+  context.fillStyle = brand.accent;
+  if (style.bar) {
+    context.fillRect(box.x, box.y, style.bar, box.height);
+  } else {
+    const edge = box.height * 0.06;
+    context.fillRect(box.x, box.y + box.height - edge, box.width, edge);
+  }
+  return style.bar;
+};
+
+const paintOverlay = (context, entry, box, frame, scale) => {
+  const { kind, alpha, nick, text } = entry;
+  const { brand, font } = frame;
+  const { x, y, width, height } = box;
+  const pad = 24 * scale;
+  const size = (kind === 'comment' ? 23 : 29) * scale;
+  context.save();
+  try {
+    context.globalAlpha = alpha;
+    const bar = paintBrandBox(context, box, brand);
+    const left = x + pad + bar;
+    const limit = width - 2 * pad - bar;
+    context.textAlign = 'left';
+    context.textBaseline = 'middle';
+    context.font = brandFont(font, size);
+    const measure = (value) => context.measureText(value).width;
+    if (nick) {
+      context.fillStyle = brand.accent;
+      const row = text ? y + 28 * scale : y + height / 2;
+      context.fillText(ellipsize(measure, nick, limit), left, row);
+    }
+    context.fillStyle = brand.text;
+    if (kind === 'ticker') {
+      const offset = tickerOffset(entry.elapsed, width, measure(text));
+      context.fillText(text, x + offset, y + height / 2);
+    } else if (kind === 'comment') {
+      const lines = commentLines(text, measure, limit);
+      for (const [index, line] of lines.entries()) {
+        context.fillText(line, left, y + (61 + 27 * index) * scale);
+      }
+    } else {
+      const row = nick ? y + 63 * scale : y + height / 2;
+      context.fillText(ellipsize(measure, text, limit), left, row);
+    }
+  } finally {
+    context.restore();
+  }
+};
+
+const overlaysOf = (scene, frame, width, height, full) => {
+  const overlays = frame.overlays ?? [];
+  const hasTicker =
+    scene.overlays.includes('ticker') &&
+    overlays.some(({ kind }) => kind === 'ticker');
+  return overlays
+    .filter(
+      ({ kind, local }) =>
+        scene.overlays.includes(kind) &&
+        (!full || kind === 'ticker') &&
+        (!local || scene.program.includeMe),
+    )
+    .map((entry) => ({
+      ...entry,
+      rect: overlayRect(entry.kind, width, height, hasTicker),
+    }));
+};
+
+const paintSlate = (context, scene, frame, now, width, height, scale) => {
+  const countdown = scene.type === 'countdown';
+  const x = width / 2;
+  const y = height / 2;
+  const max = width * 0.85;
+  if (countdown) {
+    const badge = {
+      x: width * 0.19,
+      y: y - 140 * scale,
+      width: width * 0.62,
+      height: 250 * scale,
+    };
+    context.save();
+    paintBrandBox(context, badge, frame.brand);
+    context.restore();
+  }
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillStyle = frame.brand.text;
+  context.font = brandFont(frame.font, Math.round(56 * scale), 600);
+  const title = ellipsize(
+    (text) => context.measureText(text).width,
+    scene.text,
+    max,
+  );
+  context.fillText(title, x, countdown ? y - 85 * scale : y);
+  if (!countdown) return;
+  context.fillStyle = frame.brand.accent;
+  context.font = brandFont(frame.font, Math.round(128 * scale), 600);
+  context.fillText(countdownText(frame.until, now), x, y + 20 * scale, max);
+};
+
+const paintLogo = (context, scene, frame, width, height) => {
+  if (!scene.overlays.includes('logo')) return;
+  const logo = frame.brand.logo;
+  const image = frame.image(logo.asset);
+  if (!image) return;
+  const rect = logoRect(
+    logo,
+    width,
+    height,
+    image.naturalWidth,
+    image.naturalHeight,
+  );
+  context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
 };
 
 class Compositor {
@@ -301,6 +453,9 @@ class Compositor {
   #speech = new Map();
   #videos = new Map();
   #held = [];
+  #outgoingHeld = [];
+  #sceneId = '';
+  #fadeContext = null;
   #query = null;
   #lastAt = -Infinity;
   #isManual = false;
@@ -321,6 +476,7 @@ class Compositor {
     this.drawMs = 0;
     this.error = null;
     this.tiles = [];
+    this.overlays = [];
     this.onScreen = new Set();
     this.#members = members;
     this.#options = options ?? (() => ({}));
@@ -391,35 +547,129 @@ class Compositor {
 
   #render(now) {
     const raw = this.#options();
-    const options = { ...raw, width: this.width, height: this.height };
-    const program = programOf(options);
+    const frame = raw.studio?.frame(now, this.#query?.matches) ?? null;
+    const sceneId = frame?.scene.id ?? '';
+    const isSwitch = sceneId !== this.#sceneId;
+    if (isSwitch) {
+      this.#outgoingHeld = this.#held;
+      this.#held = [];
+      this.#sceneId = sceneId;
+    }
     const members = this.#members();
     this.#speech = nextSpeech(this.#speech, members, now);
-    const sources = sourcesOf(members, this.#speech, options);
-    const speakers = selectSpeakers(sources, program, now, this.#held);
-    this.#held = speakers;
-    const tiles = layoutProgram(program, sources, now, speakers);
-    const ids = onScreenOf(program, sources, now, speakers);
-    const isMoving = !this.#query?.matches;
-    const moved = moveTiles(this.#motion, tiles, now, isMoving);
+    const scene = frame?.scene;
+    const clip = frame?.clip;
+    const layer = this.#layout(members, raw, scene, clip, now, this.#held);
+    this.#held = layer.speakers;
+    const isMoving = !isSwitch && !frame?.previous && !this.#query?.matches;
+    const moved = moveTiles(this.#motion, layer.tiles, now, isMoving);
     this.#motion = moved.motion;
     this.tiles = moved.drawn;
-    this.onScreen = new Set(ids);
-    this.#syncVideos(sources);
-    this.#paint(raw.background, program, sources);
+    this.onScreen = new Set(layer.ids);
+    this.#syncVideos(layer.sources);
+    if (frame?.previous) {
+      this.#paintFade(frame, layer, raw, members, now);
+    } else {
+      this.#fadeContext = null;
+      this.overlays = this.#paint(
+        this.#context,
+        layer,
+        this.tiles,
+        raw.background,
+        frame,
+        now,
+      );
+    }
     if (this.#isManual) this.track.requestFrame();
   }
 
-  #paint(background, program, sources) {
-    const context = this.#context;
-    const scale = program.height / REFERENCE_HEIGHT;
-    const byId = new Map(sources.map((source) => [source.id, source]));
-    paintBackground(context, background, this.width, this.height);
-    for (const tile of this.tiles) {
-      const source = byId.get(tile.id);
-      const video = this.#videos.get(tile.id)?.video;
-      paintTile(context, tile, source, video, scale);
+  #layout(members, raw, scene, clip, now, held) {
+    const options = scene?.program ?? raw;
+    const live = !scene || scene.type === 'live';
+    const sources = sourcesOf(members, this.#speech, options);
+    const source = clipSource(clip);
+    if (source) sources.unshift(source);
+    const { width, height } = this;
+    const program = programOf({ ...options, width, height });
+    const staged = live
+      ? sources
+      : sources.filter(({ id }) => id === source?.id);
+    const speakers = selectSpeakers(staged, program, now, held);
+    const tiles = layoutProgram(program, staged, now, speakers);
+    if (source) {
+      const tile = tiles.find(({ id }) => id === source.id);
+      if (tile) tile.label = source.nick;
     }
+    const ids = onScreenOf(program, staged, now, speakers);
+    return { scene, sources, speakers, tiles, ids };
+  }
+
+  #paintFade(frame, layer, raw, members, now) {
+    const previous = frame.previous;
+    const old = this.#layout(
+      members,
+      raw,
+      previous.scene,
+      frame.clip,
+      now,
+      this.#outgoingHeld,
+    );
+    this.#outgoingHeld = old.speakers;
+    const context = this.#context;
+    const fade = this.#fadeContext ?? this.#createFadeContext();
+    this.#paint(
+      context,
+      old,
+      old.tiles,
+      null,
+      { ...frame, until: previous.until },
+      now,
+    );
+    this.overlays = this.#paint(fade, layer, this.tiles, null, frame, now);
+    context.globalAlpha = frame.alpha;
+    try {
+      context.drawImage(fade.canvas, 0, 0);
+    } finally {
+      context.globalAlpha = 1;
+    }
+  }
+
+  #createFadeContext() {
+    const canvas = document.createElement('canvas');
+    canvas.width = this.width;
+    canvas.height = this.height;
+    this.#fadeContext = canvas.getContext('2d');
+    return this.#fadeContext;
+  }
+
+  #paint(context, layer, tiles, background, frame, now) {
+    const { width, height } = this;
+    const { scene, sources } = layer;
+    const scale = height / REFERENCE_HEIGHT;
+    const color = scene?.background.color;
+    const image = scene ? frame.image(scene.background.image) : background;
+    paintBackground(context, image, width, height, color);
+    if (scene && scene.type !== 'live') {
+      paintSlate(context, scene, frame, now, width, height, scale);
+    }
+    const byId = new Map(sources.map((source) => [source.id, source]));
+    for (const tile of tiles) {
+      const source = byId.get(tile.id);
+      const clip = frame?.clip;
+      const video =
+        tile.id === clip?.id ? clip.media : this.#videos.get(tile.id)?.video;
+      paintTile(context, tile, source, video, scale, frame);
+    }
+    if (!scene) return [];
+    const clip = frame.clip;
+    const full = clip?.mode === 'full' && isReady(clip.media);
+    if (full) paintBackground(context, clip.media, width, height, color);
+    const overlays = overlaysOf(scene, frame, width, height, full);
+    for (const entry of overlays) {
+      paintOverlay(context, entry, entry.rect, frame, scale);
+    }
+    paintLogo(context, scene, frame, width, height);
+    return overlays;
   }
 
   #syncVideos(sources) {

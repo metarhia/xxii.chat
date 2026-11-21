@@ -39,7 +39,7 @@ const SHARED_FIELDS = [
   },
 ];
 
-const FIELDS = [
+const PROGRAM_FIELDS = [
   { name: 'people', label: 'People on screen', kind: 'choice', values: PEOPLE },
   {
     name: 'maxSpeakers',
@@ -71,8 +71,9 @@ const FIELDS = [
   { name: 'screenAudio', label: 'Screen audio', kind: 'flag' },
   { name: 'names', label: 'Names', kind: 'flag' },
   { name: 'noVideo', label: 'No video', kind: 'choice', values: NO_VIDEO },
-  ...SHARED_FIELDS,
 ];
+
+const FIELDS = [...PROGRAM_FIELDS, ...SHARED_FIELDS];
 
 const LABELS = {
   people: {
@@ -253,7 +254,9 @@ const createRecordPanel = () => {
   head.append(title, createButton('record-panel', 'close'));
   const fields = createRecordFields(FIELDS);
   fields.append(createBackground());
-  aside.append(head, ...createProgramControls(), fields);
+  const follows = document.createElement('p');
+  follows.className = 'call-note record-follows hidden';
+  aside.append(head, ...createProgramControls(), follows, fields);
   aside.append(createList('pinned', 'Chosen people'));
   aside.append(createList('volumes', 'Volume per person'));
   return aside;
@@ -311,14 +314,14 @@ const paintPause = (button, view) => {
 
 const syncControl = (control, options, view) => {
   const name = control.dataset.record;
-  if (name === 'image') return;
   const value = options[name];
   const isFolderField =
     name === 'recordingTarget' || name === 'recordingSegment';
-  const isLocked =
-    (name === 'quality' || isFolderField) &&
-    (view.state !== 'idle' || view.isBusy);
-  control.disabled = isLocked;
+  const isShared = name === 'quality' || isFolderField;
+  control.disabled = isShared
+    ? view.state !== 'idle' || view.isBusy
+    : Boolean(view.sceneName);
+  if (name === 'image') return;
   if (name === 'recordingSegment') {
     control.closest('label').hidden = options.recordingTarget !== 'folder';
   }
@@ -378,7 +381,7 @@ const syncLists = (box, options) => {
   }
 };
 
-const paintLists = (root, options, people) => {
+const paintLists = (root, options, people, disabled = false) => {
   const pins = root.querySelector('[data-list="pinned"]');
   const volumes = root.querySelector('[data-list="volumes"]');
   const pinRows = options.people === 'pinned' ? people : [];
@@ -387,6 +390,23 @@ const paintLists = (root, options, people) => {
   paintRows(volumes, volumeRows, createVolumeRow);
   syncLists(pins, options);
   syncLists(volumes, options);
+  pins.disabled = disabled;
+  volumes.disabled = disabled;
+};
+
+const createSceneFields = () => {
+  const fields = createRecordFields(PROGRAM_FIELDS);
+  fields.append(createList('pinned', 'Chosen people'));
+  fields.append(createList('volumes', 'Volume per person'));
+  return fields;
+};
+
+const paintSceneFields = (root, program, people) => {
+  const view = { state: 'idle' };
+  for (const control of root.querySelectorAll('[data-record]')) {
+    if (control !== document.activeElement) syncControl(control, program, view);
+  }
+  paintLists(root, program, people);
 };
 
 const paintRecordPanel = (root, view) => {
@@ -404,7 +424,15 @@ const paintRecordPanel = (root, view) => {
     syncControl(control, view.options, view);
   }
   if (isCall) {
-    paintLists(panel, view.options, view.people);
+    const follows = panel.querySelector('.record-follows');
+    follows.classList.toggle('hidden', !view.sceneName);
+    follows.textContent = view.sceneName
+      ? `Program follows the Studio scene ${view.sceneName}`
+      : '';
+    panel.querySelector('[data-action="record-background"]').disabled = Boolean(
+      view.sceneName,
+    );
+    paintLists(panel, view.options, view.people, Boolean(view.sceneName));
     panel.toggleAttribute('data-open', view.isOpen);
   }
 };
@@ -419,6 +447,8 @@ const paintRecordControl = (root, view) => {
   paintRecordPanel(root, view);
 };
 
-export { FIELDS, SURFACE_COLOR, VOLUME_STEP, defaultsOf, labelOf, valueOf };
+export { FIELDS, PROGRAM_FIELDS, VOLUME_STEP, defaultsOf, labelOf, valueOf };
+export { SURFACE_COLOR, createSceneFields, paintSceneFields };
 export { createRecordPanel, createRecordControl, paintRecordControl };
 export { createProgramControls, createRecordFields, createField };
+export { createButton };

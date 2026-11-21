@@ -5,6 +5,7 @@ const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const CLOCK_FPS = 30;
 const SAMPLE_RATE = 48000;
 const RAMP_SECONDS = 0.05;
+const MUSIC_FADE_SECONDS = 1;
 const DUCK = 0.125;
 const MAX_VOLUME = 2;
 const AUDIO = ['all', 'onScreen', 'duck', 'custom'];
@@ -39,7 +40,7 @@ const volumeOf = (volumes, endpoint) => {
 };
 
 const gainOf = (entry, mix, onScreen) => {
-  if (entry.optOut) return 0;
+  if (entry.optOut || entry.stage === false) return 0;
   const isMic = entry.kind === 'mic';
   if (isMic && entry.local && !mix.includeMe) return 0;
   if (!isMic && !mix.screenAudio) return 0;
@@ -50,6 +51,8 @@ const gainOf = (entry, mix, onScreen) => {
 
 const audioSourcesOf = (members, options, onScreen) => {
   const mix = mixOf(options);
+  const slate = options?.studio?.activeScene?.type;
+  const isSlate = Boolean(slate && slate !== 'live');
   const sources = [];
   for (const member of members) {
     for (const slot of SLOTS) {
@@ -60,14 +63,15 @@ const audioSourcesOf = (members, options, onScreen) => {
         kind: slot.kind,
         local: member.local,
         optOut: member.optOut,
+        stage: member.stage,
         shownId: idOf(member.endpoint, slot.shows),
       };
       sources.push({
         id: idOf(member.endpoint, slot.kind),
         endpoint: member.endpoint,
         kind: slot.kind,
-        track: member.optOut ? null : track,
-        gain: gainOf(entry, mix, onScreen),
+        track: member.optOut || member.stage === false ? null : track,
+        gain: isSlate ? 0 : gainOf(entry, mix, onScreen),
       });
     }
   }
@@ -101,6 +105,26 @@ const disconnectNode = (node) => {
   }
 };
 
+const rampTo = (param, value, now, seconds) => {
+  if (typeof param.cancelAndHoldAtTime === 'function') {
+    param.cancelAndHoldAtTime(now);
+  } else {
+    const current = param.value;
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(current, now);
+  }
+  param.linearRampToValueAtTime(value, now + seconds);
+};
+
+const releaseMusic = (entry) => {
+  entry.media.pause();
+  entry.media.removeAttribute('src');
+  entry.media.load();
+  URL.revokeObjectURL(entry.url);
+  disconnectNode(entry.source);
+  disconnectNode(entry.gain);
+};
+
 class Mixer {
   #members = null;
   #options = null;
@@ -112,6 +136,9 @@ class Mixer {
   #chain = null;
   #nodes = new Map();
   #gains = new Map();
+  #music = new Map();
+  #currentMusic = '';
+  #clip = null;
   #isStopped = false;
 
   constructor({ members, options, onScreen, clock = null }) {
@@ -158,6 +185,8 @@ class Mixer {
       worker.terminate();
     }
     for (const id of Array.from(this.#nodes.keys())) this.#drop(id);
+    this.#clearMusic();
+    this.#dropClip();
     this.#gains.clear();
     disconnectNode(this.#chain.master);
     disconnectNode(this.#chain.limiter);
@@ -172,11 +201,116 @@ class Mixer {
     try {
       const members = this.#members();
       const onScreen = this.#onScreen();
-      this.#sync(audioSourcesOf(members, this.#options(), onScreen));
+      const options = this.#options();
+      this.#sync(audioSourcesOf(members, options, onScreen));
+      const studio = options?.studio;
+      if (studio) this.#syncMusic(studio);
+      else if (this.#currentMusic || this.#music.size) this.#clearMusic();
+      this.#syncClip(studio);
       this.error = null;
     } catch (error) {
       this.error = error;
     }
+  }
+
+  #syncClip(studio) {
+    const clip = studio?.clip;
+    if (this.#clip?.clip === clip) {
+      if (clip) this.#gains.set(clip.id, 1);
+      return;
+    }
+    this.#dropClip();
+    if (!clip) return;
+    try {
+      const { context } = this;
+      if (typeof context.createMediaElementSource !== 'function') {
+        throw new Error('Program clip audio is unavailable');
+      }
+      this.#clip = clip.route((media) => {
+        const source = context.createMediaElementSource(media);
+        const gain = context.createGain();
+        gain.gain.value = 1;
+        source.connect(gain).connect(this.#chain.master);
+        return { clip, media, source, gain };
+      });
+      this.#gains.set(clip.id, 1);
+    } catch (error) {
+      studio.clipFailed(error);
+    }
+  }
+
+  #dropClip() {
+    const entry = this.#clip;
+    if (!entry) return;
+    this.#clip = null;
+    this.#gains.delete(entry.clip.id);
+    disconnectNode(entry.source);
+    disconnectNode(entry.gain);
+    entry.clip.preview(entry.media);
+  }
+
+  #clearMusic() {
+    this.#currentMusic = '';
+    for (const entry of this.#music.values()) releaseMusic(entry);
+    this.#music.clear();
+  }
+
+  #syncMusic(studio) {
+    const music = studio.music;
+    const id = music?.checksum ?? '';
+    const now = this.#context.currentTime;
+    if (this.#currentMusic !== id) {
+      const leaving = this.#music.get(this.#currentMusic);
+      if (leaving) {
+        rampTo(leaving.gain.gain, 0, now, MUSIC_FADE_SECONDS);
+        leaving.until = now + MUSIC_FADE_SECONDS;
+      }
+      this.#currentMusic = id;
+      if (music) {
+        try {
+          const entry = this.#music.get(id) ?? this.#attachMusic(music, studio);
+          entry.until = Infinity;
+          entry.target = music.volume;
+          rampTo(entry.gain.gain, music.volume, now, MUSIC_FADE_SECONDS);
+        } catch (error) {
+          studio.musicFailed(error);
+        }
+      }
+    }
+    for (const [id, entry] of this.#music) {
+      if (entry.until <= now) {
+        releaseMusic(entry);
+        this.#music.delete(id);
+      }
+    }
+    const entry = this.#music.get(id);
+    if (!entry || entry.target === music.volume) return;
+    entry.target = music.volume;
+    rampTo(entry.gain.gain, entry.target, now, RAMP_SECONDS);
+  }
+
+  #attachMusic(music, studio) {
+    const context = this.#context;
+    if (typeof context.createMediaElementSource !== 'function') {
+      throw new Error('Program music is unavailable');
+    }
+    const media = document.createElement('audio');
+    const source = context.createMediaElementSource(media);
+    const gain = context.createGain();
+    gain.gain.value = 0;
+    source.connect(gain).connect(this.#chain.master);
+    media.loop = true;
+    const url = URL.createObjectURL(music.blob);
+    media.src = url;
+    const entry = { media, source, gain, url, until: 0, target: 0 };
+    this.#music.set(music.checksum, entry);
+    media.play().catch((error) => {
+      const isCurrent = this.#currentMusic === music.checksum;
+      if (isCurrent && this.#music.get(music.checksum) === entry) {
+        studio.musicFailed(error);
+      }
+    });
+    return entry;
   }
 
   #sync(sources) {
