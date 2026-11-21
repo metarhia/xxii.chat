@@ -817,6 +817,12 @@ const sweepAll = async () => {
     return true;
   },
 
+  member(client, args) {
+    if (!owns(client, args?.endpoint)) return false;
+    const state = domain.call.calls.get(args.call);
+    return state?.participants.has(args.endpoint) === true;
+  },
+
   async update(client, args) {
     if (!owns(client, args.endpoint)) return fail('call/forbidden');
     const state = domain.call.calls.get(args.call);

@@ -2495,6 +2495,31 @@ svg {
   font-weight: 600;
 }
 
+.call-live {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--offline);
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stream-host,
+.stream-status {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.stream-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.stream-editor[hidden],
+.stream-note[hidden] {
+  display: none;
+}
+
 .call-backstage {
   padding: 2px 6px;
   border-radius: 4px;

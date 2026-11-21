@@ -22,6 +22,7 @@ import {
   addAsset,
   deleteAsset,
 } from './studio-storage.js';
+import { createDestinationControls } from './stream-panel.js';
 import { createSceneControls, createSceneEditor } from './studio-panel.js';
 import { createBrandControls, createAssetControls } from './studio-panel.js';
 import { createSceneRow, createAssetRow, paintValues } from './studio-panel.js';
@@ -131,6 +132,7 @@ const createStudioPanel = () => {
     preview,
     note,
     status,
+    createDestinationControls(),
     createSceneControls(),
     createSceneEditor(),
     createSwitch('join-backstage', 'New people go backstage'),
@@ -938,6 +940,7 @@ class Studio {
     if (stage.programPanel === 'studio') {
       this.#load();
       this.#paintControls(panel, people);
+      stage.streaming?.paint(panel);
     }
     join.checked = joinBackstage;
     join.closest('label').hidden = !isAdmin;

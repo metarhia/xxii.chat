@@ -47,6 +47,7 @@ const memberOf = (state, person) => {
     nick: nickOf(person, local, state.nick),
     local,
     optOut: person.optOut === true,
+    live: person.live === true,
     stage: person.stage !== false,
     camera: tracks.camera,
     screen: tracks.screen,

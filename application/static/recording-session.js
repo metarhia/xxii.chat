@@ -46,6 +46,7 @@ class RecordingSession {
   #compositor = null;
   #clock = null;
   #current = null;
+  #holds = new Set();
   #defaults = null;
   #names = new Set();
   #ticks = 0;
@@ -225,10 +226,28 @@ class RecordingSession {
     return this.#stopping;
   }
 
+  hold(owner) {
+    if (this.#isDisposed) throw new Error('The call has ended');
+    const compositor = this.#ensureCompositor();
+    const mixer = this.#ensureMixer();
+    this.#holds.add(owner);
+    this.#ensureClock();
+    return { compositor, mixer };
+  }
+
+  unhold(owner) {
+    if (!this.#holds.delete(owner)) return;
+    this.#settleProgram();
+    this.#dropCompositor();
+    this.paint();
+  }
+
   dispose() {
     if (this.#disposing) return this.#disposing;
     this.#isDisposed = true;
+    this.#holds.delete('stream');
     this.#stopClock();
+    this.#settleProgram();
     this.#dropCompositor();
     const stopped = this.#starting ?? this.stop();
     this.#disposing = stopped.finally(() => this.#dropCompositor());
@@ -250,8 +269,23 @@ class RecordingSession {
     return compositor;
   }
 
+  #ensureMixer() {
+    if (this.#mixer) return this.#mixer;
+    const members = () => this.members();
+    const options = () => this.programOptions();
+    const onScreen = () => this.#compositor?.onScreen ?? new Set();
+    this.#ensureCompositor();
+    const mixer = new Mixer({ members, options, onScreen });
+    this.#mixer = mixer;
+    mixer.start();
+    return mixer;
+  }
+
   #dropCompositor() {
-    if (this.isActive || (this.#starting && !this.#isDisposed)) return;
+    const isHeld = this.#holds.size > 0;
+    if (isHeld || this.isActive || (this.#starting && !this.#isDisposed)) {
+      return;
+    }
     this.#compositor?.canvas.remove();
     this.#compositor?.stop();
     this.#compositor = null;
@@ -325,13 +359,9 @@ class RecordingSession {
     if (!target) await this.#prepareStorage(isCurrent);
     if (!isCurrent()) return;
     this.#isWarned = this.notice === LOW_SPACE;
+    this.#holds.add('record');
     const compositor = this.#ensureCompositor();
-    const members = () => this.members();
-    const options = () => this.programOptions();
-    const onScreen = () => compositor.onScreen;
-    const mixer = new Mixer({ members, options, onScreen });
-    this.#mixer = mixer;
-    mixer.start();
+    const mixer = this.#ensureMixer();
     const writer = new RecordingWriter();
     this.#writer = writer;
     const quality = qualityOf(this.options);
@@ -360,7 +390,7 @@ class RecordingSession {
     }
     this.#current = info;
     try {
-      this.#startClock();
+      this.#ensureClock();
       this.afterStart?.(info);
     } catch (error) {
       this.#hooks.fail(error);
@@ -368,12 +398,19 @@ class RecordingSession {
   }
 
   #release() {
-    this.#stopClock();
     this.release?.();
-    this.#mixer?.stop();
-    this.#mixer = null;
     this.#writer?.stop();
     this.#writer = null;
+    this.#holds.delete('record');
+    this.#settleProgram();
+  }
+
+  #settleProgram() {
+    if (this.#holds.size > 0) return;
+    this.#stopClock();
+    this.idle?.();
+    this.#mixer?.stop();
+    this.#mixer = null;
   }
 
   #onState(state) {
@@ -406,7 +443,8 @@ class RecordingSession {
     this.#dropCompositor();
   }
 
-  #startClock() {
+  #ensureClock() {
+    if (this.#clock) return;
     const worker = new Worker(CLOCK_URL);
     this.#clock = worker;
     this.#ticks = 0;
@@ -429,7 +467,8 @@ class RecordingSession {
     this.#ticks++;
     this.tick?.();
     for (const name of this.#peopleNames()) this.#names.add(name);
-    if (!this.#recorder?.meta.folder && this.#ticks % SPACE_TICKS === 0) {
+    const recorder = this.#recorder;
+    if (recorder && !recorder.meta.folder && this.#ticks % SPACE_TICKS === 0) {
       this.#checkSpace();
     }
   }

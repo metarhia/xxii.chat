@@ -262,6 +262,26 @@ that message and its author's nick on the program. Studio plays one local
 video clip at a time, full frame or as a share tile. Clip sound goes to the
 recording mix.
 
+Studio can also send the program live over WHIP (RFC 9725) to a media server
+such as MediaMTX or a service with a WHIP ingest. In the Studio panel, add
+**Destinations** with a name, the WHIP address (`https:`, or `http:` for
+`localhost`), a token, and a bitrate of 1 to 20 Mbps, and enable up to two.
+They are saved in this browser (`xxii:destinations`), and the token is never
+sent to the call. **Go live** works with Studio on or off and uses the same
+program as recording, so both can run together. Each destination shows
+`connecting`, then `LIVE · 5.8 Mbps` with a warning when bandwidth, CPU, or
+packet loss limits the stream, or `retrying in 5 s (attempt 2 of 5)`. A server
+error, timeout, or lost connection is retried after 2, 5, and 10 s and stops
+after 5 failed attempts in a row; a rejected token stops at once. **Stop live**
+is in the Studio panel and the call's **more** menu. Everyone in the call sees
+`● LIVE` in the topbar and gets an announcement, and anyone can opt out of the
+program as with recording. Leaving the call or closing the page ends the
+stream and deletes it on the media server (closing the page deletes only
+streams sent directly). The browser posts to the media server itself; when
+the server has no CORS for this app, the signaling goes through the app's
+server relay instead, `stream/whip`, which only members of the call may use
+(30 requests a minute), and the media still flows straight to the media server.
+
 Open **Recordings** from the sidebar session block or the record control menu
 to see local recordings and browser storage usage. Play and seek in the library
 using the service worker's `/recordings/<id>/<file>` route with `Range` support.
@@ -329,6 +349,10 @@ port that build the ICE server list.
   relay address.
 - `XXII_TURN_PRIVATE_PEERS` defaults to `false`. Exactly `true` sets
   `allowPrivatePeers`. Anything else, including unset, is `false`.
+- `XXII_STREAM_ALLOW_HTTP` and `XXII_STREAM_ALLOW_PRIVATE` default to
+  `false`. Exactly `true` lets the WHIP relay use `http:` for loopback hosts
+  and reach private addresses (`application/config/stream.js`; for tests and
+  a local media server).
 
 The same server can run as the `metaice` CLI: `metaice [config]`. The
 config is a `.js` or `.json` options file. `SIGINT` and `SIGTERM` exit 0.
@@ -505,6 +529,14 @@ server) with `files/have`, `get`, and `put`.
   `test/studio.js` plays a recorded scene cut, observes a hidden-tab fade,
   and checks saved settings, assets, the program music mix, call chat overlays,
   and audible clips in the recording mix.
+  `test/whip-logic.js` checks destination validation, codec order, `Link` and
+  `Location` handling, retries, and the health text. `test/stream.js` goes live
+  to a local WHIP endpoint that hands the offer to another tab, and checks the
+  token and `Origin`, received frames and audio, the `● LIVE` chip, `DELETE` on
+  stop, and a retry after a `503`; a second run against an endpoint without
+  CORS checks the server relay: no `Origin`, the token, frames, and `DELETE`
+  through the relay (scenario 21). `application/domain/stream.test.js` covers
+  the relay rules.
   `npm run test:app` reserves two different free ports and passes them as
   `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so
   it does not bind `8000` or `3478`. The browser harness picks free
