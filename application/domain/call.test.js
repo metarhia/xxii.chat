@@ -773,6 +773,105 @@
       }
     });
 
+    await t.test('Join backstage applies to new guests only', async () => {
+      const clients = [];
+      const restore = ownedBy('st-owner');
+      try {
+        const host = person(clients, 'st-host');
+        const cohost = person(clients, 'st-cohost');
+        const guest = person(clients, 'st-guest');
+        const owner = person(clients, 'st-owner');
+        const opened = await begin(host, 'studio-join', 'st-host:1', {
+          policy: 'open',
+        });
+        const call = opened.state.call;
+        const set = (client, value) =>
+          domain.call.host(client, { call, action: 'joinBackstage', value });
+        node.assert.strictEqual(opened.state.joinBackstage, false);
+        await enter(cohost, call, 'st-cohost:1');
+        await domain.call.host(host, {
+          call,
+          action: 'promote',
+          target: 'st-cohost:1',
+        });
+        isCode(await set(guest, true), 'call/admin-only');
+        isCode(await set(host, 'true'), 'call/bad-action');
+        isCode(await set(host), 'call/bad-action');
+        node.assert.strictEqual(
+          last(host, 'call/state').data.joinBackstage,
+          false,
+        );
+        node.assert.strictEqual(await set(cohost, true), true);
+        node.assert.strictEqual(
+          last(host, 'call/state').data.joinBackstage,
+          true,
+        );
+        const joined = await enter(guest, call, 'st-guest:1');
+        node.assert.strictEqual(joined.state.joinBackstage, true);
+        node.assert.strictEqual(row(joined.state, 'st-guest:1').stage, false);
+        isCode(await set(guest, false), 'call/admin-only');
+        const first = named(guest, 'call/state')[0].data;
+        node.assert.strictEqual(row(first, 'st-guest:1').stage, false);
+        for (const admin of [host, cohost]) {
+          const endpoint = `${domain.presence.owners.get(admin)}:2`;
+          const view = (await enter(admin, call, endpoint)).state;
+          node.assert.strictEqual(row(view, endpoint).stage, true);
+        }
+        const own = (await enter(owner, call, 'st-owner:1')).state;
+        node.assert.strictEqual(row(own, 'st-owner:1').admin, true);
+        node.assert.strictEqual(row(own, 'st-owner:1').stage, false);
+        const again = await enter(cohost, call, 'st-cohost:1');
+        node.assert.strictEqual(again.state.joinBackstage, true);
+        node.assert.strictEqual(row(again.state, 'st-cohost:1').stage, true);
+        node.assert.strictEqual(await set(host, false), true);
+        const after = last(guest, 'call/state').data;
+        node.assert.strictEqual(after.joinBackstage, false);
+        node.assert.strictEqual(row(after, 'st-guest:1').stage, false);
+        const next = (await enter(guest, call, 'st-guest:2')).state;
+        node.assert.strictEqual(row(next, 'st-guest:2').stage, true);
+      } finally {
+        restore();
+        await done(clients);
+      }
+    });
+
+    await t.test(
+      'Admission uses the current join backstage setting',
+      async () => {
+        const clients = [];
+        try {
+          const host = person(clients, 'sa-host');
+          const guest = person(clients, 'sa-guest');
+          const opened = await begin(host, 'studio-lobby', 'sa-host:1', {
+            policy: 'approval',
+          });
+          const call = opened.state.call;
+          const endpoint = 'sa-guest:1';
+          node.assert.strictEqual(
+            (await enter(guest, call, endpoint)).status,
+            'lobby',
+          );
+          await domain.call.host(host, {
+            call,
+            action: 'joinBackstage',
+            value: true,
+          });
+          node.assert.strictEqual(
+            await domain.call.admit(host, { call, endpoint }),
+            true,
+          );
+          const published = named(guest, 'call/state')[0].data;
+          const admitted = last(guest, 'call/admitted').data.state;
+          for (const view of [published, admitted]) {
+            node.assert.strictEqual(view.joinBackstage, true);
+            node.assert.strictEqual(row(view, endpoint).stage, false);
+          }
+        } finally {
+          await done(clients);
+        }
+      },
+    );
+
     await t.test('Host mute, remove, lock, policy, and spotlight', async () => {
       const clients = [];
       try {

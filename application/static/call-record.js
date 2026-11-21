@@ -36,7 +36,6 @@ class CallRecording extends RecordingSession {
   #stage = null;
   #sent = new Map();
   #imageUrl = '';
-  #isPanel = false;
   #flagged = null;
 
   constructor(stage, settings) {
@@ -60,11 +59,22 @@ class CallRecording extends RecordingSession {
   }
 
   programOptions() {
+    const studio = this.#stage.studio;
+    const scene = studio?.enabled && studio.activeScene;
+    if (scene) return { ...this.options, ...scene.program, studio };
     const background = this.image ?? (this.options.background || undefined);
     return { ...this.options, background };
   }
 
   storedOptions() {
+    const studio = this.#stage.studio;
+    const scene = studio?.enabled && studio.activeScene;
+    if (scene) {
+      const background = scene.background.image
+        ? 'image'
+        : scene.background.color;
+      return { ...this.options, ...scene.program, background };
+    }
     const background = this.image ? 'image' : this.options.background;
     return { ...this.options, background };
   }
@@ -73,32 +83,32 @@ class CallRecording extends RecordingSession {
     const stage = this.#stage;
     if (!stage.host || this.isDisposed) return;
     const people = this.members().filter((member) => !member.local);
-    this.paintPanel(stage.host, this.#isOpen(), people);
-  }
-
-  togglePanel() {
-    const stage = this.#stage;
-    if (stage.mode !== 'call') return;
-    if (stage.phone?.matches === true) {
-      if (stage.sheet === 'record') stage.closeSheet();
-      else stage.openSheet('record');
-    } else {
-      this.#isPanel = !this.#isPanel;
+    const panel = stage.programPanel;
+    const studio = stage.host.querySelector('.call-studio');
+    studio?.toggleAttribute('data-open', panel === 'studio');
+    const preview = panel
+      ? stage.host.querySelector(`.${panel}-preview`)
+      : null;
+    this.paintPanel(stage.host, panel === 'record', people, preview);
+    const note = studio?.querySelector('.studio-note');
+    if (note && note.textContent !== this.notice) {
+      note.textContent = this.notice;
     }
-    this.paint();
+    if (panel === 'studio') stage.studio?.paint();
   }
 
-  closePanel() {
-    const stage = this.#stage;
-    const isPhone = stage.phone?.matches === true;
-    if (isPhone || !this.#isPanel || stage.mode !== 'call') return false;
-    this.#isPanel = false;
-    this.paint();
-    return true;
+  recordView() {
+    const studio = this.#stage.studio;
+    const scene = studio?.enabled && studio.activeScene;
+    if (!scene) return null;
+    const { color } = scene.background;
+    const options = { ...this.options, ...scene.program, background: color };
+    return { options, sceneName: scene.name };
   }
 
   change(control) {
     const { record, pin, volume } = control.dataset;
+    if (this.#stage.studio?.enabled && control.disabled) return;
     if (pin) return void this.#pin(pin, control.checked);
     if (volume) return void this.#volume(volume, Number(control.value));
     if (record === 'image') return void this.#chooseImage(control);
@@ -159,13 +169,6 @@ class CallRecording extends RecordingSession {
 
   tick() {
     this.#syncHints();
-  }
-
-  #isOpen() {
-    const stage = this.#stage;
-    if (stage.mode !== 'call') return false;
-    if (stage.phone?.matches === true) return stage.sheet === 'record';
-    return this.#isPanel;
   }
 
   #syncHints() {

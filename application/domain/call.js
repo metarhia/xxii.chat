@@ -137,7 +137,7 @@ const blocked = (state, item, args) => {
   return screen && screens;
 };
 
-const memberOf = (client, peer, endpoint, nick, now) => ({
+const memberOf = (state, client, peer, endpoint, nick, now) => ({
   endpoint,
   peer,
   nick: clip(nick, NICK_LIMIT),
@@ -150,7 +150,7 @@ const memberOf = (client, peer, endpoint, nick, now) => ({
   hand: 0,
   recording: false,
   optOut: false,
-  stage: true,
+  stage: !state.joinBackstage || peer === state.host || state.cohosts.has(peer),
   live: false,
   title: '',
 });
@@ -200,6 +200,7 @@ const viewOf = (state, admins, participants, lobby, version) => ({
   version,
   policy: state.policy,
   locked: state.locked,
+  joinBackstage: state.joinBackstage,
   host: state.host,
   admins,
   spotlight: state.spotlight,
@@ -307,6 +308,7 @@ const createCall = (fields) => {
     policy: fields.policy,
     token,
     locked: false,
+    joinBackstage: false,
     spotlight: '',
     host: fields.host,
     cohosts: new Set(),
@@ -320,7 +322,7 @@ const createCall = (fields) => {
 
 const enter = async (state, client, peer, endpoint, nick) => {
   const now = Date.now();
-  const member = memberOf(client, peer, endpoint, nick, now);
+  const member = memberOf(state, client, peer, endpoint, nick, now);
   state.participants.set(endpoint, member);
   state.lobby.delete(endpoint);
   remember(client, endpoint, state.id);
@@ -634,6 +636,13 @@ const setStage = async (state, endpoint, value) => {
   return true;
 };
 
+const setJoinBackstage = async (state, value) => {
+  if (typeof value !== 'boolean') return fail('call/bad-action');
+  state.joinBackstage = value;
+  await publish(state);
+  return true;
+};
+
 const lowerOne = async (state, endpoint) => {
   const target = state.participants.get(endpoint);
   if (!target) return true;
@@ -690,6 +699,7 @@ const HOST = {
   promote: (access, args) => promote(access.state, args.target),
   demote: (access, args) => demote(access.state, args.target),
   stage: (access, args) => setStage(access.state, args.target, args.value),
+  joinBackstage: (access, args) => setJoinBackstage(access.state, args.value),
   lowerHand: (access, args) => lowerOne(access.state, args.target),
   muteAll: (access) => muteAll(access.state, access.peer, access.owner),
   lowerHands: (access) => lowerAll(access.state),

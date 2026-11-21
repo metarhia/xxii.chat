@@ -1,5 +1,6 @@
 const SETTINGS_KEY = 'xxii:call-settings';
 const LEGACY_AUTO_LOWER_KEY = 'xxii:call-auto-lower';
+const TITLE_LIMIT = 48;
 const NOISE_LEVELS = ['standard', 'strong'];
 const TOAST_LIMIT = 8;
 const TOAST_MERGE_MS = 3000;
@@ -12,6 +13,7 @@ const DEFAULTS = {
   noise: 'standard',
   pushToTalk: true,
   autoLower: true,
+  title: '',
   recordingLayout: 'speakers',
   recordingAudio: 'all',
   recordingQuality: '1080p30',
@@ -35,12 +37,20 @@ const segmentLabel = (minutes) => `${minutes} minutes`;
 const flagOf = (value, fallback) =>
   typeof value === 'boolean' ? value : fallback;
 
+const titleOf = (value) => {
+  if (typeof value !== 'string') return '';
+  const title = value.trim().slice(0, TITLE_LIMIT);
+  return title.replace(/[\uD800-\uDBFF]$/u, '');
+};
+
 const validateSettings = (input) => {
   const source = input && typeof input === 'object' ? input : {};
   const settings = { ...DEFAULTS };
   for (const [name, fallback] of Object.entries(DEFAULTS)) {
     if (typeof fallback === 'boolean') {
       settings[name] = flagOf(source[name], fallback);
+    } else if (name === 'title') {
+      settings.title = titleOf(source.title);
     } else if (OPTIONS[name].includes(source[name])) {
       settings[name] = source[name];
     }
@@ -120,3 +130,4 @@ export { SETTINGS_KEY, OPTIONS, DEFAULTS, TOAST_LIMIT, TOAST_SHOW_MS };
 export { TOAST_MERGE_MS, validateSettings, readSettings, writeSettings };
 export { createToast, addToast, toastText, showsToast };
 export { targetLabel, segmentLabel };
+export { TITLE_LIMIT, titleOf };

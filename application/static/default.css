@@ -2275,7 +2275,8 @@ svg {
   background: var(--panel);
 }
 
-.call-record {
+.call-record,
+.call-studio {
   display: none;
   flex-direction: column;
   gap: 8px;
@@ -2286,7 +2287,8 @@ svg {
   background: var(--panel);
 }
 
-.call-record[data-open] {
+.call-record[data-open],
+.call-studio[data-open] {
   display: flex;
 }
 
@@ -2299,7 +2301,8 @@ svg {
   justify-content: space-between;
 }
 
-.record-preview canvas {
+.record-preview canvas,
+.studio-preview canvas {
   display: block;
   width: 100%;
   height: auto;
@@ -2318,9 +2321,33 @@ svg {
 
 .record-fields,
 .record-list,
-.record-background {
+.record-background,
+.studio-options {
   display: grid;
   gap: 8px;
+}
+
+.studio-options {
+  min-inline-size: 0;
+  border: 1px solid var(--raised);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.studio-options legend {
+  padding-inline: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.studio-options input[type='file'] {
+  max-width: 100%;
+}
+
+.studio-options [aria-pressed='true'],
+.studio-stage-lists [aria-pressed='true'] {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .record-list {
@@ -2356,6 +2383,49 @@ svg {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.call-people-roster,
+.studio-stage-lists,
+.call-stage-group {
+  display: grid;
+  gap: 6px;
+}
+
+.call-stage-group h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.call-roster li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+
+.roster-menu {
+  margin-left: auto;
+}
+
+.roster-menu summary {
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.studio-note:empty,
+.studio-status:empty {
+  display: none;
+}
+
+.studio-permission {
+  color: var(--muted);
+}
+
+.call-studio [hidden] {
+  display: none;
 }
 
 #knock-toasts {
@@ -2423,6 +2493,14 @@ svg {
 .call-recording {
   color: var(--offline);
   font-weight: 600;
+}
+
+.call-backstage {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--away);
+  font-size: 12px;
 }
 
 .call-opt-out[aria-pressed='true'],
@@ -2986,7 +3064,8 @@ svg {
   .app[data-call='call'] > .sidebar,
   .app[data-call='call'] .chat-view,
   .app[data-call='call'] .call-people,
-  .app[data-call='call'] .call-record {
+  .app[data-call='call'] .call-record,
+  .app[data-call='call'] .call-studio {
     display: none;
   }
 
@@ -3000,6 +3079,7 @@ svg {
 
   .app[data-call='call'][data-call-sheet='people'] .call-people,
   .app[data-call='call'][data-call-sheet='record'] .call-record[data-open],
+  .app[data-call='call'][data-call-sheet='studio'] .call-studio[data-open],
   .app[data-call='call'][data-call-sheet='chat'] .chat-view,
   .app[data-call='call']:is([data-panel='calls'], [data-panel='recordings'])
     > .panel {

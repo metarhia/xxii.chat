@@ -1,10 +1,13 @@
 import { Menu, Press } from './overlays.js';
 import { tileId } from './call-layout.js';
+import { stageMove } from './studio.js';
 
 const adminItems = (stage, endpoint) => {
-  if (!stage.isAdmin || endpoint === stage.session?.endpoint) return [];
+  if (!stage.isAdmin) return [];
   const person = stage.personOf(endpoint);
   if (!person) return [];
+  const move = stageMove(person);
+  if (endpoint === stage.session?.endpoint) return [move];
   const mute = person.mic ? 'Ask to mute' : 'Ask to unmute';
   const items = [{ action: 'ask-mute', label: mute }];
   if (person.camera) {
@@ -19,6 +22,7 @@ const adminItems = (stage, endpoint) => {
   const lit = stage.spotlight === endpoint;
   const spotlight = lit ? 'Clear spotlight' : 'Spotlight';
   items.push({ action: 'spotlight', label: spotlight });
+  items.push(move);
   const host = person.peer !== '' && person.peer === stage.hostPeer;
   if (!host) {
     const label = person.admin ? 'Remove co-host' : 'Make co-host';

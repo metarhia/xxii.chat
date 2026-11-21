@@ -232,6 +232,32 @@ shows `opted out` instead of their video and drops
 their voice within a frame, and the roster marks them. The recorder's app
 honors this; a modified app could ignore it.
 
+Open **Studio** from the call's **more** menu to preview the program and see
+who is on stage or backstage. A host can move people from the Studio lists,
+a tile's menu, or a People row menu. Backstage participants stay visible and
+audible in the call, and their camera, screen, mic, and screen audio are
+excluded from the program. They see a backstage chip and a notice when they
+move. Hosts can turn on **New people go backstage** for the call, so guests
+start backstage when they join or are admitted. Hosts and co-hosts start on
+stage. Studio and Record share one program preview and open one at a time.
+
+Turn on **Enable Studio** to switch between **Starting soon**, **Live**,
+**Be right back**, and **Ending**. Edit or add scenes with their own layout,
+background color or image, title, and music. Scene changes use a cut or a
+300 ms fade and appear in the recording. A countdown stays on screen at zero.
+Studio settings and assets are saved in browser storage. Branding controls
+set the colors, font, name chips, and logo. Music loops in the program and
+fades when the track changes. Record still controls recording quality and
+storage target while Studio is enabled.
+
+Choose which overlays each scene shows. Save banners and a scrolling ticker
+in Studio, and show one banner and one participant lower third at a time.
+Participants can set **Title for lower thirds** in Calls settings. In the
+active call chat, use **Show on screen** from a text message's menu to put
+that message and its author's nick on the program. Studio plays one local
+video clip at a time, full frame or as a share tile. Clip sound goes to the
+recording mix.
+
 Open **Recordings** from the sidebar session block or the record control menu
 to see local recordings and browser storage usage. Play and seek in the library
 using the service worker's `/recordings/<id>/<file>` route with `Range` support.
@@ -393,7 +419,8 @@ server) with `files/have`, `get`, and `put`.
 | `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state                                      |
 | `files/have`, `get`, `put`       | answer peer | File exchange between peers                                        |
 | `CallSession` event `stats`      | call tab    | Per-link RTT, loss, streams and candidates sampled once per second |
-| `call/update`                    | server      | Mic, camera, shared screen, and raised hand for the endpoint       |
+| `call/update`                    | server      | Updates endpoint mic, camera, screen, hand, and lower-third title  |
+| `call/host`                      | server      | Admin actions including `stage` and `joinBackstage`                |
 | `reaction` peer message          | call link   | One emoji from the reaction set, at most 3 per second per sender   |
 | `hint` peer message              | call link   | Rendered slot size, frame cap, and camera audio-only request       |
 | `ice/servers`                    | server      | ICE server list for the call tab; host is location.hostname        |
@@ -467,6 +494,13 @@ server) with `files/have`, `get`, and `put`.
   `test/capture-logic.js` checks the solo layouts, and `test/capture.js` checks
   solo capture, storage targets, the direct-chat card, and source cleanup.
   `test/recording-duration.js` covers timing in WebM and fragmented MP4.
+  `test/studio-stage.js` checks stage moves, program picture and mix,
+  the Studio preview, and new people joining backstage (scenario 20).
+  `test/studio-layout.js` checks saved data, overlay placement and animation,
+  comment clipping, ticker speed, and clip layout.
+  `test/studio.js` plays a recorded scene cut, observes a hidden-tab fade,
+  and checks saved settings, assets, the program music mix, call chat overlays,
+  and audible clips in the recording mix.
   `npm run test:app` reserves two different free ports and passes them as
   `XXII_PORT` and `XXII_ICE_PORT`, then runs `MODE=test node server.js`, so
   it does not bind `8000` or `3478`. The browser harness picks free
