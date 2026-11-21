@@ -210,7 +210,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
         && app.selectionPosition.textContent === '1 of 2'
         && app.backBtn.classList.contains('hidden')
         && items.length === 2 && dim === 0
-        && [...items].every((row) => row.classList.contains('chain'));`;
+        && [...items].every((row) => row.classList.contains('inside'));`;
     await wait(first, opened);
     await run(first, `${press('Escape')} return true;`);
     await wait(

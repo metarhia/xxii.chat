@@ -14,7 +14,7 @@ import { MAX_FILE_SIZE, attachFile, attachmentsOf } from './chat.js';
 import { listChannels, listAuthors, folderTree } from './chat.js';
 import { threadsOf, activityOf, reactionsOf, unreadOf } from './chat.js';
 import { lineageOf } from './chat.js';
-import { rootOf, threadOf, threadRootOf, branchOf } from './replies.js';
+import { rootOf, threadOf, threadRootOf } from './replies.js';
 import { colorOf, repliesToMe } from './replies.js';
 import { isImage, storeFile, readFile, saveFile } from './files.js';
 import { readBlob, onFileStored } from './files.js';
@@ -153,7 +153,14 @@ const ITEM_KEYS = {
 
 const LAYER_ACTIONS = new Set(['selection', 'forward', 'pick']);
 
-const THREAD_KEYS = { '[': -1, ']': 1, ArrowUp: -1, ArrowDown: 1 };
+const THREAD_KEYS = {
+  '[': -1,
+  ']': 1,
+  ArrowUp: -1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowRight: 1,
+};
 
 const LAYERS = {
   menu: (app) => app.hideMenu(),
@@ -2565,16 +2572,13 @@ class ChatApplication extends Application {
 
   renderSelection() {
     const list = this.messageList;
-    const { selection, view } = this;
+    const { selection } = this;
     list.classList.toggle('selecting', selection !== null);
     const items = list.querySelectorAll(`${ITEMS}, .call-card`);
     const ids = this.threadItems();
     const members = new Set(ids);
     const loaded = ids.filter((id) => this.cache.has(id));
     const chosen = this.chosenOf(loaded);
-    const chain = selection
-      ? new Set(branchOf(view.records, view.replies, chosen, this.article))
-      : new Set();
     for (const item of items) {
       const { id } = item.dataset;
       const isArticle = item.classList.contains('post-article');
@@ -2582,7 +2586,6 @@ class ChatApplication extends Application {
       const isDimmed = selection !== null && !isMember && !isArticle;
       item.classList.toggle('dim', isDimmed);
       item.classList.toggle('inside', isMember);
-      item.classList.toggle('chain', isMember && chain.has(id));
       item.classList.toggle('chosen', isMember && id === chosen);
     }
     this.renderSelectionBar(loaded, chosen);

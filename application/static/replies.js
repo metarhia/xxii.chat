@@ -40,24 +40,6 @@ const threadRootOf = (view, id, top = '') => {
   return hasParent || replies.has(id) ? rootOf(records, id, top) : '';
 };
 
-const ancestorsOf = (records, id, top) => {
-  const ancestors = [];
-  const visited = new Set([id]);
-  let parent = records.get(id)?.replyTo;
-  while (parent && parent !== top && !visited.has(parent)) {
-    visited.add(parent);
-    ancestors.unshift(parent);
-    parent = records.get(parent)?.replyTo;
-  }
-  return ancestors;
-};
-
-const branchOf = (records, replies, id, top = '') => {
-  const ancestors = ancestorsOf(records, id, top);
-  const descendants = threadOf(replies, id).map((reply) => reply.id);
-  return ancestors.concat([id], descendants);
-};
-
 const hashOf = (text) => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
@@ -92,4 +74,4 @@ const repliesToMe = (records, me, readAt) => {
   return mine;
 };
 
-export { rootOf, threadOf, threadRootOf, branchOf, colorOf, repliesToMe };
+export { rootOf, threadOf, threadRootOf, colorOf, repliesToMe };

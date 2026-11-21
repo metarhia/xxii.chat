@@ -50,8 +50,8 @@ test('rootOf stops at top, a missing parent, or a cycle', async () => {
   assert.equal(rootOf(records(loop), 'y'), 'x');
 });
 
-test('threadOf and branchOf walk a deep tree', async () => {
-  const { threadOf, branchOf } = await load();
+test('threadOf walks a deep tree', async () => {
+  const { threadOf } = await load();
   const list = [
     message('r', '', 1),
     message('a', 'r', 2),
@@ -65,17 +65,6 @@ test('threadOf and branchOf walk a deep tree', async () => {
   const all = threadOf(replies, 'r').map((item) => item.id);
   assert.deepEqual(all, ['a', 'b', 'c', 'd', 'e']);
   assert.deepEqual(threadOf(replies, 'z'), []);
-  const byId = records(list);
-  assert.deepEqual(branchOf(byId, replies, 'a'), ['r', 'a', 'b', 'c', 'e']);
-  assert.deepEqual(branchOf(byId, replies, 'b', 'r'), ['a', 'b', 'c']);
-  assert.deepEqual(branchOf(byId, replies, 'r'), [
-    'r',
-    'a',
-    'b',
-    'c',
-    'd',
-    'e',
-  ]);
 });
 
 test('threadRootOf handles messages and article comments', async () => {
