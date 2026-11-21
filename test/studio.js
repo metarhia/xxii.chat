@@ -791,7 +791,8 @@ test(
     const endpoint = await guest.run('return app.callStage.session.endpoint;');
     await host.wait(titleIs(endpoint, 'Producer'));
     const comment =
-      '<b>A plain comment</b>\nSecond line\nThird line\nFourth\n' +
+      '<b>A plain comment</b> with **bold**\nSecond line\nThird line\n' +
+      'Fourth\n' +
       'A sentence beyond the limit. '.repeat(14);
     const id = await guest.run(`return app.writeMessage('general',
     ${quote(comment)}, '', []);`);
@@ -882,7 +883,8 @@ test(
     assert.equal(cards.lowerThird.text, 'Producer');
     assert.equal(cards.comment.nick, 'river');
     assert.equal(cards.comment.text.length, 280);
-    assert.ok(cards.comment.text.startsWith('<b>A plain comment</b>'));
+    const start = '<b>A plain comment</b> with bold\nSecond line';
+    assert.ok(cards.comment.text.startsWith(start));
     for (const card of Object.values(cards)) {
       assert.deepEqual(card.accent, [230, 23, 183]);
       assert.deepEqual(card.chip, [55, 25, 93]);
