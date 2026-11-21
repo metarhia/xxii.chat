@@ -726,11 +726,7 @@ svg {
 }
 
 .selecting .message.inside {
-  background: color-mix(in srgb, var(--thread) 10%, transparent);
-}
-
-.selecting .message.chain {
-  background: color-mix(in srgb, var(--thread) 20%, transparent);
+  background: color-mix(in srgb, var(--thread) 12%, transparent);
 }
 
 .selecting .message.chosen {

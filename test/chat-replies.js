@@ -239,7 +239,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
         const style = getComputedStyle(row);
         return [row.querySelector('.content').textContent, {
           dim: row.classList.contains('dim'),
-          chain: row.classList.contains('chain'),
+          inside: row.classList.contains('inside'),
           chosen: row.classList.contains('chosen'),
           opacity: style.opacity,
           stripe: style.boxShadow,
@@ -284,7 +284,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     const rows = await states(bob);
     for (const name of ['B0', 'B1', 'B2']) {
       assert.equal(rows[name].dim, false, name);
-      assert.equal(rows[name].chain, true, name);
+      assert.equal(rows[name].inside, true, name);
     }
     for (const name of ['A0', 'C1', 'D2', 'F3']) {
       assert.equal(rows[name].dim, true, name);
@@ -374,14 +374,16 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     );
   });
 
-  await t.test('a click in the middle highlights only its chain', async () => {
+  await t.test('a click in the middle tints the thread alike', async () => {
     await run(bob, `${rowOf('D1')}.querySelector('.content').click();`);
     const rows = await states(bob);
-    for (const name of ['D0', 'D1', 'D3']) {
-      assert.equal(rows[name].chain, true, name);
+    for (const name of ['D0', 'D1', 'D2', 'D3']) {
+      assert.equal(rows[name].inside, true, name);
     }
     assert.equal(rows.D1.chosen, true);
-    assert.equal(rows.D2.chain, false);
+    assert.equal(rows.D0.background, rows.D2.background);
+    assert.equal(rows.D3.background, rows.D2.background);
+    assert.notEqual(rows.D1.background, rows.D2.background);
     assert.equal(rows.D2.opacity, '1');
     await run(bob, `app.selectionClose.click();`);
     await wait(bob, `return app.selection === null && app.pops === 0;`);
@@ -501,7 +503,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     await run(bob, `document.activeElement.blur();`);
   });
 
-  await t.test('F jumps to a far row and highlights its chain', async () => {
+  await t.test('F jumps to a far row and highlights it', async () => {
     const id = await idOf(bob, 'D3');
     await run(bob, `app.selectById('${id}', false); return true;`);
     await press(bob, 'f');
@@ -510,14 +512,15 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       `return app.selection?.chosen === '${id}' && app.selection.moved;`,
     );
     const rows = await states(bob);
-    for (const name of ['D0', 'D1', 'D3']) {
-      assert.equal(rows[name].chain, true, name);
-      assert.notEqual(rows[name].background, rows.D2.background, name);
+    for (const name of ['D0', 'D1', 'D2']) {
+      assert.equal(rows[name].inside, true, name);
+      assert.equal(rows[name].background, rows.D0.background, name);
+      assert.notEqual(rows[name].background, rows.B0.background, name);
     }
     assert.equal(rows.D3.chosen, true);
     assert.notEqual(rows.D3.background, rows.D1.background);
+    assert.notEqual(rows.D3.background, rows.B0.background);
     assert.match(rows.D1.stripe, /6px 0px 0px 0px inset/);
-    assert.equal(rows.D2.chain, false);
     assert.equal(rows.D2.opacity, '1');
     assert.match(rows.D2.stripe, /6px 0px 0px 0px inset/);
     assert.ok(Number(rows.B0.opacity) < 1);
@@ -530,14 +533,20 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       await wait(bob, `return app.selection.chosen === '${id}';`);
     };
     assert.equal(await position(), '4 of 4');
+    const before = await states(bob);
     await press(bob, 'ArrowUp');
     await chosen('D2');
     assert.equal(await position(), '3 of 4');
     const rows = await states(bob);
     assert.equal(rows.D2.chosen, true);
-    assert.equal(rows.D2.chain, true);
-    assert.equal(rows.D1.chain, false);
-    assert.equal(rows.D3.chain, false);
+    const changed = Object.keys(before).filter(
+      (name) => before[name].background !== rows[name].background,
+    );
+    assert.deepEqual(changed.toSorted(), ['D2', 'D3']);
+    await press(bob, 'ArrowLeft');
+    await chosen('D1');
+    await press(bob, 'ArrowRight');
+    await chosen('D2');
     await run(bob, `app.selectionPrev.click(); return true;`);
     await chosen('D1');
     await press(bob, '[');
@@ -929,7 +938,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
     await wait(bob, `return app.selection === null;`);
   });
 
-  await t.test('new messages follow the selection and chain', async () => {
+  await t.test('new messages follow the selection', async () => {
     await run(bob, `${rowOf('D1')}.querySelector('.content').click();`);
     await write(ada, 'ada', 'new descendant', 'D1');
     await write(ada, 'ada', 'new sibling', 'D0');
@@ -939,9 +948,11 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       `app.render(); return ${rowOf('new standalone')} !== undefined;`,
     );
     const rows = await states(bob);
-    assert.equal(rows['new descendant'].chain, true);
-    assert.equal(rows['new sibling'].chain, false);
+    assert.equal(rows['new descendant'].inside, true);
+    assert.equal(rows['new sibling'].inside, true);
     assert.equal(rows['new sibling'].dim, false);
+    const shade = rows['new descendant'].background;
+    assert.equal(rows['new sibling'].background, shade);
     assert.equal(rows['new standalone'].dim, true);
     const sibling = await idOf(bob, 'new sibling');
     assert.equal(await run(bob, 'return app.targetId();'), sibling);
@@ -1126,7 +1137,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
       bob,
       `const article = document.querySelector('.post-article');
       return [
-        article.matches('.dim, .chain'),
+        article.matches('.dim, .inside'),
         ${rowOf('R3')}.classList.contains('dim'),
         app.selectionPosition.textContent,
       ];`,

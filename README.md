@@ -51,10 +51,9 @@ sync. Terminal-like UI follows the
   every peer. Click a quote to jump to its message. For distant jumps,
   `↓ back` returns to the reply.
 - Click or tap any thread message, its root's reply counter, or a quote to
-  select the thread. Its rows take a shade of the thread color, stronger
-  for the chosen message's ancestors and replies and strongest for the
-  chosen message. Other threads and standalone messages dim, and their
-  stripes darken.
+  select the thread. All its rows take one shade of the thread color and
+  the chosen message a stronger one, so stepping changes only two rows.
+  Other threads and standalone messages dim, and their stripes darken.
   The bar above the messages shows the chosen message's position and buttons
   to step through the thread. Select another thread to switch. Click the chosen
   message again or click outside the thread to clear. The selection bar's `✕`,
@@ -128,7 +127,8 @@ sync. Terminal-like UI follows the
   previous or next chat, `Ctrl+F` search, `Ctrl+P` pinned; `↑` in an empty
   composer selects the last message, `↑`/`↓` move, `Enter` or `Shift+F10`
   opens the menu, `R` replies, `E` edits your own message, and `F`
-  selects the thread of the current message. Use `[`, `]`, `↑`, or `↓` to step through the selected thread.
+  selects the thread of the current message. Use `[`/`]`, `↑`/`↓`, or
+  `←`/`→` to step through the selected thread.
   `Esc` closes the top overlay, clears a reply target or thread selection,
   closes an open post, or toggles the sidebar
 - Mobile: the back button closes the sidebar, panel, viewer, menu, thread
