@@ -181,7 +181,19 @@ const STATES = {
 };
 
 const STATUS_ORDER = ['linked', 'online', 'away', 'offline', 'unknown'];
-const UNITS = ['chat', 'cache', 'presence', 'signal', 'files', 'ice', 'call'];
+const UNITS = [
+  'chat',
+  'cache',
+  'presence',
+  'signal',
+  'files',
+  'ice',
+  'call',
+  'stream',
+];
+const PERSON_FLAGS = ['mic', 'camera', 'screen', 'hand'];
+const PROGRAM_FLAGS = ['recording', 'live', 'optOut'];
+const CALL_FLAGS = [...PERSON_FLAGS, ...PROGRAM_FLAGS];
 const ITEMS = '.message, .post, .post-article';
 const CHAT_ITEMS = '.nav-item[data-id], .nav-item[data-peer]';
 const TITLE = 'XXII Chat';
@@ -925,6 +937,7 @@ class ChatApplication extends Application {
     window.addEventListener('beforeunload', () => this.syncUsername());
     window.addEventListener('pagehide', () => {
       const session = this.callSession;
+      this.callStage?.pagehide();
       if (session) session.leave().catch((error) => this.report(error));
       if (this.panel === 'capture') this.hidePanel(false);
       this.mesh.stop();
@@ -3776,6 +3789,8 @@ class ChatApplication extends Application {
       },
       titleOf: (chat) => this.callTitle(chat),
       update: (flags) => this.pushCallState(flags),
+      ice: () => this.iceConfiguration(),
+      stream: (args) => this.api.stream.whip(args),
       recordStart: (record) => this.recordRecordingStart(record),
       recordStop: (record) => this.recordRecordingStop(record),
       confirm: (text) => window.confirm(text),
@@ -4231,8 +4246,7 @@ class ChatApplication extends Application {
     const call = session.call;
     const endpoint = session.endpoint;
     const args = { call, endpoint };
-    const names = ['mic', 'camera', 'screen', 'hand', 'recording', 'optOut'];
-    for (const name of names) {
+    for (const name of CALL_FLAGS) {
       if (typeof flags[name] === 'boolean') args[name] = flags[name];
     }
     if (typeof flags.title === 'string') args.title = flags.title;

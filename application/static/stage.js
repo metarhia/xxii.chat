@@ -8,6 +8,7 @@ import { requestCallNotifications } from './notifications.js';
 import { notificationClient } from './notifications.js';
 import { ViewHints } from './view-hints.js';
 import { CallRecording } from './call-record.js';
+import { Streaming } from './streaming.js';
 import { createRecordPanel, createRecordControl } from './record-panel.js';
 import { createButton } from './record-panel.js';
 import {
@@ -41,6 +42,16 @@ import {
 
 const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
 const phoneView = () => matchMedia(PHONE).matches;
+
+const LEAVE_RECORDING =
+  'You are recording this call. Stop the recording and leave?';
+const LEAVE_LIVE = 'You are live. Stop the stream and leave?';
+const LEAVE_BOTH = 'You are recording and live. Stop both and leave?';
+
+const leaveText = (isRecording, isLive) => {
+  if (isRecording && isLive) return LEAVE_BOTH;
+  return isLive ? LEAVE_LIVE : LEAVE_RECORDING;
+};
 
 const LOBBY = 'waiting for an admin to let you in';
 const LOCKED = 'Call is locked';
@@ -85,6 +96,8 @@ const ACTIONS = {
   'record-pause': (stage) => stage.recording?.togglePause(),
   'record-panel': (stage) => stage.toggleProgramPanel('record'),
   studio: (stage) => stage.toggleProgramPanel('studio'),
+  'go-live': (stage) => stage.streaming?.toggle(),
+  'stop-live': (stage) => stage.streaming?.stop(),
   'record-background': (stage) => stage.recording?.resetBackground(),
   recordings: (stage) => {
     stage.closeMenus();
@@ -416,7 +429,9 @@ const createMore = (hasStudio) => {
     text.textContent = row.label;
     keys.append(name, text);
   }
-  if (hasStudio) choices.append(createButton('studio', 'Studio'));
+  const stopLive = createButton('stop-live', 'Stop live');
+  stopLive.hidden = true;
+  if (hasStudio) choices.append(createButton('studio', 'Studio'), stopLive);
   choices.append(pip, createButton('settings', 'call settings'), note, keys);
   menu.append(summary, choices);
   wrap.append(menu);
@@ -496,6 +511,8 @@ const createCall = (title, hasStudio) => {
   heading.textContent = title;
   const recording = document.createElement('span');
   recording.className = 'call-recording hidden';
+  const live = document.createElement('span');
+  live.className = 'call-live hidden';
   const backstage = document.createElement('span');
   backstage.className = 'call-backstage';
   backstage.textContent = 'backstage';
@@ -507,6 +524,7 @@ const createCall = (title, hasStudio) => {
     back,
     heading,
     recording,
+    live,
     backstage,
     optOut,
     createButton('people', 'people'),
@@ -969,6 +987,7 @@ class CallStage {
     this.viewHints = null;
     this.recording = null;
     this.studio = null;
+    this.streaming = null;
     this.desktopPanel = '';
     this.quality = new Map();
     this.qualityNotices = new Set();
@@ -1052,6 +1071,7 @@ class CallStage {
     this.preferences = this.hooks.preferences.settings;
     this.recording = new CallRecording(this, this.preferences);
     if (typeof MediaRecorder === 'function') this.studio = new Studio(this);
+    this.streaming = new Streaming(this);
     this.media.cameraOn = camera && !this.preferences.joinCameraOff;
     this.media.micOn = !this.preferences.joinMicOff;
     this.media.noise = this.preferences.noise;
@@ -1097,6 +1117,8 @@ class CallStage {
 
   detach() {
     const session = this.session;
+    this.streaming?.dispose();
+    this.streaming = null;
     this.recording?.dispose();
     this.recording = null;
     this.studio?.dispose();
@@ -1211,6 +1233,7 @@ class CallStage {
       this.renderTiles();
       this.paintPeople();
       this.paintRecording();
+      this.paintLive();
       this.paintBackstage();
       this.studio?.paint();
       this.hooks.focusChat(this.chat);
@@ -1576,9 +1599,15 @@ class CallStage {
 
   leave() {
     const isRecording = this.recording?.isActive === true;
-    const text = 'You are recording this call. Stop the recording and leave?';
-    if (isRecording && this.hooks.confirm?.(text) === false) return;
+    const isLive = this.streaming?.isActive === true;
+    const text = leaveText(isRecording, isLive);
+    const isBusy = isRecording || isLive;
+    if (isBusy && this.hooks.confirm?.(text) === false) return;
     this.cancel();
+  }
+
+  pagehide() {
+    this.streaming?.abandon();
   }
 
   async share() {
@@ -1631,6 +1660,7 @@ class CallStage {
         admin,
         hand,
         recording: item.recording === true,
+        live: item.live === true,
         optOut: item.optOut === true,
         stage: item.stage !== false,
         title: titleOf(item.title),
@@ -1682,6 +1712,7 @@ class CallStage {
     }
     this.paintPeople();
     this.paintRecording();
+    this.paintLive();
     this.paintBackstage();
     this.studio?.paint();
     this.paintKnocks();
@@ -1707,13 +1738,29 @@ class CallStage {
     note.textContent = text;
     note.classList.toggle('hidden', text === '');
     const me = this.session?.endpoint;
-    const byOthers = recorders.some((person) => person.endpoint !== me);
+    const makers = this.people.filter(
+      (person) => person.recording || person.live,
+    );
+    const byOthers = makers.some((person) => person.endpoint !== me);
     const optOut = this.host?.querySelector('.call-opt-out');
     if (!optOut) return;
     const isOut = this.isOptedOut();
     optOut.classList.toggle('hidden', !byOthers);
     optOut.textContent = isOut ? 'opted out · undo' : 'opt out';
     optOut.setAttribute('aria-pressed', `${isOut}`);
+  }
+
+  paintLive() {
+    const chip = this.host?.querySelector('.call-live');
+    const stop = this.host?.querySelector('[data-action="stop-live"]');
+    if (stop) stop.hidden = this.streaming?.isActive !== true;
+    if (!chip) return;
+    const names = this.people
+      .filter((person) => person.live)
+      .map((person) => person.nick || 'guest');
+    chip.textContent = names.length > 0 ? '● LIVE' : '';
+    chip.title = names.length > 0 ? `${names.join(', ')} is live` : '';
+    chip.classList.toggle('hidden', names.length === 0);
   }
 
   announceChanges(people) {
@@ -1739,11 +1786,16 @@ class CallStage {
       if (recording !== Boolean(before?.recording)) {
         lines.push(`${nick} ${recording ? 'started' : 'stopped'} recording`);
       }
+      if (person.live && !before?.live) lines.push(`${nick} went live`);
     }
     for (const person of previous.values()) {
       if (person.endpoint === this.session.endpoint) continue;
       membership.push({ kind: 'leave', nick: person.nick });
       if (person.recording) lines.push(`${person.nick} stopped recording`);
+    }
+    const wasLive = this.people.some((person) => person.live);
+    if (wasLive && !people.some((person) => person.live)) {
+      lines.push('Live stream ended');
     }
     if (membership.length) {
       let recent = createToast();
@@ -1892,6 +1944,7 @@ class CallStage {
     const flags = { mic, camera, screen };
     if (includeTitle) flags.title = this.preferences.title;
     if (this.recording?.isActive) flags.recording = true;
+    if (this.streaming?.isFlagged) flags.live = true;
     await this.hooks.update(flags);
   }
 
@@ -1927,6 +1980,11 @@ class CallStage {
 
   onClick(event) {
     if (this.soundBlocked) this.resumeAudio();
+    const streamAction = event.target.closest('[data-stream-action]');
+    if (streamAction) {
+      this.streaming?.action(streamAction);
+      return;
+    }
     const studioAction = event.target.closest('[data-studio-action]');
     if (studioAction) {
       this.studio?.action(studioAction).catch(this.hooks.fail);
@@ -1959,7 +2017,8 @@ class CallStage {
 
   onDevice(event) {
     const select = event.target;
-    const { record, pin, volume, studio } = select.dataset;
+    const { record, pin, volume, studio, stream } = select.dataset;
+    if (stream) return void this.streaming?.change(select);
     if (studio || select.closest('[data-studio-section="editor"]')) {
       this.studio?.change(select).catch((error) => this.hooks.fail(error));
       return;

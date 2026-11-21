@@ -163,8 +163,11 @@ class CallRecording extends RecordingSession {
   }
 
   release() {
-    this.#releaseHints();
     this.beforeStop();
+  }
+
+  idle() {
+    this.#releaseHints();
   }
 
   tick() {
