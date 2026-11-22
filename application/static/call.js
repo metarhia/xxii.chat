@@ -1,6 +1,8 @@
 import { Emitter, jsonParse } from './metautil.js';
 import { RtcConnection, emitError } from './metacom.js';
 import { CODECS, LinkMediaPolicy, validateHint } from './media.js';
+import { RELAY_SLOTS } from './relay-logic.js';
+import { PeerRelay } from './call-relay.js';
 
 const CALL_SLOTS = [
   { slot: 'mic', kind: 'audio' },
@@ -9,6 +11,7 @@ const CALL_SLOTS = [
   { slot: 'screenAudio', kind: 'audio' },
 ];
 const SLOTS = CALL_SLOTS.map((item) => item.slot);
+const LINK_SLOTS = CALL_SLOTS.concat(RELAY_SLOTS);
 const RECONNECT_MS = [1000, 2000, 5000, 10000];
 const HEARTBEAT_MS = 10000;
 const RESUME_LIMIT = 12;
@@ -162,7 +165,7 @@ class CallLink extends Emitter {
     const signaling = options.signaling;
     this.remote = peerId;
     this.role = role;
-    const media = CALL_SLOTS;
+    const media = LINK_SLOTS;
     try {
       const channel = await this.#connection.open({
         localId,
@@ -310,6 +313,8 @@ class CallSession extends Emitter {
   #viewHints = new Map();
   #demands = new Map();
   #audioOnly = new Set();
+  #blocked = new Set();
+  #relay = null;
 
   constructor(options) {
     super();
@@ -326,6 +331,7 @@ class CallSession extends Emitter {
     this.#schedule = schedule ?? ((fn, ms) => setTimeout(fn, ms));
     const create = () => new RtcConnection();
     this.#createConnection = connection ?? create;
+    this.#relay = new PeerRelay(this, this.#links);
     this.#bind();
     if (options.pagehide !== false) this.#listenPage();
   }
@@ -372,6 +378,7 @@ class CallSession extends Emitter {
 
   async leave() {
     this.#setPhase('leaving');
+    this.#relay.close();
     this.#clearPlans();
     const call = this.call;
     const endpoint = this.endpoint;
@@ -389,9 +396,32 @@ class CallSession extends Emitter {
   }
 
   receiver(endpoint, slot) {
-    const link = this.#links.get(endpoint);
-    if (!link) return null;
-    return link.receiver(slot);
+    return this.#relay.receiver(endpoint, slot);
+  }
+
+  relayFor(endpoint) {
+    return this.#relay.route(endpoint);
+  }
+
+  get forwarding() {
+    return this.#relay.forwarding;
+  }
+
+  get relaySoundBlocked() {
+    return this.#relay.soundBlocked;
+  }
+
+  enableRelaySound() {
+    this.#relay.enableSound();
+  }
+
+  blockRelaySound() {
+    this.#relay.blockSound();
+  }
+
+  blockLink(endpoint, isBlocked) {
+    if (isBlocked) this.#blocked.add(endpoint);
+    else this.#blocked.delete(endpoint);
   }
 
   sender(endpoint, slot) {
@@ -570,6 +600,7 @@ class CallSession extends Emitter {
   #listenPage() {
     if (typeof globalThis.addEventListener !== 'function') return;
     this.#onPageHide = () => {
+      this.#relay.close();
       const call = this.call;
       const endpoint = this.endpoint;
       this.api.call.leave({ call, endpoint });
@@ -587,6 +618,7 @@ class CallSession extends Emitter {
   #onSignal(data) {
     if (data.to !== this.endpoint) return;
     const from = data.from;
+    if (this.#blocked.has(from)) return;
     const link = this.#links.get(from);
     const stale = link?.role === 'answerer' && link.connected;
     if (!stale || !isOffer(data.message)) return void this.router.deliver(data);
@@ -632,6 +664,8 @@ class CallSession extends Emitter {
     if (stale) return;
     if (typeof version === 'number') this.#version = version;
     this.#state = state;
+    if (this.phase === 'leaving') return;
+    this.#relay.update(state.participants);
     for (const link of this.#links.values()) {
       link.policy.participants = state.participants?.length ?? 2;
       link.policy.refresh();
@@ -654,7 +688,8 @@ class CallSession extends Emitter {
     if (stopped || !Array.isArray(state.participants)) return;
     for (const remote of state.participants) {
       if (remote.endpoint === this.endpoint) continue;
-      if (this.#links.has(remote.endpoint)) continue;
+      const pending = this.#plans.has(remote.endpoint);
+      if (pending || this.#links.has(remote.endpoint)) continue;
       const role = isOfferer(local, remote) ? 'offerer' : 'answerer';
       this.#open(remote, role, configuration);
     }
@@ -662,6 +697,10 @@ class CallSession extends Emitter {
 
   #open(remote, role, configuration) {
     const endpoint = remote.endpoint;
+    if (this.#blocked.has(endpoint)) {
+      this.#linkFailed(endpoint, role, true);
+      return;
+    }
     const connection = this.#createConnection();
     const link = new CallLink({ connection });
     link.policy.participants = this.#state?.participants?.length ?? 2;
@@ -671,10 +710,18 @@ class CallSession extends Emitter {
     link.on('close', () => this.#onLinkClose(endpoint, link));
     link.on('connect', () => this.#onLinkConnect(endpoint, link));
     link.on('message', (message) => {
+      if (message.type === 'relay') {
+        if (this.#links.get(endpoint) === link) {
+          this.#relay.receive(endpoint, message);
+        }
+        return;
+      }
       this.emit('message', { endpoint, message });
     });
     link.on('notice', (text) => this.emit('notice', text));
     link.on('stats', (stats) => {
+      if (this.#links.get(endpoint) !== link) return;
+      this.#relay.refresh();
       this.emit('stats', { endpoint, stats });
     });
     link.on('quality', (quality) => {
@@ -683,6 +730,7 @@ class CallSession extends Emitter {
     link.on('track', (payload) => {
       const slot = payload?.slot;
       const track = payload?.track ?? null;
+      this.#relay.refresh();
       this.emit('track', { endpoint, slot, track });
     });
     const localId = this.endpoint;
@@ -726,8 +774,8 @@ class CallSession extends Emitter {
     if (Array.isArray(participants)) {
       for (const item of participants) present.add(item.endpoint);
     }
-    const endpoints = [];
-    for (const endpoint of this.#links.keys()) endpoints.push(endpoint);
+    const endpoints = new Set(this.#links.keys());
+    for (const endpoint of this.#plans.keys()) endpoints.add(endpoint);
     for (const endpoint of endpoints) {
       if (present.has(endpoint) || this.#keep) continue;
       this.#drop(endpoint);
@@ -736,10 +784,11 @@ class CallSession extends Emitter {
 
   #drop(endpoint) {
     this.#cancelPlan(endpoint);
+    this.#attempts.delete(endpoint);
     const link = this.#links.get(endpoint);
     if (!link) return;
     this.#links.delete(endpoint);
-    this.#attempts.delete(endpoint);
+    this.#relay.disconnected(endpoint);
     link.retired = true;
     link.close();
   }
@@ -749,20 +798,30 @@ class CallSession extends Emitter {
     this.#links.delete(endpoint);
     link.retired = true;
     link.close();
+    this.#relay.disconnected(endpoint);
+    this.#linkFailed(endpoint, link.role);
+  }
+
+  #linkFailed(endpoint, role, blocked = false) {
     if (!this.#paired(endpoint)) return;
     const stopped = this.phase === 'idle' || this.phase === 'leaving';
     if (stopped) return;
-    if (link.role !== 'offerer') return void this.#reopen(endpoint, 'answerer');
     const attempt = this.#attempts.get(endpoint) ?? 0;
     this.#attempts.set(endpoint, attempt + 1);
+    this.#relay.failed(endpoint, attempt + 1);
+    if (role === 'answerer' && !blocked) {
+      this.#reopen(endpoint, role);
+      return;
+    }
     this.#setPhase('reconnecting');
-    this.#plan(endpoint, delayOf(attempt), link.role);
+    this.#plan(endpoint, delayOf(attempt), role);
   }
 
   #onLinkConnect(endpoint, link) {
     if (link.retired || this.#links.get(endpoint) !== link) return;
     link.connectedAt = this.#now();
     this.#attempts.set(endpoint, 0);
+    this.#relay.connected(endpoint);
     for (const slot of ['camera', 'screen']) {
       const hint = this.#viewHints.get(`${endpoint}\n${slot}`);
       if (hint) this.#sendHint(endpoint, hint);
@@ -799,7 +858,8 @@ class CallSession extends Emitter {
     const remote = participantOf(this.#state.participants, endpoint);
     guard(async () => {
       const configuration = await this.#ice();
-      const gone = !this.#paired(endpoint) || this.#links.has(endpoint);
+      const pending = this.#plans.has(endpoint) || this.#links.has(endpoint);
+      const gone = !this.#paired(endpoint) || pending;
       const halted = this.phase === 'idle' || this.phase === 'leaving';
       if (gone || halted) return;
       this.#open(remote, role, configuration);
@@ -834,6 +894,7 @@ class CallSession extends Emitter {
 
   #shutdown() {
     this.#clearPlans();
+    this.#relay.close();
     this.#closeLinks();
     this.#attempts.clear();
     this.#setPhase('idle');
@@ -848,7 +909,7 @@ class CallSession extends Emitter {
       const call = this.call;
       const endpoint = this.endpoint;
       guard(() => this.api.call.ping({ call, endpoint }), this);
-      if (this.phase === 'joined') this.#armHeartbeat();
+      if (RESUMABLE.has(this.phase)) this.#armHeartbeat();
     };
     const timer = relax(this.#schedule(run, HEARTBEAT_MS));
     this.#heartbeat = { run, timer };
@@ -864,11 +925,14 @@ class CallSession extends Emitter {
   #setPhase(phase) {
     if (this.phase === phase) return;
     this.phase = phase;
-    if (phase === 'joined') this.#armHeartbeat();
-    else this.#clearHeartbeat();
+    if (RESUMABLE.has(phase)) {
+      if (!this.#heartbeat) this.#armHeartbeat();
+    } else {
+      this.#clearHeartbeat();
+    }
     this.emit('state', phase);
   }
 }
 
-export { CALL_SLOTS, SLOTS, isOfferer, delayOf };
+export { CALL_SLOTS, LINK_SLOTS, SLOTS, isOfferer, delayOf };
 export { SignalRouter, CallLink, CallSession };

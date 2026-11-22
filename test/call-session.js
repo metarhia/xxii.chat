@@ -237,7 +237,7 @@ test('a dropped participant is closed before the new link', async (t) => {
 });
 
 test('the later joiner offers and signaling uses the router', async (t) => {
-  const { CallSession, CALL_SLOTS } = await load();
+  const { CallSession, LINK_SLOTS } = await load();
   const order = [];
   const links = createConnections(order);
   const api = createApi();
@@ -257,7 +257,7 @@ test('the later joiner offers and signaling uses the router', async (t) => {
   await flush();
   const opened = links.connections[0].opened;
   assert.equal(opened.role, 'offerer');
-  assert.deepEqual(opened.media, CALL_SLOTS);
+  assert.deepEqual(opened.media, LINK_SLOTS);
   assert.equal(opened.localId, 'ada');
   assert.equal(opened.peerId, 'bob');
   assert.equal(opened.configuration, configuration);

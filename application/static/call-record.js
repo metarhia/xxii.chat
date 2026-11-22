@@ -48,6 +48,7 @@ class CallRecording extends RecordingSession {
     const stage = this.#stage;
     const session = stage.session;
     const state = {
+      session,
       endpoint: session?.endpoint ?? '',
       nick: stage.hooks.nick(),
       people: stage.people,

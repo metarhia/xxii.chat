@@ -27,6 +27,8 @@ const ASSETS = [
   '/replies.js',
   '/mesh.js',
   '/call.js',
+  '/call-relay.js',
+  '/relay-logic.js',
   '/media.js',
   '/mirror.js',
   '/mirror-worker.js',
