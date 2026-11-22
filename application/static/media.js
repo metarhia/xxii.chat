@@ -445,7 +445,8 @@ class LinkMediaPolicy {
       const reports = await pc.getStats();
       if (this.closed) return;
       const lanes = new Map();
-      for (const slot of ['mic', 'camera', 'screen', 'screenAudio']) {
+      const slots = ['mic', 'camera', 'screen', 'screenAudio'];
+      for (const slot of slots.concat(['relayAudio', 'relayVideo'])) {
         const sent = this.link.sender(slot)?.track;
         const received = this.link.receiver(slot)?.track;
         if (sent) lanes.set(sent.id, slot);

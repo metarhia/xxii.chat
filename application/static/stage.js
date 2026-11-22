@@ -2,6 +2,7 @@ import { ParticipantVolume } from './call-volume.js';
 import { TileMenu } from './call-tile-menu.js';
 import { peerOf, colorOf, initialsOf } from './avatar.js';
 import { statsText } from './call-stats.js';
+import { trackOf } from './members.js';
 import { MediaCapture, CallLevels, isMobile } from './media.js';
 import { pausesCameraInBackground } from './media.js';
 import { requestCallNotifications } from './notifications.js';
@@ -549,6 +550,7 @@ const createCall = (title, hasStudio) => {
   controls.append(
     createCaptureControl('mic'),
     createCaptureControl('camera'),
+    createButton('enable-sound', 'Enable sound'),
     createLeave(),
   );
   const leave = controls.lastElementChild;
@@ -578,6 +580,7 @@ const createMini = () => {
     createButton('camera', 'camera on'),
     createButton('leave', 'leave'),
     createButton('expand', 'expand'),
+    createButton('enable-sound', 'Enable sound'),
   );
   tile.append(createVideo(true), createAvatar(), controls);
   return tile;
@@ -597,7 +600,10 @@ const createPip = () => {
   mic.title = HINTS.mic;
   camera.title = HINTS.camera;
   controls.append(back, mic, camera, createHand(), createReact());
-  controls.append(createButton('leave', 'leave'));
+  controls.append(
+    createButton('leave', 'leave'),
+    createButton('enable-sound', 'Enable sound'),
+  );
   root.append(createVideo(true), createAvatar(), name, controls);
   return root;
 };
@@ -938,6 +944,7 @@ class CallStage {
   #onKey = null;
   #onPhase = null;
   #onTrack = null;
+  #onRelay = null;
   #onCall = null;
   #listening = false;
   #onNotice = null;
@@ -1021,6 +1028,7 @@ class CallStage {
     this.#onKey = (event) => this.onKey(event);
     this.#onPhase = (phase) => this.onPhase(phase);
     this.#onTrack = (payload) => this.onRemoteTrack(payload);
+    this.#onRelay = (endpoint) => this.onRelay(endpoint);
     this.#onCall = (state) => this.onCallState(state);
     this.#onNotice = (text) => {
       this.qualityNotices.add(text);
@@ -1088,6 +1096,7 @@ class CallStage {
     this.levels.on('notice', this.#onNotice);
     session.on('state', this.#onPhase);
     session.on('track', this.#onTrack);
+    session.on('relay', this.#onRelay);
     session.on('notice', this.#onNotice);
     session.on('quality', this.#onQuality);
     session.on('stats', this.#onStats);
@@ -1134,6 +1143,7 @@ class CallStage {
     if (session) {
       session.off('state', this.#onPhase);
       session.off('track', this.#onTrack);
+      session.off('relay', this.#onRelay);
       session.off('notice', this.#onNotice);
       session.off('quality', this.#onQuality);
       session.off('stats', this.#onStats);
@@ -1185,6 +1195,7 @@ class CallStage {
     this.mini?.remove();
     this.mini = null;
     this.stopAudios();
+    this.soundBlocked = false;
     this.people = [];
     this.lobby = [];
     this.preview = null;
@@ -1411,6 +1422,7 @@ class CallStage {
   }
 
   onAction(action, endpoint = '', slot = 'camera') {
+    if (action === 'enable-sound') return void this.resumeAudio(true);
     if (action === 'tile-stats') return void this.toggleStats(endpoint);
     if (action === 'pin') return void this.togglePin(endpoint, slot);
     if (action === 'tile-fullscreen') {
@@ -1703,7 +1715,7 @@ class CallStage {
     this.levels?.sample();
     for (const endpoint of this.remote.keys()) {
       const screen = this.screenTrack(endpoint);
-      const audio = screen ? this.remote.get(endpoint)?.screenAudio : null;
+      const audio = screen ? trackOf(this, endpoint, 'screenAudio') : null;
       this.attachAudio(endpoint, audio, 'screenAudio');
     }
     if (this.mode === 'call' || this.mode === 'mini') {
@@ -1819,7 +1831,8 @@ class CallStage {
   restoreRemote() {
     for (const person of this.people) {
       const endpoint = person.endpoint;
-      if (endpoint === this.session.endpoint) continue;
+      const local = endpoint === this.session.endpoint;
+      if (local || this.session.relayFor?.(endpoint)) continue;
       for (const slot of ['mic', 'camera', 'screen', 'screenAudio']) {
         const current = this.remote.get(endpoint)?.[slot];
         if (current?.readyState === 'live') continue;
@@ -1833,25 +1846,52 @@ class CallStage {
   onRemoteTrack(payload) {
     const endpoint = payload?.endpoint;
     const slot = payload?.slot;
-    const valid = ['mic', 'camera', 'screen', 'screenAudio'].includes(slot);
-    if (!endpoint || !valid) return;
+    const direct = ['mic', 'camera', 'screen', 'screenAudio'].includes(slot);
+    const relay = slot === 'relayAudio' || slot === 'relayVideo';
+    if (!endpoint || (!direct && !relay)) return;
     const track = payload.track ?? null;
     const current = this.remote.get(endpoint) ?? {
       mic: null,
       camera: null,
       screen: null,
       screenAudio: null,
+      relayAudio: null,
+      relayVideo: null,
     };
     const previous = current[slot];
     if (previous !== track) this.unwatchTrack(previous);
     current[slot] = track;
     this.remote.set(endpoint, current);
     if (track) this.watchTrack(endpoint, slot, track);
-    if (slot === 'mic') this.attachAudio(endpoint, track);
+    if (slot === 'mic') {
+      this.attachAudio(endpoint, trackOf(this, endpoint, slot));
+    }
+    if (slot === 'relayAudio') this.syncRelayAudios(endpoint);
     if (slot === 'screenAudio' || slot === 'screen') {
-      const audio = this.screenTrack(endpoint) ? current.screenAudio : null;
+      const playing = this.screenTrack(endpoint);
+      const audio = playing ? trackOf(this, endpoint, 'screenAudio') : null;
       this.attachAudio(endpoint, audio, 'screenAudio');
     }
+    if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
+  }
+
+  syncRelayAudios(relay) {
+    for (const person of this.people) {
+      const { endpoint } = person;
+      if (this.session?.relayFor?.(endpoint) === relay) {
+        this.attachAudio(endpoint, trackOf(this, endpoint, 'mic'));
+      }
+    }
+  }
+
+  onRelay(endpoint) {
+    if (endpoint) {
+      this.attachAudio(endpoint, trackOf(this, endpoint, 'mic'));
+      const screen = this.screenTrack(endpoint);
+      const audio = screen ? trackOf(this, endpoint, 'screenAudio') : null;
+      this.attachAudio(endpoint, audio, 'screenAudio');
+    }
+    this.paintSound();
     if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
   }
 
@@ -1883,8 +1923,9 @@ class CallStage {
       if (ended) this.unwatchTrack(track);
       if (ended && current && current[slot] === track) current[slot] = null;
       if (ended && (slot === 'mic' || slot === 'screenAudio')) {
-        this.attachAudio(endpoint, null, slot);
+        this.attachAudio(endpoint, trackOf(this, endpoint, slot), slot);
       }
+      if (ended && slot === 'relayAudio') this.syncRelayAudios(endpoint);
       if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
     };
     this.trackListeners.set(track, refresh);
@@ -1979,7 +2020,8 @@ class CallStage {
   }
 
   onClick(event) {
-    if (this.soundBlocked) this.resumeAudio();
+    const sound = event.target.closest('[data-action="enable-sound"]');
+    if (this.soundBlocked && !sound) this.resumeAudio();
     const streamAction = event.target.closest('[data-stream-action]');
     if (streamAction) {
       this.streaming?.action(streamAction);
@@ -2076,6 +2118,7 @@ class CallStage {
 
   syncControls() {
     this.recording?.paint();
+    this.paintSound();
     const roots = [this.host, this.mini, this.pip?.root];
     for (const root of roots) {
       if (root) this.paintButtons(root);
@@ -2832,7 +2875,8 @@ class CallStage {
       : this.people.find((person) => person.endpoint === endpoint)?.mic;
     const paused = local && this.media?.cameraOn && this.media?.cameraPaused;
     const status = paused ? ' · camera paused' : '';
-    const tags = status + this.backstageSuffix(endpoint);
+    const via = this.relaySuffix(endpoint);
+    const tags = status + this.backstageSuffix(endpoint) + via;
     if (chip) {
       chip.textContent = `${name} · mic ${mic ? 'on' : 'off'}${tags}`;
     }
@@ -2877,7 +2921,13 @@ class CallStage {
 
   statsOf(local, sample) {
     if (!local) return statsText(sample);
-    return `mirror: ${this.media?.mirrorState || 'off'}`;
+    const mirror = `mirror: ${this.media?.mirrorState || 'off'}`;
+    const pair = this.session?.forwarding;
+    if (!pair) return mirror;
+    const from = this.nameOf(pair.from);
+    const to = this.nameOf(pair.to);
+    return `${mirror}
+relaying for ${from} and ${to}`;
   }
 
   paintStats() {
@@ -2915,7 +2965,7 @@ class CallStage {
       (person) => person.endpoint === endpoint && person.screen,
     );
     if (!sharing) return null;
-    const track = this.remote.get(endpoint)?.screen;
+    const track = trackOf(this, endpoint, 'screen');
     return track?.readyState === 'live' ? track : null;
   }
 
@@ -2945,8 +2995,9 @@ class CallStage {
       const localOnly = local && !this.media.screenShared;
       const label = localOnly ? 'captured, not shared' : 'screen';
       const backstage = this.backstageSuffix(endpoint);
+      const via = this.relaySuffix(endpoint);
       tile.querySelector('.call-name').textContent =
-        `${this.nameOf(endpoint)} · ${label}${backstage}`;
+        `${this.nameOf(endpoint)} · ${label}${backstage}${via}`;
     }
   }
 
@@ -2969,7 +3020,8 @@ class CallStage {
       paintPerson(root, this.videoTrack(endpoint), name, color);
       this.paintSpeakingTile(root, endpoint);
       const chip = root.querySelector('.pip-name');
-      if (chip) chip.textContent = name + this.backstageSuffix(endpoint);
+      const tags = this.backstageSuffix(endpoint) + this.relaySuffix(endpoint);
+      if (chip) chip.textContent = name + tags;
     }
   }
 
@@ -3051,7 +3103,7 @@ class CallStage {
       break;
     }
     if (listed && !cameraOn) return null;
-    const track = this.remote.get(endpoint)?.camera ?? null;
+    const track = trackOf(this, endpoint, 'camera');
     const live = track && track.readyState === 'live' && !track.muted;
     if (!live) return null;
     return track;
@@ -3063,6 +3115,11 @@ class CallStage {
       if (person.endpoint === endpoint) return person.nick || 'guest';
     }
     return 'guest';
+  }
+
+  relaySuffix(endpoint) {
+    const relay = this.session?.relayFor?.(endpoint);
+    return relay ? ` · via ${this.nameOf(relay)}` : '';
   }
 
   attachAudio(endpoint, track, slot = 'mic') {
@@ -3093,22 +3150,35 @@ class CallStage {
     this.parkAudios();
     this.media?.applySink(audio);
     this.volume?.attach(audio, this.peerOf(endpoint));
-    audio.play().catch(() => {
+    this.playAudio(key, audio);
+  }
+
+  playAudio(key, audio) {
+    audio.play().catch((error) => {
+      const canceled = error?.name === 'AbortError';
+      if (canceled || this.audios.get(key) !== audio) return;
       this.soundBlocked = true;
-      this.showNote('Click to enable sound.');
+      if (error?.name === 'NotAllowedError') {
+        this.session?.blockRelaySound?.();
+      }
+      this.paintSound();
     });
   }
 
-  resumeAudio() {
+  paintSound() {
+    const blocked = this.soundBlocked || this.session?.relaySoundBlocked;
+    for (const root of [this.host, this.mini, this.pip?.root]) {
+      const button = root?.querySelector('[data-action="enable-sound"]');
+      if (button) button.classList.toggle('hidden', !blocked);
+    }
+  }
+
+  resumeAudio(enableRelay = false) {
     this.volume?.resume();
     this.soundBlocked = false;
-    this.showNote('');
-    for (const audio of this.audios.values()) {
-      audio.play().catch(() => {
-        this.soundBlocked = true;
-        this.showNote('Click to enable sound.');
-      });
-    }
+    if (enableRelay) this.session?.enableRelaySound?.();
+    this.paintSound();
+    for (const entry of this.audios) this.playAudio(entry[0], entry[1]);
   }
 
   parkAudios() {

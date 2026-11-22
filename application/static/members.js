@@ -19,14 +19,23 @@ const localTracks = (media) => {
   };
 };
 
-const remoteTracks = (tracks, person) => {
+const trackOf = (state, endpoint, slot) => {
+  const { remote, session } = state;
+  if (session?.relayFor?.(endpoint)) {
+    return session.receiver(endpoint, slot)?.track ?? null;
+  }
+  return remote?.get(endpoint)?.[slot] ?? null;
+};
+
+const remoteTracks = (state, person) => {
+  const track = (slot) => trackOf(state, person.endpoint, slot);
   const hasCamera = person.camera === true;
-  const screen = person.screen === true ? liveOf(tracks?.screen) : null;
+  const screen = person.screen === true ? liveOf(track('screen')) : null;
   return {
-    camera: hasCamera ? shownOf(tracks?.camera) : null,
+    camera: hasCamera ? shownOf(track('camera')) : null,
     screen,
-    mic: liveOf(tracks?.mic),
-    screenAudio: screen ? liveOf(tracks?.screenAudio) : null,
+    mic: liveOf(track('mic')),
+    screenAudio: screen ? liveOf(track('screenAudio')) : null,
   };
 };
 
@@ -36,11 +45,9 @@ const nickOf = (person, local, own) => {
 };
 
 const memberOf = (state, person) => {
-  const { endpoint, media, remote, speech } = state;
+  const { endpoint, media, speech } = state;
   const local = person.endpoint === endpoint;
-  const tracks = local
-    ? localTracks(media)
-    : remoteTracks(remote?.get(person.endpoint), person);
+  const tracks = local ? localTracks(media) : remoteTracks(state, person);
   const heard = speech?.get(person.endpoint);
   return {
     endpoint: person.endpoint,
@@ -67,4 +74,4 @@ const membersOf = (state) => {
   return everyone.filter((person) => person.endpoint).map(make);
 };
 
-export { idOf, membersOf };
+export { idOf, membersOf, trackOf };

@@ -141,6 +141,8 @@ sync. Terminal-like UI follows the
 
 Calls in the session block stores network settings in the browser: public
 STUN off by default, user STUN and TURN servers, and force relay.
+If two participants cannot connect, a third can forward their mic and video
+while the direct link retries. The tiles show who is relaying.
 The chat topbar starts a call. A direct call rings in every tab of the
 other person: video, audio, and decline, a generated tone, and a system
 notification while the page is hidden. Decline or a miss leaves a
@@ -502,6 +504,9 @@ server) with `files/have`, `get`, and `put`.
   that both sides select a relay pair while audio and video flow
   (scenario 9), and again through TURN over TLS on a port that also
   offers HTTP;
+  `test/relay-logic.js` checks peer relay decisions and slot mapping.
+  `test/call-relay.js` checks relay playback, recovery, limits, and cleanup
+  when the direct link reconnects or the relay leaves (scenario 22);
   `test/call-link.js` checks link policy: without a token the visitor
   waits in the lobby until an admin admits them, a token joins, and a
   lock denies (scenario 10);
