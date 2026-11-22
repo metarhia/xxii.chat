@@ -21,6 +21,7 @@ import { readBlob, onFileStored } from './files.js';
 import { timeOf, dateOf, dayKey, dayOf, dayLabel, plural } from './view.js';
 import { formatSize, fitSize, readSetting, writeSetting } from './view.js';
 import { readMap, writeMap, cloneTemplate, setBadge } from './view.js';
+import { syncChildren } from './view.js';
 import { isEditable, isReducedMotion } from './view.js';
 import { parseMarkdown, plainOf, plainInline } from './markdown.js';
 import { hasOpenFence } from './markdown.js';
@@ -542,6 +543,7 @@ class ChatApplication extends Application {
     this.divider = { chat: this.chat, at: this.readAtOf(this.chat) };
     this.collapsed = readCollapsed();
     this.cache = new Map();
+    this.days = new Map();
     this.iceCache = null;
     this.previews = new Map();
     this.loading = new Map();
@@ -1381,8 +1383,8 @@ class ChatApplication extends Application {
     const focused = isItem(active) ? active.dataset.id : '';
     const editorFocused = this.editForm.contains(active);
     const cache = new Map();
-    const sections = [];
-    let section = null;
+    const parts = [];
+    let nodes = null;
     let previous = null;
     let previousRoot = '';
     let day = '';
@@ -1392,22 +1394,23 @@ class ChatApplication extends Application {
       const key = dayKey(message.timestamp);
       if (key !== day) {
         day = key;
-        section = createDay(message.timestamp);
-        sections.push(section);
+        const section = this.daySection(key, message.timestamp, parts);
+        nodes = [section.firstChild];
+        parts.push({ key, section, nodes });
         previous = null;
       }
       if (!isMarked && this.isNew(message)) {
-        section.append(createLabel('new-divider', 'new messages'));
+        nodes.push(createLabel('new-divider', 'new messages'));
         isMarked = true;
         previous = null;
       }
       if (message.kind === 'call') {
-        section.append(this.createCallCard(message));
+        nodes.push(this.createCallCard(message));
         previous = null;
         continue;
       }
       if (message.kind === 'recording') {
-        section.append(this.createRecordingCard(message));
+        nodes.push(this.createRecordingCard(message));
         previous = null;
         continue;
       }
@@ -1417,18 +1420,21 @@ class ChatApplication extends Application {
       const isThreadContinued = previous && threadRoot && isSameThread;
       details.isContinued = isGrouped(previous, message, isSameThread);
       details.isThreadContinued = Boolean(isThreadContinued);
-      section.append(this.messageElement(message, details, cache));
+      nodes.push(this.messageElement(message, details, cache));
       previous = message;
       previousRoot = threadRoot;
       if (!details.isArticle) continue;
       const count = plural(visible.length - 1, 'reply', 'replies');
-      section.append(createLabel('replies-divider', count));
+      nodes.push(createLabel('replies-divider', count));
       previous = null;
     }
     this.forget(cache);
     this.cache = cache;
+    for (const part of parts) syncChildren(part.section, part.nodes);
+    this.days = new Map(parts.map(({ key, section }) => [key, section]));
+    const sections = parts.map(({ section }) => section);
     if (sections.length === 0) sections.push(this.createEmpty());
-    this.messageList.replaceChildren(...sections);
+    syncChildren(this.messageList, sections);
     if (this.editing) this.placeEditor();
     if (editorFocused && this.editing) active.focus({ preventScroll: true });
     const hasOlder = view.shown.length > limit;
@@ -1449,6 +1455,16 @@ class ChatApplication extends Application {
     const isOthers = author !== this.peerId;
     const isTimeline = chat === this.chat && !this.article;
     return isTimeline && isOthers && message.timestamp > at;
+  }
+
+  daySection(key, timestamp, parts) {
+    const kept = this.days.get(key);
+    const isTaken = parts.some((part) => part.section === kept);
+    if (!kept || isTaken) return createDay(timestamp);
+    const label = kept.firstChild.firstChild;
+    const text = dayLabel(timestamp);
+    if (label.textContent !== text) label.textContent = text;
+    return kept;
   }
 
   messageElement(message, details, cache) {

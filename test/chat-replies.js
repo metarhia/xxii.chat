@@ -1309,4 +1309,36 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
         && app.repliesCount('general') === 0;`,
     );
   });
+
+  await t.test('a text selection survives new messages', async () => {
+    await write(ada, 'ada', 'keep this selection');
+    await wait(
+      bob,
+      `app.render(); return ${rowOf('keep this selection')} !== undefined;`,
+    );
+    await run(
+      bob,
+      `const text = ${rowOf('keep this selection')}
+        .querySelector('.content').firstChild;
+      const range = document.createRange();
+      range.setStart(text, 5);
+      range.setEnd(text, 9);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;`,
+    );
+    await write(ada, 'ada', 'arrives after the selection');
+    await wait(
+      bob,
+      `app.render();
+      return ${rowOf('arrives after the selection')} !== undefined;`,
+    );
+    const kept = await run(
+      bob,
+      `app.render(); return window.getSelection().toString();`,
+    );
+    assert.equal(kept, 'this');
+    await run(bob, `window.getSelection().removeAllRanges(); return true;`);
+  });
 });
