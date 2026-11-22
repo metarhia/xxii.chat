@@ -92,6 +92,18 @@ const cloneTemplate = (template, selector) => {
   return fragment.querySelector(selector);
 };
 
+const syncChildren = (parent, nodes) => {
+  const wanted = new Set(nodes);
+  for (const child of [...parent.childNodes]) {
+    if (!wanted.has(child)) child.remove();
+  }
+  let current = parent.firstChild;
+  for (const node of nodes) {
+    if (node === current) current = current.nextSibling;
+    else parent.insertBefore(node, current);
+  }
+};
+
 const setBadge = (badge, count) => {
   badge.textContent = count;
   badge.classList.toggle('hidden', count === 0);
@@ -128,5 +140,5 @@ const isReducedMotion = () => matchMedia(REDUCED_MOTION).matches;
 
 export { timeOf, dateOf, dayKey, dayOf, dayLabel, plural };
 export { formatSize, fitSize, readSetting, writeSetting, readMap, writeMap };
-export { cloneTemplate, setBadge, fillText };
+export { cloneTemplate, syncChildren, setBadge, fillText };
 export { isEditable, isReducedMotion };
