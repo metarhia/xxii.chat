@@ -179,15 +179,9 @@ class RecordingSession {
   }
 
   start() {
-    if (
-      this.isActive ||
-      this.#starting ||
-      this.#stopping ||
-      this.#isChoosingFolder ||
-      this.#isDisposed
-    ) {
-      return this.#starting;
-    }
+    const isRunning = this.isActive || this.#starting || this.#stopping;
+    const isBlocked = this.#isChoosingFolder || this.#isDisposed;
+    if (isRunning || isBlocked) return this.#starting;
     this.notice = '';
     this.#starting = this.#begin()
       .catch((error) => {
@@ -303,15 +297,9 @@ class RecordingSession {
   }
 
   async #chooseFolder() {
-    if (
-      !canPickFolder() ||
-      this.#isChoosingFolder ||
-      this.isActive ||
-      this.#starting ||
-      this.#isDisposed
-    ) {
-      return;
-    }
+    const isUnavailable = !canPickFolder() || this.#isChoosingFolder;
+    const isBusy = this.isActive || this.#starting || this.#isDisposed;
+    if (isUnavailable || isBusy) return;
     this.#isChoosingFolder = true;
     this.paint();
     try {

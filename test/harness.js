@@ -311,7 +311,7 @@ const startCallServer = async (t) => {
 const launch = async (t, flags, env = null) => {
   const extra = flags ?? [];
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'xxii-chrome-'));
-  const args = [
+  const chromeArgs = [
     '--headless=new',
     '--no-sandbox',
     '--disable-gpu',
@@ -319,9 +319,8 @@ const launch = async (t, flags, env = null) => {
     '--no-default-browser-check',
     '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
-    ...extra,
-    'about:blank',
   ];
+  const args = chromeArgs.concat(extra, 'about:blank');
   const stdio = ['ignore', 'ignore', 'pipe'];
   const options = { stdio };
   if (env) options.env = { ...process.env, ...env };

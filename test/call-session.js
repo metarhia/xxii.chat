@@ -464,9 +464,9 @@ test('join failure returns to idle and resume sends the record', async (t) => {
 test('offerer backs off and answerer reopens at once', async (t) => {
   const { CallSession } = await load();
   const planned = [];
-  const schedule = (fn, ms) => {
+  const schedule = (callback, timeoutMs) => {
     const id = planned.length + 1;
-    planned.push({ fn, ms, id });
+    planned.push({ callback, timeoutMs, id });
     return id;
   };
   const links = createConnections([]);
@@ -489,19 +489,19 @@ test('offerer backs off and answerer reopens at once', async (t) => {
   session.receive('state', stateOf(call, 1, [ada, bob]));
   await flush();
   assert.equal(links.connections[0].opened.role, 'offerer');
-  assert.equal(planned[0].ms, 10000);
+  assert.equal(planned[0].timeoutMs, 10000);
   links.connections[0].emit('close');
-  assert.equal(planned[1].ms, 1000);
-  planned[1].fn();
+  assert.equal(planned[1].timeoutMs, 1000);
+  planned[1].callback();
   await flush();
   assert.equal(links.connections[1].opened.role, 'offerer');
   assert.deepEqual(links.connections[1].tracks, [{ slot: 'mic', track }]);
   links.connections[1].emit('close');
-  assert.equal(planned.at(-1).ms, 1000);
+  assert.equal(planned.at(-1).timeoutMs, 1000);
 
   const earlyPlanned = [];
-  const earlySchedule = (fn, ms) => {
-    earlyPlanned.push({ fn, ms });
+  const earlySchedule = (callback, timeoutMs) => {
+    earlyPlanned.push({ callback, timeoutMs });
     return earlyPlanned.length;
   };
   const earlyLinks = createConnections([]);

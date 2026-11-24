@@ -46,7 +46,8 @@ const titleOf = (value) => {
 const validateSettings = (input) => {
   const source = input && typeof input === 'object' ? input : {};
   const settings = { ...DEFAULTS };
-  for (const [name, fallback] of Object.entries(DEFAULTS)) {
+  for (const name in DEFAULTS) {
+    const fallback = DEFAULTS[name];
     if (typeof fallback === 'boolean') {
       settings[name] = flagOf(source[name], fallback);
     } else if (name === 'title') {

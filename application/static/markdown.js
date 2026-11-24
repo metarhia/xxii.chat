@@ -87,8 +87,6 @@ const unescape = (text) => {
 const normalizeLabel = (label) =>
   label.trim().replace(/\s+/g, ' ').toLowerCase();
 
-// Inline tokens
-
 const createState = (source, refs) => ({
   source,
   refs,
@@ -670,12 +668,11 @@ const parseInline = (source, refs) => {
   return convertNodes(state.head);
 };
 
-// Blocks
-
 const fenceOf = (line) => {
   const match = FENCE.exec(line);
   if (!match) return null;
-  const [, marks, info] = match;
+  const marks = match[1];
+  const info = match[2];
   if (marks[0] === '`' && info.includes('`')) return null;
   const indent = indentOf(line);
   return { char: marks[0], size: marks.length, indent, info: info.trim() };
@@ -692,7 +689,10 @@ const isClosing = (fence, line) => {
 const itemOf = (line) => {
   const match = ITEM.exec(line);
   if (!match) return null;
-  const [, indent, marker, gap = '', text = ''] = match;
+  const indent = match[1];
+  const marker = match[2];
+  const gap = match[3] ?? '';
+  const text = match[4] ?? '';
   const isOrdered = marker.length > 1 || /\d/.test(marker);
   const sign = isOrdered ? marker.slice(-1) : marker;
   const spaces = gap.replace(/\t/g, '    ').length;
@@ -868,12 +868,12 @@ const isSibling = (line, first) => {
 };
 
 const taskOf = (children) => {
-  const [first] = children;
+  const first = children[0];
   const match = first?.type === 'paragraph' ? TASK.exec(first.raw) : null;
   if (!match) return { checked: null, children };
   const raw = first.raw.slice(match[0].length);
   const rest = children.slice(1);
-  const kids = raw === '' ? rest : [{ ...first, raw }, ...rest];
+  const kids = raw === '' ? rest : [{ ...first, raw }].concat(rest);
   return { checked: match[1] !== ' ', children: kids };
 };
 
@@ -1044,14 +1044,12 @@ Object.assign(FINISHERS, {
 });
 
 const parseMarkdown = (source) => {
-  const text = String(source ?? '').replace(/\r\n?/g, '\n');
+  const text = `${source ?? ''}`.replace(/\r\n?/g, '\n');
   const lines = text.split('\n').map(expandTabs);
   const refs = new Map();
   const blocks = readBlocks(lines, 0, refs);
   return blocks.map((block) => finishBlock(block, refs));
 };
-
-// Plain text
 
 const PLAIN = {};
 
@@ -1064,7 +1062,8 @@ const plainBlocks = (blocks) =>
 const plainItem = (item) => plainBlocks(item.children);
 
 const plainTable = ({ head, rows }) => {
-  const lines = [head, ...rows].map((row) => row.map(plainInline).join(' '));
+  const cells = (row) => row.map(plainInline).join(' ');
+  const lines = [head].concat(rows).map(cells);
   return lines.join('\n');
 };
 

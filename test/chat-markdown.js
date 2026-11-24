@@ -570,7 +570,7 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
       delete document.documentElement.dataset.theme;
       return { dark, light };`,
     );
-    for (const color of [...styles.dark, ...styles.light]) {
+    for (const color of styles.dark.concat(styles.light)) {
       assert.match(color, /^#[0-9a-f]{6}$/);
     }
     assert.notDeepEqual(styles.dark, styles.light);

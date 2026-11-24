@@ -12,7 +12,8 @@ const harness = require('./harness.js');
 
 const { MEDIA_FLAGS, ORIGIN, launch, startServer, stopServer } = harness;
 
-const FLAGS = [...MEDIA_FLAGS, '--disable-features=WebRtcHideLocalIpsWithMdns'];
+const MDNS = '--disable-features=WebRtcHideLocalIpsWithMdns';
+const FLAGS = MEDIA_FLAGS.concat(MDNS);
 
 const untilLoaded = async (browser, sessionId) => {
   const deadline = Date.now() + 15000;

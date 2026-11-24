@@ -152,7 +152,7 @@ const ITEM_KEYS = {
   e: (app, item) => app.startEdit(item.dataset.id),
 };
 
-const LAYER_ACTIONS = new Set(['selection', 'forward', 'pick']);
+const LAYER_ACTIONS = ['selection', 'forward', 'pick'];
 
 const THREAD_KEYS = {
   '[': -1,
@@ -201,7 +201,7 @@ const UNITS = [
 ];
 const PERSON_FLAGS = ['mic', 'camera', 'screen', 'hand'];
 const PROGRAM_FLAGS = ['recording', 'live', 'optOut'];
-const CALL_FLAGS = [...PERSON_FLAGS, ...PROGRAM_FLAGS];
+const CALL_FLAGS = PERSON_FLAGS.concat(PROGRAM_FLAGS);
 const ITEMS = '.message, .post, .post-article';
 const CHAT_ITEMS = '.nav-item[data-id], .nav-item[data-peer]';
 const TITLE = 'XXII Chat';
@@ -273,15 +273,17 @@ const createContact = (peer) => ({
 });
 
 const createReactionButtons = () => {
-  const buttons = [];
-  for (const reaction in REACTIONS) {
+  const names = Object.keys(REACTIONS);
+  const buttons = new Array(names.length).fill(null);
+  for (let i = 0; i < names.length; i++) {
+    const reaction = names[i];
     const button = document.createElement('button');
     button.type = 'button';
     button.title = reaction;
     button.dataset.action = 'react';
     button.dataset.reaction = reaction;
     button.textContent = REACTIONS[reaction];
-    buttons.push(button);
+    buttons[i] = button;
   }
   return buttons;
 };
@@ -1752,15 +1754,17 @@ class ChatApplication extends Application {
   }
 
   summarize(byReaction, nicks) {
-    const summary = [];
+    const reactions = Object.keys(REACTIONS);
+    const summary = new Array(reactions.length).fill(null);
     let total = 0;
-    for (const reaction in REACTIONS) {
+    for (let i = 0; i < reactions.length; i++) {
+      const reaction = reactions[i];
       const authors = byReaction?.get(reaction) ?? new Set();
       const names = Array.from(authors, (id) => nicks.get(id) ?? shortId(id));
       const mine = authors.has(this.peerId);
       const count = authors.size;
       total += count;
-      summary.push({ reaction, count, mine, names: names.toSorted() });
+      summary[i] = { reaction, count, mine, names: names.toSorted() };
     }
     return total > 0 ? summary : [];
   }
@@ -2034,7 +2038,7 @@ class ChatApplication extends Application {
     if (!button) return;
     const id = this.menu.target;
     const { action } = button.dataset;
-    const selectAfterPop = LAYER_ACTIONS.has(action) && this.menu.isLifted;
+    const selectAfterPop = LAYER_ACTIONS.includes(action) && this.menu.isLifted;
     const run = () => MESSAGE_ACTIONS[action](this, id, button);
     if (selectAfterPop && this.layers.at(-1) === 'menu') {
       window.addEventListener('popstate', run, { once: true });
@@ -2312,14 +2316,10 @@ class ChatApplication extends Application {
   }
 
   openCapture(chat) {
-    if (
-      typeof MediaRecorder !== 'function' ||
-      this.callOpening ||
-      this.callSession ||
-      (chat && !isPair(chat))
-    ) {
-      return;
-    }
+    const canRecord = typeof MediaRecorder === 'function';
+    const isBusy = Boolean(this.callOpening || this.callSession);
+    const isGroup = Boolean(chat && !isPair(chat));
+    if (!canRecord || isBusy || isGroup) return;
     if (this.capture?.context().chat === chat) return void this.closePanel();
     if (!this.releaseCapture()) return;
     const context = {
@@ -3454,7 +3454,7 @@ class ChatApplication extends Application {
   }
 
   startEdit(id) {
-    const [record] = this.ownRecords([id]);
+    const record = this.ownRecords([id])[0];
     if (!record || !this.itemOf(id)) return;
     const input = this.editInput;
     if (this.editing === id) return void input.focus();
@@ -3492,7 +3492,7 @@ class ChatApplication extends Application {
 
   saveEdit() {
     const id = this.editing;
-    const [record] = this.ownRecords([id]);
+    const record = this.ownRecords([id])[0];
     if (!record) return void this.cancelEdit();
     const content = this.editInput.value.trim();
     const hasFiles = (this.view?.attachments.get(id) ?? []).length > 0;

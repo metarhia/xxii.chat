@@ -122,7 +122,8 @@ const edit = async (page, id, values) => {
     return !editor.hidden;
   `);
   const editor = '[data-studio-section=editor]';
-  for (const [name, value] of Object.entries(values)) {
+  for (const name in values) {
+    const value = values[name];
     const record = `[data-record="${name}"]`;
     const selector = `${editor} ${field(name)}, ${editor} ${record}`;
     await change(page, selector, value);
@@ -174,7 +175,7 @@ const playback = (url) => `
     videoFrame = media.requestVideoFrameCallback(sample);
     try {
       context.drawImage(media, 8, 8, 1, 1, 0, 0, 1, 1);
-      const rgb = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      const rgb = context.getImageData(0, 0, 1, 1).data.slice(0, 3);
       history.push({ time: metadata.mediaTime, rgb,
         presented: lastPresented, clock: media.currentTime });
     } catch (error) {
@@ -246,7 +247,7 @@ const hiddenSamples = `
   compositor.draw = () => {
     draw();
     pixel.drawImage(context.canvas, 8, 8, 1, 1, 0, 0, 1, 1);
-    const rgb = [...pixel.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    const rgb = pixel.getImageData(0, 0, 1, 1).data.slice(0, 3);
     window.studioSamples.push({ rgb, hidden: document.hidden });
   };
 `;
@@ -283,7 +284,7 @@ const privacyFade = `
   const sample = () => {
     compositor.draw();
     pixel.drawImage(compositor.canvas, 510, 260, 1, 1, 0, 0, 1, 1);
-    return [...pixel.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    return pixel.getImageData(0, 0, 1, 1).data.slice(0, 3);
   };
   try {
     let before;
@@ -708,7 +709,7 @@ const videoFile = `
   oscillator.connect(gain).connect(audio);
   oscillator.start();
   await context.resume();
-  const tracks = [...video.getTracks(), ...audio.stream.getTracks()];
+  const tracks = video.getTracks().concat(audio.stream.getTracks());
   const mimeType = 'video/webm;codecs=vp8,opus';
   const recorder = new MediaRecorder(new MediaStream(tracks), { mimeType });
   const chunks = [];
@@ -736,7 +737,7 @@ const overlayProbe = `
   window.studioPixel = (canvas, x, y) => {
     copy.width = copy.height = 1;
     pixel.drawImage(canvas, x, y, 1, 1, 0, 0, 1, 1);
-    return [...pixel.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    return pixel.getImageData(0, 0, 1, 1).data.slice(0, 3);
   };
   window.studioCards = () => {
     const { compositor } = app.callStage.recording;
@@ -764,7 +765,10 @@ const overlayProbe = `
     const tile = tiles.find(({ id }) => id.startsWith('clip/'));
     const x = tile ? tile.x + tile.width / 2 : canvas.width / 2;
     const y = tile ? tile.y + tile.height / 3 : canvas.height / 3;
-    const [r, g, b] = window.studioPixel(canvas, x, y);
+    const pixel = window.studioPixel(canvas, x, y);
+    const r = pixel[0];
+    const g = pixel[1];
+    const b = pixel[2];
     return r < 15 && g > 173 && g < 205 && b > 200;
   };
 `;

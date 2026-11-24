@@ -19,7 +19,7 @@ const folderRecord = async (handle, recording = '') => {
       const mode = handle === undefined ? 'readonly' : 'readwrite';
       const tx = db.transaction('handles', mode);
       const store = tx.objectStore('handles');
-      let request;
+      let request = null;
       if (handle === null) store.delete(key);
       else if (entry) store.put(entry, key);
       else request = store.get(key);

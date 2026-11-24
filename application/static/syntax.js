@@ -343,8 +343,6 @@ const FAMILIES = {
   patch: 'diff',
 };
 
-// Token list
-
 const createTokens = () => ({ list: [], last: null });
 
 const pushToken = (tokens, type, text) => {
@@ -355,8 +353,6 @@ const pushToken = (tokens, type, text) => {
   const isSpace = type === 'text' && text.trim() === '';
   if (!isSpace) tokens.last = { type: type === 'text' ? 'value' : type, text };
 };
-
-// Generic tokenizer
 
 const sticky = (pattern) => new RegExp(pattern.source, 'y');
 
@@ -370,15 +366,18 @@ const stringRule = (name, prefix) => {
 };
 
 const commentRules = (def) => {
-  const rules = [];
-  for (const [open, close] of def.block) {
+  const rules = new Array(def.block.length + def.line.length).fill(null);
+  let index = 0;
+  for (const pair of def.block) {
+    const open = pair[0];
+    const close = pair[1];
     const escape = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
     const source = `${escape(open)}[\\s\\S]*?(?:${escape(close)}|$)`;
-    rules.push(new RegExp(source, 'y'));
+    rules[index++] = new RegExp(source, 'y');
   }
   for (const start of def.line) {
     const escape = start.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-    rules.push(new RegExp(`${escape}[^\\n]*`, 'y'));
+    rules[index++] = new RegExp(`${escape}[^\\n]*`, 'y');
   }
   return rules;
 };
@@ -391,7 +390,7 @@ const PUNCTUATION = /[{}()[\];,.]/y;
 const SPACE = /\s+/y;
 const LIFETIME = /'[A-Za-z_]\w*/y;
 
-const VALUE_BEFORE = new Set([
+const VALUE_BEFORE = [
   'literal',
   'number',
   'string',
@@ -400,11 +399,11 @@ const VALUE_BEFORE = new Set([
   'value',
   'property',
   'function',
-]);
+];
 
 const canStartRegexp = ({ last }) => {
   if (!last) return true;
-  if (VALUE_BEFORE.has(last.type)) return false;
+  if (VALUE_BEFORE.includes(last.type)) return false;
   if (last.type === 'keyword') return !['this', 'super'].includes(last.text);
   const isClose = last.type === 'punctuation' && ')]}'.includes(last.text);
   return !isClose;
@@ -469,7 +468,9 @@ const scanSimple = (code, pos) => {
     ['operator', OPERATOR],
     ['punctuation', PUNCTUATION],
   ];
-  for (const [type, regex] of checks) {
+  for (const pair of checks) {
+    const type = pair[0];
+    const regex = pair[1];
     const match = matchAt(regex, code, pos);
     if (match) return { type, text: match[0] };
   }
@@ -501,8 +502,6 @@ const tokenizeGeneric = (code, source) => {
   }
   return tokens.list;
 };
-
-// HTML and XML
 
 const TAG_OPEN = /<\/?[A-Za-z][\w:.-]*/y;
 const TAG_END = /\/?>/y;
@@ -564,7 +563,9 @@ const SCANNERS = [
 ];
 
 const scanMarkup = (code, pos, tokens) => {
-  for (const [type, regex] of SCANNERS) {
+  for (const pair of SCANNERS) {
+    const type = pair[0];
+    const regex = pair[1];
     const match = matchAt(regex, code, pos);
     if (!match) continue;
     pushToken(tokens, type, match[0]);
@@ -582,8 +583,6 @@ const tokenizeHtml = (code) => {
   while (pos < code.length) pos += scanMarkup(code, pos, tokens);
   return tokens.list;
 };
-
-// CSS
 
 const CSS_COMMENT = /\/\*[\s\S]*?(?:\*\/|$)/y;
 const CSS_STRING = /"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?/y;
@@ -645,7 +644,9 @@ const scanRules = (rules, chunk, tokens) => {
   let pos = 0;
   while (pos < chunk.length) {
     let found = null;
-    for (const [type, regex] of rules) {
+    for (const pair of rules) {
+      const type = pair[0];
+      const regex = pair[1];
       const match = matchAt(regex, chunk, pos);
       if (match && match[0] !== '') {
         found = { type, text: match[0] };
@@ -693,8 +694,6 @@ const tokenizeCss = (code) => {
   return tokens.list;
 };
 
-// Line based languages
-
 const splitLines = (code) => code.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 
 const DIFF_META = [
@@ -741,7 +740,10 @@ const YAML_DASH = /^(\s*)(-)(?=\s|$)/;
 const yamlLine = (line, tokens) => {
   const key = YAML_KEY.exec(line);
   if (key) {
-    const [all, lead, name, colon] = key;
+    const all = key[0];
+    const lead = key[1];
+    const name = key[2];
+    const colon = key[3];
     pushToken(tokens, 'text', lead);
     pushToken(tokens, 'property', name);
     pushToken(tokens, 'punctuation', colon);
@@ -832,7 +834,7 @@ const TOKENIZERS = {
 };
 
 const highlight = (code, lang) => {
-  const family = FAMILIES[String(lang ?? '').toLowerCase()];
+  const family = FAMILIES[`${lang ?? ''}`.toLowerCase()];
   if (!family) return null;
   const tokenize = TOKENIZERS[family];
   if (tokenize) return tokenize(code);

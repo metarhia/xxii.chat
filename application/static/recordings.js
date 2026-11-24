@@ -1,23 +1,13 @@
 import { META_FILE, POSTER_FILE } from './recording-files.js';
 import { programFileOf, recordingUrlOf, routeOf } from './recording-files.js';
 import { stampOf, timeText, sizeText } from './recording-files.js';
-import {
-  isFolderRecording,
-  readMeta,
-  recordingsOf,
-} from './recording-files.js';
+import { isFolderRecording, readMeta } from './recording-files.js';
+import { recordingsOf } from './recording-files.js';
 import { exportNameOf, downloadUrlOf, exportFile } from './recording-export.js';
-import {
-  pickExportFile,
-  exportToFolder,
-  partLabel,
-} from './recording-export.js';
-import {
-  canPickFolder,
-  folderHandle,
-  folderRecord,
-  folderPermission,
-} from './recording-folder.js';
+import { pickExportFile, exportToFolder } from './recording-export.js';
+import { partLabel } from './recording-export.js';
+import { canPickFolder, folderHandle } from './recording-folder.js';
+import { folderRecord, folderPermission } from './recording-folder.js';
 import { cloneTemplate } from './view.js';
 import { RecordingWriter } from './recorder.js';
 
@@ -325,7 +315,8 @@ class Recordings {
   addPartActions(row, entry, play) {
     const select = row.querySelector('.recording-part');
     select.hidden = false;
-    for (const [index, part] of entry.segments.entries()) {
+    for (let index = 0; index < entry.segments.length; index++) {
+      const part = entry.segments[index];
       const option = document.createElement('option');
       option.value = part.name;
       option.textContent = partLabel(index + 1);
@@ -366,11 +357,9 @@ class Recordings {
       });
     };
     const canWrite = globalThis.FileSystemFileHandle?.prototype.createWritable;
-    if (
-      !canWrite ||
-      !globalThis.TransformStream ||
-      typeof globalThis.showSaveFilePicker !== 'function'
-    ) {
+    const canStream = Boolean(globalThis.TransformStream);
+    const canSave = typeof globalThis.showSaveFilePicker === 'function';
+    if (!canWrite || !canStream || !canSave) {
       return;
     }
     const saveAs = row.querySelector('.recording-save-as');

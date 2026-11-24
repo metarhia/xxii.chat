@@ -116,7 +116,8 @@ const fillEditor = (editor, destination) => {
     token: destination.token,
     bitrate: destination.bitrate / MBPS,
   };
-  for (const [name, value] of Object.entries(values)) {
+  for (const name in values) {
+    const value = values[name];
     editor.querySelector(`[data-stream="${name}"]`).value = value;
   }
 };

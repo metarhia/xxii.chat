@@ -1,11 +1,7 @@
 import { PEOPLE, SCREENS, PLACEMENTS, OTHERS, POSITIONS } from './layout.js';
 import { NO_VIDEO, QUALITIES, MIN_SPEAKERS, MAX_SPEAKERS } from './layout.js';
-import {
-  DEFAULTS,
-  OPTIONS,
-  targetLabel,
-  segmentLabel,
-} from './call-settings.js';
+import { DEFAULTS, OPTIONS, targetLabel } from './call-settings.js';
+import { segmentLabel } from './call-settings.js';
 import { canPickFolder } from './recording-folder.js';
 
 const SURFACE_COLOR = '#0f1418';
@@ -13,8 +9,9 @@ const VOLUME_MAX = 200;
 const VOLUME_STEP = 5;
 
 const range = (from, to) => {
-  const values = [];
-  for (let value = from; value <= to; value++) values.push(value);
+  const count = Math.max(0, to - from + 1);
+  const values = new Array(count).fill(0);
+  for (let i = 0; i < count; i++) values[i] = from + i;
   return values;
 };
 
@@ -73,7 +70,7 @@ const PROGRAM_FIELDS = [
   { name: 'noVideo', label: 'No video', kind: 'choice', values: NO_VIDEO },
 ];
 
-const FIELDS = [...PROGRAM_FIELDS, ...SHARED_FIELDS];
+const FIELDS = PROGRAM_FIELDS.concat(SHARED_FIELDS);
 
 const LABELS = {
   people: {

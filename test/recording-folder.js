@@ -202,7 +202,8 @@ test(
           parts.reduce((sum, part) => sum + part.size, 0),
         );
         assert.ok(meta.duration >= 6900 && meta.duration < 8500);
-        for (const [index, part] of parts.entries()) {
+        for (let index = 0; index < parts.length; index++) {
+          const part = parts[index];
           assert.ok(part.duration > 0 && Number.isFinite(part.duration));
           assert.ok(part.headerDuration > 0);
           const difference =

@@ -3,16 +3,9 @@ import { drawArgsOf, selectSpeakers } from './layout.js';
 import { onScreenOf, layoutProgram } from './layout.js';
 import { colorOf, initialsOf } from './avatar.js';
 import { idOf } from './members.js';
-import {
-  brandFont,
-  chipStyleOf,
-  countdownText,
-  logoRect,
-  overlayRect,
-  tickerOffset,
-  commentLines,
-  clipSource,
-} from './studio-layout.js';
+import { brandFont, chipStyleOf, countdownText } from './studio-layout.js';
+import { logoRect, overlayRect, tickerOffset } from './studio-layout.js';
+import { commentLines, clipSource } from './studio-layout.js';
 
 const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
@@ -130,11 +123,12 @@ const stepOf = (previous, tile, now, isMoving) => {
 
 const moveTiles = (motion, tiles, now, isMoving) => {
   const next = new Map();
-  const drawn = [];
-  for (const tile of tiles) {
+  const drawn = new Array(tiles.length).fill(null);
+  for (let i = 0; i < tiles.length; i++) {
+    const tile = tiles[i];
     const entry = stepOf(motion.get(tile.id), tile, now, isMoving);
     next.set(tile.id, entry);
-    drawn.push({ ...tile, ...rectAt(entry, now) });
+    drawn[i] = { ...tile, ...rectAt(entry, now) };
   }
   return { motion: next, drawn };
 };
@@ -365,7 +359,8 @@ const paintOverlay = (context, entry, box, frame, scale) => {
       context.fillText(text, x + offset, y + height / 2);
     } else if (kind === 'comment') {
       const lines = commentLines(text, measure, limit);
-      for (const [index, line] of lines.entries()) {
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
         context.fillText(line, left, y + (61 + 27 * index) * scale);
       }
     } else {

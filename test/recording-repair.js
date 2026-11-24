@@ -77,8 +77,8 @@ const startRecording = (extension, id) => `
   const destination = audio.createMediaStreamDestination();
   oscillator.connect(destination);
   oscillator.start();
-  const [video] = canvas.captureStream(30).getVideoTracks();
-  const [sound] = destination.stream.getAudioTracks();
+  const video = canvas.captureStream(30).getVideoTracks()[0];
+  const sound = destination.stream.getAudioTracks()[0];
   const compositor = { canvas, track: video };
   const mixer = { track: sound };
   const writer = new RecordingWriter();

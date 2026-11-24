@@ -172,11 +172,16 @@ test('writes flush every 5 s and save meta every 10 s', async () => {
   assert.equal(FLUSH_MS, 5000);
   assert.equal(META_MS, 10000);
   let marks = { flushedAt: 0, metaAt: 0 };
-  const steps = [];
-  for (let now = 1000; now <= 21000; now += 1000) {
+  const first = 1000;
+  const last = 21000;
+  const stepMs = 1000;
+  const count = (last - first) / stepMs + 1;
+  const steps = new Array(count).fill(null);
+  for (let i = 0; i < count; i++) {
+    const now = first + i * stepMs;
     const due = scheduleOf(marks, now);
     marks = markedOf(marks, due, now);
-    steps.push([now, due.flush, due.meta]);
+    steps[i] = [now, due.flush, due.meta];
   }
   const flushes = steps.filter((step) => step[1]).map((step) => step[0]);
   const saves = steps.filter((step) => step[2]).map((step) => step[0]);

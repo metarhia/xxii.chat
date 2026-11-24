@@ -119,7 +119,7 @@ const gridRects = (count, area, aspect, gap) => {
   const { columns, rows, width, height } = shape;
   const blockHeight = rows * height + (rows - 1) * gap;
   const top = Math.max(area.y, area.y + (area.height - blockHeight) / 2);
-  const rects = [];
+  const rects = new Array(count).fill(null);
   for (let i = 0; i < count; i++) {
     const row = Math.floor(i / columns);
     const inRow = Math.min(columns, count - row * columns);
@@ -127,7 +127,7 @@ const gridRects = (count, area, aspect, gap) => {
     const left = Math.max(area.x, area.x + (area.width - rowWidth) / 2);
     const x = left + (i % columns) * (width + gap);
     const y = top + row * (height + gap);
-    rects.push({ x, y, width, height });
+    rects[i] = { x, y, width, height };
   }
   return rects;
 };
@@ -241,9 +241,9 @@ const trimmed = (members, room) => {
 const rankOutsiders = (outsiders, now) => {
   const isLong = (source) => isQualified(source, now);
   const isFresh = (source) => isRecent(source, now);
-  const qualified = outsiders.filter(isLong).sort(bySpeechStart);
+  const qualified = outsiders.filter(isLong).toSorted(bySpeechStart);
   const quiet = outsiders.filter((source) => !isLong(source));
-  const recent = quiet.filter(isFresh).sort(byRecent);
+  const recent = quiet.filter(isFresh).toSorted(byRecent);
   const rest = quiet.filter((source) => !isFresh(source));
   return qualified.concat(recent, rest);
 };
@@ -328,12 +328,12 @@ const lineRects = (count, cell, strip, vertical, gap) => {
   const length = vertical ? strip.height : strip.width;
   const step = (vertical ? cell.height : cell.width) + gap;
   const start = Math.max(0, (length - (step * count - gap)) / 2);
-  const rects = [];
+  const rects = new Array(count).fill(null);
   for (let i = 0; i < count; i++) {
     const offset = start + i * step;
     const x = vertical ? strip.x : strip.x + offset;
     const y = vertical ? strip.y + offset : strip.y;
-    rects.push({ x, y, width: cell.width, height: cell.height });
+    rects[i] = { x, y, width: cell.width, height: cell.height };
   }
   return rects;
 };
@@ -383,10 +383,10 @@ const bubbleRects = (count, area, gap) => {
   const height = width / TILE_ASPECT;
   const right = area.x + area.width - gap;
   const y = area.y + area.height - gap - height;
-  const rects = [];
+  const rects = new Array(count).fill(null);
   for (let i = 0; i < count; i++) {
     const x = right - (count - i) * width - (count - 1 - i) * gap;
-    rects.push({ x, y, width, height });
+    rects[i] = { x, y, width, height };
   }
   return rects;
 };
@@ -520,7 +520,7 @@ const layoutProgram = (input, sources, now, speakers) => {
   const side = others.map((source, i) =>
     make(source, panel.rects[i], program, now, 1),
   );
-  return main.concat(side).filter(hasArea).sort(byZ);
+  return main.concat(side).filter(hasArea).toSorted(byZ);
 };
 
 export { TILE_ASPECT, REFERENCE_HEIGHT, QUALITIES, PEOPLE, SCREENS };

@@ -119,7 +119,8 @@ test('logo uses its corner and scales with program height', async () => {
     'bottom-left': { x: 24, y: 1008 },
     'bottom-right': { x: 1800, y: 1008 },
   };
-  for (const [corner, point] of Object.entries(corners)) {
+  for (const corner in corners) {
+    const point = corners[corner];
     assert.deepEqual(logoRect({ corner, size: 96 }, 1920, 1080, 120, 60), {
       ...point,
       width: 96,

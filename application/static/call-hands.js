@@ -14,7 +14,7 @@ const byHand = (a, b) => {
   return a.endpoint > b.endpoint ? 1 : 0;
 };
 
-const raisedOf = (people) => people.filter(isRaised).sort(byHand);
+const raisedOf = (people) => people.filter(isRaised).toSorted(byHand);
 
 const orderOf = (people) => {
   const order = new Map();

@@ -12,7 +12,7 @@ const para = (...children) => ({ type: 'paragraph', children });
 const parse = async (source) => (await loadMarkdown()).parseMarkdown(source);
 
 const inlines = async (source) => {
-  const [block] = await parse(source);
+  const block = (await parse(source))[0];
   return block.children;
 };
 
@@ -46,19 +46,19 @@ test('ATX headings drop the closing run and need a space', async () => {
 });
 
 test('fenced code: info string, tildes, longer fences, unclosed', async () => {
-  const [js] = await parse('```js title\nlet a;\n```');
+  const js = (await parse('```js title\nlet a;\n```'))[0];
   assert.deepEqual(js, { type: 'code', lang: 'js', text: 'let a;' });
-  const [tilde] = await parse('~~~\n```\nx\n```\n~~~');
+  const tilde = (await parse('~~~\n```\nx\n```\n~~~'))[0];
   assert.deepEqual(tilde, { type: 'code', lang: '', text: '```\nx\n```' });
-  const [long] = await parse('````\n```\n````');
+  const long = (await parse('````\n```\n````'))[0];
   assert.equal(long.text, '```');
-  const [open] = await parse('```py\nprint(1)\n\nmore');
+  const open = (await parse('```py\nprint(1)\n\nmore'))[0];
   assert.deepEqual(open, {
     type: 'code',
     lang: 'py',
     text: 'print(1)\n\nmore',
   });
-  const [inline] = await parse('```code``` in a line');
+  const inline = (await parse('```code``` in a line'))[0];
   assert.equal(inline.type, 'paragraph');
 });
 
@@ -70,12 +70,12 @@ test('indented code does not interrupt a paragraph', async () => {
   assert.deepEqual(await parse('para\n    still para'), [
     para(text('para\nstill para')),
   ]);
-  const [tab] = await parse('\tcode');
+  const tab = (await parse('\tcode'))[0];
   assert.deepEqual(tab, { type: 'code', lang: '', text: 'code' });
 });
 
 test('block quotes nest and continue lazily', async () => {
-  const [quote] = await parse('> one\nlazy\n> > deep');
+  const quote = (await parse('> one\nlazy\n> > deep'))[0];
   assert.equal(quote.type, 'quote');
   assert.deepEqual(quote.children[0], para(text('one\nlazy')));
   assert.equal(quote.children[1].type, 'quote');
@@ -85,35 +85,35 @@ test('block quotes nest and continue lazily', async () => {
     blocks.map((block) => block.type),
     ['quote', 'paragraph'],
   );
-  const [fenced] = await parse('> ```\n> x\n> ```');
+  const fenced = (await parse('> ```\n> x\n> ```'))[0];
   assert.deepEqual(fenced.children, [{ type: 'code', lang: '', text: 'x' }]);
 });
 
 test('lists: bullets, numbers, start, nesting, tight and loose', async () => {
-  const [tight] = await parse('- a\n- b\n  - c\n+ d');
+  const tight = (await parse('- a\n- b\n  - c\n+ d'))[0];
   assert.equal(tight.type, 'list');
   assert.equal(tight.ordered, false);
   assert.equal(tight.loose, false);
   assert.equal(tight.items.length, 2);
-  const [first] = tight.items[1].children;
+  const first = tight.items[1].children[0];
   assert.deepEqual(first, para(text('b')));
   assert.equal(tight.items[1].children[1].type, 'list');
   const blocks = await parse('- a\n- b\n+ d');
   assert.equal(blocks.length, 2);
-  const [loose] = await parse('- a\n\n- b');
+  const loose = (await parse('- a\n\n- b'))[0];
   assert.equal(loose.loose, true);
-  const [inner] = await parse('- a\n\n  b\n- c');
+  const inner = (await parse('- a\n\n  b\n- c'))[0];
   assert.equal(inner.loose, true);
-  const [numbers] = await parse('3. x\n4. y\n5) z');
+  const numbers = (await parse('3. x\n4. y\n5) z'))[0];
   assert.equal(numbers.ordered, true);
   assert.equal(numbers.start, 3);
   assert.equal(numbers.items.length, 2);
-  const [paren] = await parse('1) one\n2) two');
+  const paren = (await parse('1) one\n2) two'))[0];
   assert.equal(paren.items.length, 2);
 });
 
 test('lists: interrupting, lazy lines, empty items', async () => {
-  const [mixed] = await parse('text\n- item');
+  const mixed = (await parse('text\n- item'))[0];
   assert.equal(mixed.type, 'paragraph');
   const blocks = await parse('text\n- item');
   assert.deepEqual(
@@ -124,21 +124,21 @@ test('lists: interrupting, lazy lines, empty items', async () => {
   assert.equal(late.length, 1);
   const first = await parse('text\n1. item');
   assert.equal(first.length, 2);
-  const [lazy] = await parse('- one\nlazy\n- two');
+  const lazy = (await parse('- one\nlazy\n- two'))[0];
   assert.deepEqual(lazy.items[0].children, [para(text('one\nlazy'))]);
-  const [empty] = await parse('-\n- b');
+  const empty = (await parse('-\n- b'))[0];
   assert.equal(empty.items.length, 2);
   assert.deepEqual(empty.items[0].children, []);
-  const [indent] = await parse('1.  one\n    more\n2. two');
+  const indent = (await parse('1.  one\n    more\n2. two'))[0];
   assert.deepEqual(indent.items[0].children, [para(text('one\nmore'))]);
-  const [code] = await parse('- ```\n  x\n  ```');
+  const code = (await parse('- ```\n  x\n  ```'))[0];
   assert.deepEqual(code.items[0].children, [
     { type: 'code', lang: '', text: 'x' },
   ]);
 });
 
 test('task items are checked, unchecked, or plain', async () => {
-  const [list] = await parse('- [ ] todo\n- [x] done\n- [X] big\n- [y] no');
+  const list = (await parse('- [ ] todo\n- [x] done\n- [X] big\n- [y] no'))[0];
   const checked = list.items.map((item) => item.checked);
   assert.deepEqual(checked, [false, true, true, null]);
   assert.deepEqual(list.items[0].children, [para(text('todo'))]);
@@ -149,14 +149,14 @@ test('thematic breaks', async () => {
   for (const line of ['---', '***', '___', '- - -', ' * * * *']) {
     assert.deepEqual(await parse(line), [{ type: 'rule' }], line);
   }
-  const [bullet] = await parse('* a');
+  const bullet = (await parse('* a'))[0];
   assert.equal(bullet.type, 'list');
 });
 
 test('tables: alignment, escaped pipes, short and long rows', async () => {
   const source =
     '| a | b | c |\n|:--|:-:|--:|\n| 1 \\| x | 2 |\n| 3 | 4 | 5 | 6 |';
-  const [table] = await parse(source);
+  const table = (await parse(source))[0];
   assert.equal(table.type, 'table');
   assert.deepEqual(table.align, ['left', 'center', 'right']);
   assert.deepEqual(table.head, [[text('a')], [text('b')], [text('c')]]);
@@ -164,9 +164,9 @@ test('tables: alignment, escaped pipes, short and long rows', async () => {
   assert.deepEqual(table.rows[0][0], [text('1 | x')]);
   assert.deepEqual(table.rows[0][2], []);
   assert.equal(table.rows[1].length, 3);
-  const [bare] = await parse('a | b\n--|--\n1 | 2');
+  const bare = (await parse('a | b\n--|--\n1 | 2'))[0];
   assert.deepEqual(bare.align, ['', '']);
-  const [lone] = await parse('| a | b |\n|---|\n| 1 | 2 |');
+  const lone = (await parse('| a | b |\n|---|\n| 1 | 2 |'))[0];
   assert.equal(lone.type, 'paragraph');
   const stop = await parse('| a |\n|---|\n| 1 |\n\ntext');
   assert.deepEqual(
@@ -182,19 +182,25 @@ test('reference definitions are removed and resolved', async () => {
     '[Foo  Bar]: http://x.test "T"\n\n[foo bar] [x][FOO BAR] [foo bar][]';
   const blocks = await parse(source);
   assert.equal(blocks.length, 1);
-  const [one, , two, , three] = blocks[0].children;
+  const children = blocks[0].children;
+  const one = children[0];
+  const two = children[2];
+  const three = children[4];
   assert.equal(one.href, 'http://x.test');
   assert.equal(one.title, 'T');
   assert.deepEqual(two.children, [text('x')]);
   assert.equal(three.href, 'http://x.test');
-  const [missing] = await parse('[nope] and [a][b]');
+  const missing = (await parse('[nope] and [a][b]'))[0];
   assert.deepEqual(missing, para(text('[nope] and [a][b]')));
   const first = await parse('[a]: http://1.test\n[a]: http://2.test\n\n[a]');
   assert.equal(first[0].children[0].href, 'http://1.test');
 });
 
 test('emphasis follows the delimiter rules', async () => {
-  const [em, , under, , strong] = await inlines('*a* _b_ **c**');
+  const parsed = await inlines('*a* _b_ **c**');
+  const em = parsed[0];
+  const under = parsed[2];
+  const strong = parsed[4];
   assert.equal(em.type, 'em');
   assert.equal(under.type, 'em');
   assert.equal(strong.type, 'strong');
@@ -268,24 +274,24 @@ test('code spans, escapes, and entities', async () => {
 });
 
 test('links: inline, titles, pointed, balanced parentheses', async () => {
-  const [plainLink] = await inlines('[a](http://x.test)');
+  const plainLink = (await inlines('[a](http://x.test)'))[0];
   assert.deepEqual(plainLink, {
     type: 'link',
     href: 'http://x.test',
     title: '',
     children: [text('a')],
   });
-  const [titled] = await inlines('[a](https://x.test/p "The title")');
+  const titled = (await inlines('[a](https://x.test/p "The title")'))[0];
   assert.equal(titled.title, 'The title');
-  const [single] = await inlines(`[a](https://x.test 'T')`);
+  const single = (await inlines(`[a](https://x.test 'T')`))[0];
   assert.equal(single.title, 'T');
-  const [pointed] = await inlines('[a](<https://x.test/a b>)');
+  const pointed = (await inlines('[a](<https://x.test/a b>)'))[0];
   assert.equal(pointed.href, 'https://x.test/a b');
-  const [paren] = await inlines('[a](https://x.test/a_(b)_c)');
+  const paren = (await inlines('[a](https://x.test/a_(b)_c)'))[0];
   assert.equal(paren.href, 'https://x.test/a_(b)_c');
-  const [rich] = await inlines('[**bold** `c`](http://x.test)');
+  const rich = (await inlines('[**bold** `c`](http://x.test)'))[0];
   assert.equal(rich.children[0].type, 'strong');
-  const [mail] = await inlines('[m](mailto:a@b.test)');
+  const mail = (await inlines('[m](mailto:a@b.test)'))[0];
   assert.equal(mail.href, 'mailto:a@b.test');
   assert.deepEqual(
     await inlines('[a] (http://x.test)').then((n) => n[0]),
@@ -299,12 +305,12 @@ test('links never nest', async () => {
   const hrefs = links.map((node) => node.href);
   assert.deepEqual(hrefs, ['http://in.test', 'http://out.test']);
   assert.ok(links[0].children.every((node) => node.type === 'text'));
-  const [bare] = await inlines('[http://x.test](http://x.test)');
+  const bare = (await inlines('[http://x.test](http://x.test)'))[0];
   assert.deepEqual(bare.children, [text('http://x.test')]);
 });
 
 test('images become links data and never load', async () => {
-  const [image] = await inlines('![alt *x*](https://x.test/i.png "T")');
+  const image = (await inlines('![alt *x*](https://x.test/i.png "T")'))[0];
   assert.deepEqual(image, {
     type: 'image',
     src: 'https://x.test/i.png',
@@ -317,12 +323,12 @@ test('images become links data and never load', async () => {
 });
 
 test('autolinks: pointed, emails, bare URLs and trimming', async () => {
-  const [pointed] = await inlines('<https://x.test/a?b=c>');
+  const pointed = (await inlines('<https://x.test/a?b=c>'))[0];
   assert.equal(pointed.href, 'https://x.test/a?b=c');
   assert.deepEqual(pointed.children, [text('https://x.test/a?b=c')]);
-  const [mail] = await inlines('<me@host.test>');
+  const mail = (await inlines('<me@host.test>'))[0];
   assert.equal(mail.href, 'mailto:me@host.test');
-  const [word] = await inlines('<javascript:alert(1)>');
+  const word = (await inlines('<javascript:alert(1)>'))[0];
   assert.equal(word.type, 'text');
   const bare = await inlines(
     'see https://x.test/a_b, (http://y.test/q) and www.z.test.',
@@ -333,7 +339,7 @@ test('autolinks: pointed, emails, bare URLs and trimming', async () => {
     ['https://x.test/a_b', 'http://y.test/q', 'https://www.z.test'],
   );
   assert.deepEqual(bare.at(-1), text('.'));
-  const [wiki] = await inlines('https://x.test/w_(v)).');
+  const wiki = (await inlines('https://x.test/w_(v)).'))[0];
   assert.equal(wiki.href, 'https://x.test/w_(v)');
   const nope = await inlines('nohttp://x and xwww.y');
   assert.equal(nope.length, 1);
@@ -360,7 +366,7 @@ test('URL safety: only http, https, and mailto become links', async () => {
       source,
     );
   }
-  const [reference] = await parse('[x]: javascript:alert(1)\n\n[x]');
+  const reference = (await parse('[x]: javascript:alert(1)\n\n[x]'))[0];
   assert.deepEqual(reference, para(text('x')));
   const upper = await inlines('[x](HTTPS://X.TEST)');
   assert.equal(upper[0].type, 'link');
@@ -369,7 +375,7 @@ test('URL safety: only http, https, and mailto become links', async () => {
 test('raw HTML is text', async () => {
   const source = '<img src=x onerror=alert(1)> <b>bold</b> <script>x</script>';
   assert.deepEqual(await inlines(source), [text(source)]);
-  const [block] = await parse('<div>\nhi\n</div>');
+  const block = (await parse('<div>\nhi\n</div>'))[0];
   assert.deepEqual(block, para(text('<div>\nhi\n</div>')));
 });
 
@@ -462,7 +468,8 @@ test('pathological 64 KB messages parse fast', async () => {
     parseMarkdown(source);
     return performance.now() - started;
   };
-  for (const [name, source] of Object.entries(cases)) {
+  for (const name in cases) {
+    const source = cases[name];
     const runs = Array.from({ length: 3 }, () => timeOf(source));
     const elapsed = Math.min(...runs);
     assert.ok(elapsed < LIMIT_MS, `${name} took ${elapsed.toFixed(0)} ms`);

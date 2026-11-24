@@ -12,12 +12,8 @@ import { CallRecording } from './call-record.js';
 import { Streaming } from './streaming.js';
 import { createRecordPanel, createRecordControl } from './record-panel.js';
 import { createButton } from './record-panel.js';
-import {
-  Studio,
-  createStudioPanel,
-  createStageLists,
-  stageMove,
-} from './studio.js';
+import { Studio, createStudioPanel, createStageLists } from './studio.js';
+import { stageMove } from './studio.js';
 import { CALL_LAYOUTS, STRIP_POSITIONS } from './call-layout.js';
 import { tileId, callLayout } from './call-layout.js';
 import { REACTIONS, REACTION_SHOW_MS, isReaction } from './call-hands.js';
@@ -25,21 +21,11 @@ import { orderOf, rosterOf, createLimiter } from './call-hands.js';
 import { takeReaction, createAutoLower, stepAutoLower } from './call-hands.js';
 import { shortcutOf, isTalkKey, createTalk, stepTalk } from './call-keys.js';
 import { helpOf } from './call-keys.js';
-import {
-  syncFields,
-  settingField,
-  deviceField,
-  fillDevice,
-} from './call-preferences.js';
-import {
-  DEFAULTS,
-  createToast,
-  addToast,
-  showsToast,
-  toastText,
-  TOAST_SHOW_MS,
-  titleOf,
-} from './call-settings.js';
+import { syncFields, settingField, deviceField } from './call-preferences.js';
+import { fillDevice } from './call-preferences.js';
+import { DEFAULTS, createToast, addToast } from './call-settings.js';
+import { showsToast, toastText, TOAST_SHOW_MS } from './call-settings.js';
+import { titleOf } from './call-settings.js';
 
 const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
 const phoneView = () => matchMedia(PHONE).matches;
@@ -997,7 +983,7 @@ class CallStage {
     this.streaming = null;
     this.desktopPanel = '';
     this.quality = new Map();
-    this.qualityNotices = new Set();
+    this.qualityNotices = [];
     this.levels = null;
     this.layout = 'auto';
     this.strip = 'bottom';
@@ -1031,7 +1017,7 @@ class CallStage {
     this.#onRelay = (endpoint) => this.onRelay(endpoint);
     this.#onCall = (state) => this.onCallState(state);
     this.#onNotice = (text) => {
-      this.qualityNotices.add(text);
+      if (!this.qualityNotices.includes(text)) this.qualityNotices.push(text);
       this.showNote(this.media?.message || this.media?.notice || '');
     };
     this.#onQuality = (quality) => this.onQuality(quality);
@@ -1174,7 +1160,7 @@ class CallStage {
     this.viewHints?.stop();
     this.viewHints = null;
     this.quality.clear();
-    this.qualityNotices.clear();
+    this.qualityNotices.length = 0;
     if (this.#listening) {
       this.hooks.unlisten(this.#onCall);
       document.removeEventListener('keydown', this.#onKey, true);
@@ -2231,13 +2217,13 @@ class CallStage {
     const reason = this.mode === 'prejoin' ? admission.reason : '';
     const unavailable = this.media && !this.media.canScreen;
     const message = unavailable ? 'Screen capture is unavailable.' : '';
-    const notices = [...this.qualityNotices];
+    const notices = this.qualityNotices.slice();
     const strong = this.preferences.noise === 'strong';
     const supported = navigator.mediaDevices?.getSupportedConstraints?.();
     if (strong && !supported?.voiceIsolation) {
       notices.push('Strong noise suppression unavailable. Using standard.');
     }
-    const parts = [reason, this.mediaNote, message, ...notices];
+    const parts = [reason, this.mediaNote, message].concat(notices);
     const value = parts.filter(Boolean).join(' ');
     note.textContent = value;
     note.classList.toggle('hidden', value === '');

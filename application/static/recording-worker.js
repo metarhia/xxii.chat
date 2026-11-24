@@ -6,11 +6,8 @@ import { isFolderRecording } from './recording-files.js';
 import { durationSlotOf, durationBytesOf } from './recording-webm.js';
 import { storedDurationOf } from './recording-duration.js';
 import { folderHandle } from './recording-folder.js';
-import {
-  createAvailableFile,
-  removeEmptyExport,
-  segmentNameOf,
-} from './recording-export.js';
+import { createAvailableFile, removeEmptyExport } from './recording-export.js';
+import { segmentNameOf } from './recording-export.js';
 
 const encoder = new TextEncoder();
 const sessions = new Map();
@@ -22,10 +19,11 @@ const SESSION_WRITES = ['write', 'pause', 'resume'];
 const lockNameOf = (recording) => `xxii-recording-${recording}`;
 
 const requireStorage = () => {
-  if (
-    !navigator.storage?.getDirectory ||
-    !globalThis.FileSystemFileHandle?.prototype.createSyncAccessHandle
-  ) {
+  const storage = navigator.storage;
+  const prototype = globalThis.FileSystemFileHandle?.prototype;
+  const hasDirectory = Boolean(storage?.getDirectory);
+  const hasHandle = Boolean(prototype?.createSyncAccessHandle);
+  if (!hasDirectory || !hasHandle) {
     throw new Error('Browser storage for recordings is unavailable');
   }
   if (!navigator.locks?.request) {
@@ -300,7 +298,7 @@ const interruptedEvent = async (directory, meta) => {
   const type = 'interrupt';
   if (isFolderRecording(meta)) return { type };
   const name = programFileOf(meta.extension);
-  let file;
+  let file = null;
   try {
     file = await directory.getFileHandle(name);
   } catch (error) {

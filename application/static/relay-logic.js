@@ -8,7 +8,7 @@ const RELAY_HEIGHT = 360;
 const RELAY_FPS = 15;
 const RELAY_BITRATE = 500000;
 
-const DENIALS = new Set(['busy', 'not-linked', 'not-joined', 'no-sound']);
+const DENIALS = ['busy', 'not-linked', 'not-joined', 'no-sound'];
 
 const needsRelay = (local, remote, failures) => failures >= 3 && local < remote;
 
@@ -19,7 +19,7 @@ const relayCandidates = (people, from, to, connected) => {
       candidates.push(endpoint);
     }
   }
-  return candidates.sort();
+  return candidates.toSorted();
 };
 
 const relayDenial = ({ joined, linked, busy, blocked }) => {
@@ -40,7 +40,7 @@ const readRelayMessage = (message, local, sender) => {
   if (action === 'ask' && !localInPair && sender === from) return message;
   if (action === 'stop' && !localInPair && senderInPair) return message;
   if (!localInPair || senderInPair) return null;
-  if (action === 'deny' && local === from && DENIALS.has(reason)) {
+  if (action === 'deny' && local === from && DENIALS.includes(reason)) {
     return message;
   }
   const other = local === from ? to : from;

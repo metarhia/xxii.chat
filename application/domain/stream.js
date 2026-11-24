@@ -179,7 +179,8 @@ const admit = (windows, endpoint, now) => {
   if (isAllowed) recent.push(now);
   windows.set(endpoint, recent);
   if (windows.size > RATE_SWEEP) {
-    for (const [key, list] of windows) {
+    for (const key of windows.keys()) {
+      const list = windows.get(key);
       const last = list[list.length - 1] ?? 0;
       if (now - last >= RATE_WINDOW_MS) windows.delete(key);
     }

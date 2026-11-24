@@ -1,7 +1,7 @@
 const PAIR = /^[\w-]{1,64}_[\w-]{1,64}$/;
 const POLICIES = ['open', 'link', 'approval'];
 const FLAGS = ['mic', 'camera', 'screen', 'recording', 'optOut', 'live'];
-const REQUESTS = new Set(['mute', 'unmute', 'stopCamera', 'stopScreen']);
+const REQUESTS = ['mute', 'unmute', 'stopCamera', 'stopScreen'];
 const EMPTY = Object.freeze([]);
 const SIGNAL_BURST = 200;
 const UPDATE_BURST = 10;
@@ -156,9 +156,10 @@ const memberOf = (state, client, peer, endpoint, nick, now) => ({
 });
 
 const peopleOf = (state, admins) => {
-  const people = [];
+  const people = new Array(state.participants.size).fill(null);
+  let index = 0;
   for (const item of state.participants.values()) {
-    people.push({
+    people[index++] = {
       endpoint: item.endpoint,
       peer: item.peer,
       nick: item.nick,
@@ -173,20 +174,21 @@ const peopleOf = (state, admins) => {
       stage: item.stage,
       live: item.live,
       title: item.title,
-    });
+    };
   }
   return people;
 };
 
 const lobbyOf = (state) => {
-  const lobby = [];
+  const lobby = new Array(state.lobby.size).fill(null);
+  let index = 0;
   for (const item of state.lobby.values()) {
-    lobby.push({
+    lobby[index++] = {
       endpoint: item.endpoint,
       peer: item.peer,
       nick: item.nick,
       knocked: item.knocked,
-    });
+    };
   }
   return lobby;
 };
@@ -897,7 +899,7 @@ const sweepAll = async () => {
   async host(client, args) {
     const access = await accessOf(client, args.call);
     if (access.error) return access.error;
-    if (REQUESTS.has(args.action)) {
+    if (REQUESTS.includes(args.action)) {
       return request(access.state, access.peer, args.target, args.action);
     }
     const handler = HOST[args.action];
@@ -932,12 +934,13 @@ const sweepAll = async () => {
 
   active(client) {
     const peer = client ? peerOf(client) : '';
-    const list = [];
+    const list = new Array(domain.call.calls.size).fill(null);
+    let index = 0;
     for (const state of domain.call.calls.values()) {
       const owner = ownerOf(state.chat);
       const count = state.participants.size;
       const full = count >= config.call.maxParticipants;
-      list.push({
+      list[index++] = {
         call: state.id,
         chat: state.chat,
         count,
@@ -947,7 +950,7 @@ const sweepAll = async () => {
         kind: state.kind,
         full,
         admin: isAdmin(state, peer, owner),
-      });
+      };
     }
     return list;
   },

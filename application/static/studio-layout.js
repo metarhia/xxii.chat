@@ -73,12 +73,16 @@ const programOf = (value, defaults) => {
   const pins = Array.isArray(input.pinned) ? input.pinned : [];
   const endpoints = pins.filter((pin) => pin && textOf(pin) === pin);
   program.pinned = [...new Set(endpoints)];
-  const volumes = isObject(input.volumes) ? Object.entries(input.volumes) : [];
-  program.volumes = Object.fromEntries(
-    volumes
-      .filter(([key, gain]) => key && Number.isFinite(gain))
-      .map(([key, gain]) => [key, bounded(gain, 0, 2, 1)]),
-  );
+  const source = isObject(input.volumes) ? input.volumes : null;
+  const volumes = {};
+  if (source) {
+    for (const key in source) {
+      const gain = source[key];
+      if (!key || !Number.isFinite(gain)) continue;
+      volumes[key] = bounded(gain, 0, 2, 1);
+    }
+  }
+  program.volumes = volumes;
   return program;
 };
 
@@ -134,14 +138,11 @@ const scenesOf = (value, defaults = defaultsOf()) => {
   const transition = choose(value.transition, TRANSITIONS, '');
   const scenes = value.scenes.map((scene) => sceneOf(scene, defaults));
   const ids = new Set(scenes.map((scene) => scene?.id));
-  if (
-    !transition ||
-    ids.has(undefined) ||
-    ids.size !== scenes.length ||
-    (scenes.length ? !ids.has(value.active) : value.active !== '')
-  ) {
-    return fallback();
-  }
+  const hasDuplicate = ids.has(undefined) || ids.size !== scenes.length;
+  const activeMissing = scenes.length
+    ? !ids.has(value.active)
+    : value.active !== '';
+  if (!transition || hasDuplicate || activeMissing) return fallback();
   return { transition, active: value.active, scenes };
 };
 

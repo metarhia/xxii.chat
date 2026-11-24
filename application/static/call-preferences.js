@@ -1,13 +1,6 @@
-import {
-  SETTINGS_KEY,
-  OPTIONS,
-  readSettings,
-  writeSettings,
-  targetLabel,
-  segmentLabel,
-  TITLE_LIMIT,
-  validateSettings,
-} from './call-settings.js';
+import { SETTINGS_KEY, OPTIONS, readSettings } from './call-settings.js';
+import { writeSettings, targetLabel, segmentLabel } from './call-settings.js';
+import { TITLE_LIMIT, validateSettings } from './call-settings.js';
 import { readDevices, writeDevices, canSink } from './media.js';
 import { canPickFolder, folderRecord, pickFolder } from './recording-folder.js';
 import { chooseRecordingFolder } from './recording-folder.js';
@@ -107,7 +100,7 @@ const tone = async (speaker) => {
   const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
   if (!Context) throw new Error('Speaker test unavailable in this browser');
   const context = new Context();
-  let output;
+  let output = null;
   try {
     let destination = context.destination;
     if (speaker && typeof context.setSinkId === 'function') {

@@ -24,7 +24,10 @@ const suffixNameOf = (name, number) => {
   return `${name.slice(0, end)} (${number})${name.slice(end)}`;
 };
 
-const partLabel = (number) => `part ${String(number).padStart(2, '0')}`;
+const partLabel = (number) => {
+  const index = `${number}`.padStart(2, '0');
+  return `part ${index}`;
+};
 
 const segmentNameOf = ({ chatName, started, extension }, number) => {
   const name = exportNameOf(chatName, started, extension);

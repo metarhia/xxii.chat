@@ -130,7 +130,7 @@ const openBlockedPair = async (relay, first, second, relayFirst) => {
   await prepare(first, relay.token);
   await prepare(second, relay.token);
   const compare = (a, b) => (a.endpoint < b.endpoint ? -1 : 1);
-  const order = [first, second].sort(compare);
+  const order = [first, second].toSorted(compare);
   const a = order[0];
   const b = order[1];
   await blocked(a, b);

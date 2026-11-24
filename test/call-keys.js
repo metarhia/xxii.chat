@@ -245,9 +245,9 @@ test(
 
     await run(`document.querySelector(
       '#call-view .call-controls [data-action="mic"]').focus(); return true;`);
-    const seen = [];
-    for (let index = 0; index < 12; index++) {
-      seen.push(await run(FOCUSED));
+    const seen = new Array(12).fill('');
+    for (let index = 0; index < seen.length; index++) {
+      seen[index] = await run(FOCUSED);
       await tab(browser, session);
     }
     const expected = [
