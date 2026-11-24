@@ -211,8 +211,8 @@ const webmDurationOf = (read, size) => {
   if (segment?.id !== SEGMENT) return null;
   const end = segment.end < 0 ? size : Math.min(segment.end, size);
   let scale = DEFAULT_SCALE;
-  let offset;
-  let timecode;
+  let offset = undefined;
+  let timecode = undefined;
   let at = segment.start;
   const readInfo = ({ id, start, end }) => {
     if (id === TIMECODE_SCALE) {

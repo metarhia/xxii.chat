@@ -266,9 +266,9 @@ test(
     );
     await delay(1500);
 
-    const samples = [];
+    const samples = new Array(MEASURE_STEPS + 1).fill(null);
     for (let step = 0; step <= MEASURE_STEPS; step++) {
-      samples.push(await run('return window.sampleProgram();'));
+      samples[step] = await run('return window.sampleProgram();');
       await delay(STEP_MS);
     }
     const first = samples[0];
@@ -321,9 +321,9 @@ test(
     await settle(browser, session);
     const muted = await loudest(browser, session, 3000);
     assert.ok(muted < SILENCE, `opted-out voice peak ${muted}`);
-    const frozen = [];
-    for (let i = 0; i < 4; i++) {
-      frozen.push(await run('return window.sampleProgram().remote;'));
+    const frozen = new Array(4).fill(0);
+    for (let i = 0; i < frozen.length; i++) {
+      frozen[i] = await run('return window.sampleProgram().remote;');
       await delay(300);
     }
     assert.equal(distinct(frozen), 1);

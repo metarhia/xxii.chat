@@ -440,10 +440,10 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await untilServer(serverHas('written while server is down'), 20000);
   });
 
-  const contexts = [];
-  for (let i = 0; i < 2; i++) {
+  const contexts = new Array(2).fill('');
+  for (let i = 0; i < contexts.length; i++) {
     const created = await browser.request('Target.createBrowserContext');
-    contexts.push(created.browserContextId);
+    contexts[i] = created.browserContextId;
   }
   const grace = await open(contexts[0]);
   const linus = await open(contexts[1]);

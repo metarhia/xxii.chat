@@ -10,7 +10,7 @@ const rootOf = (records, id, top = '') => {
   while (true) {
     const parent = records.get(current)?.replyTo;
     if (!parent || parent === top) return current;
-    if (visited.has(parent)) return Array.from(visited).sort()[0];
+    if (visited.has(parent)) return Array.from(visited).toSorted()[0];
     visited.add(parent);
     current = parent;
   }
@@ -29,7 +29,7 @@ const threadOf = (replies, root) => {
       parents.push(reply.id);
     }
   }
-  return thread.sort(byTime);
+  return thread.toSorted(byTime);
 };
 
 const threadRootOf = (view, id, top = '') => {
@@ -67,7 +67,7 @@ const repliesToMe = (records, me, readAt) => {
   for (const chat of found.keys()) {
     const ids = found
       .get(chat)
-      .sort(byTime)
+      .toSorted(byTime)
       .map((reply) => reply.id);
     mine.set(chat, ids);
   }

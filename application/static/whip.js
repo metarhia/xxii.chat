@@ -253,7 +253,8 @@ const healthOf = (before, after, age) => {
   if (age > WARM_MS && fps !== null && fps < FPS_LIMIT) {
     warnings.push(`${Math.round(fps)} fps`);
   }
-  const text = ['LIVE', `${mbps.toFixed(1)} Mbps`, ...warnings].join(' · ');
+  const live = ['LIVE', `${mbps.toFixed(1)} Mbps`];
+  const text = live.concat(warnings).join(' · ');
   return { mbps, warnings, text };
 };
 

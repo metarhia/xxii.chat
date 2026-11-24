@@ -53,11 +53,14 @@ test('scenario 16: serve recording ranges and Unicode filenames', async (t) => {
     ['bytes=5-', 5, 7],
     ['bytes=-4', 4, 7],
   ];
-  for (const [header, start, end] of ranges) {
+  for (const pair of ranges) {
+    const header = pair[0];
+    const start = pair[1];
+    const end = pair[2];
     assert.deepEqual(await request(header), {
       status: 206,
       range: `bytes ${start}-${end}/${bytes.length}`,
-      length: String(end - start + 1),
+      length: `${end - start + 1}`,
       bytes: bytes.slice(start, end + 1),
     });
   }

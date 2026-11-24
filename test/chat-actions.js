@@ -437,7 +437,9 @@ test('Message actions in Chrome', { timeout: 120000 }, async (t) => {
         bob,
         `const rows = [${reply}, ${rowOf('a line from bob')}];
       const colors = rows.map((row) => getComputedStyle(row).backgroundColor);
-      return [...colors, rows[0].classList.contains('inside')];`,
+      const copy = colors.slice();
+      copy.push(rows[0].classList.contains('inside'));
+      return copy;`,
       );
       assert.notEqual(rows[0], 'rgba(0, 0, 0, 0)');
       assert.notEqual(rows[0], rows[1]);

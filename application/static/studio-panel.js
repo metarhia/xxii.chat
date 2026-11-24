@@ -230,7 +230,8 @@ const createAssetRow = (asset) => {
 };
 
 const paintValues = (box, values) => {
-  for (const [name, value] of Object.entries(values)) {
+  for (const name in values) {
+    const value = values[name];
     const control = box.querySelector(`[data-studio="${name}"]`);
     if (control.type === 'checkbox') control.checked = value;
     else if (control !== document.activeElement) control.value = value;

@@ -52,7 +52,9 @@ test('lists recording details and labels', async () => {
     ['interrupted', 'Interrupted'],
     ['constructor', 'Unknown'],
   ];
-  for (const [state, label] of states) {
+  for (const pair of states) {
+    const state = pair[0];
+    const label = pair[1];
     assert.equal(labelsOf({ ...meta, state }).state, label);
   }
 });

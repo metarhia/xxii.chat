@@ -96,11 +96,17 @@ const freshUntilOf = (entries) => {
 };
 
 const buildIce = ({ servers, settings }) => {
-  const iceServers = servers.slice();
+  const stunCount = settings.publicStun ? PUBLIC_STUN.length : 0;
+  const total = servers.length + stunCount + settings.servers.length;
+  const iceServers = new Array(total).fill(null);
+  for (let i = 0; i < servers.length; i++) iceServers[i] = servers[i];
+  let index = servers.length;
   if (settings.publicStun) {
-    for (const url of PUBLIC_STUN) iceServers.push({ urls: [url] });
+    for (const url of PUBLIC_STUN) iceServers[index++] = { urls: [url] };
   }
-  for (const server of settings.servers) iceServers.push(rtcServer(server));
+  for (const server of settings.servers) {
+    iceServers[index++] = rtcServer(server);
+  }
   const iceTransportPolicy = settings.forceRelay ? 'relay' : 'all';
   const freshUntil = freshUntilOf(iceServers);
   return { iceServers, iceTransportPolicy, freshUntil };

@@ -277,7 +277,8 @@ class Mixer {
         }
       }
     }
-    for (const [id, entry] of this.#music) {
+    for (const id of this.#music.keys()) {
+      const entry = this.#music.get(id);
       if (entry.until <= now) {
         releaseMusic(entry);
         this.#music.delete(id);

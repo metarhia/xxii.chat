@@ -253,7 +253,7 @@
         isCode(await offerOf(who, plain, { action: 'get' }), 'stream/refused');
         const noToken = await offerOf(who, plain, { token: '' });
         node.assert.strictEqual(noToken.status, 201);
-        const [entry] = endpoint.seen;
+        const entry = endpoint.seen[0];
         node.assert.strictEqual(entry.request.headers.authorization, undefined);
         node.assert.strictEqual(endpoint.seen.length, 1);
       } finally {

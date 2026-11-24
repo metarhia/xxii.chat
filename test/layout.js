@@ -315,7 +315,7 @@ test('a tile has the documented shape and values', async () => {
   const talking = person('ada', { level: 0.2, spokeAt: BASE - 100 });
   const tiles = layoutProgram({}, [talking], BASE);
   assert.equal(tiles.length, 1);
-  assert.deepEqual(Object.keys(tiles[0]).sort(), TILE_KEYS);
+  assert.deepEqual(Object.keys(tiles[0]).toSorted(), TILE_KEYS);
   assert.deepEqual(tiles[0], {
     id: 'ada:1/camera',
     x: 57,
@@ -610,7 +610,7 @@ test('others strip lists people not on screen on every side', async () => {
     left: (main, other) => right(other) < main.x,
     right: (main, other) => other.x > right(main),
   };
-  assert.deepEqual(Object.keys(sides).sort(), lib.POSITIONS.toSorted());
+  assert.deepEqual(Object.keys(sides).toSorted(), lib.POSITIONS.toSorted());
   for (const position of lib.POSITIONS) {
     const options = {
       people: 'speaker',

@@ -362,31 +362,33 @@ test('retries: a final relay error stops at once', async () => {
 
 const fakes = { connection: null };
 
-function FakeConnection() {
-  const getParameters = () => ({ encodings: [{}] });
-  const sender = { getParameters, setParameters: async () => undefined };
-  const connection = {
-    iceGatheringState: 'complete',
-    connectionState: 'new',
-    localDescription: null,
-    remoteDescription: null,
-    isClosed: false,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-    addTransceiver: () => ({ sender }),
-    createOffer: async () => ({ type: 'offer', sdp: 'v=0 offer' }),
-    setLocalDescription: async (description) => {
-      connection.localDescription = description;
-    },
-    setRemoteDescription: async (description) => {
-      connection.remoteDescription = description;
-    },
-    close: () => {
-      connection.isClosed = true;
-    },
-  };
-  fakes.connection = connection;
-  return connection;
+class FakeConnection {
+  constructor() {
+    const getParameters = () => ({ encodings: [{}] });
+    const sender = { getParameters, setParameters: async () => undefined };
+    const connection = {
+      iceGatheringState: 'complete',
+      connectionState: 'new',
+      localDescription: null,
+      remoteDescription: null,
+      isClosed: false,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addTransceiver: () => ({ sender }),
+      createOffer: async () => ({ type: 'offer', sdp: 'v=0 offer' }),
+      setLocalDescription: async (description) => {
+        connection.localDescription = description;
+      },
+      setRemoteDescription: async (description) => {
+        connection.remoteDescription = description;
+      },
+      close: () => {
+        connection.isClosed = true;
+      },
+    };
+    fakes.connection = connection;
+    return connection;
+  }
 }
 
 const withFakes = async (fetchFake, body) => {

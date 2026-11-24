@@ -185,9 +185,9 @@ const floats = (endpoint, count, emoji = '') => {
     return true;`;
 };
 
-const burst = (emoji) => `const sent = [];
-  for (let index = 0; index < 10; index++) {
-    sent.push(app.callStage.react(${JSON.stringify(emoji)}));
+const burst = (emoji) => `const sent = new Array(10).fill(false);
+  for (let index = 0; index < sent.length; index++) {
+    sent[index] = app.callStage.react(${JSON.stringify(emoji)});
   }
   return sent.filter(Boolean).length;`;
 

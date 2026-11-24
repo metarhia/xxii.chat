@@ -17,7 +17,7 @@ const HEARTBEAT_MS = 10000;
 const RESUME_LIMIT = 12;
 const RESUME_WAIT_MS = 300;
 const MESSAGE_LIMIT = 4096;
-const TYPES = new Set(['hint', 'reaction', 'ping', 'relay']);
+const TYPES = ['hint', 'reaction', 'ping', 'relay'];
 const EVENTS = [
   'state',
   'signal',
@@ -29,8 +29,8 @@ const EVENTS = [
   'ringing',
   'request',
 ];
-const LIVE = new Set(['joined', 'lobby', 'reconnecting']);
-const RESUMABLE = new Set(['joined', 'reconnecting']);
+const LIVE = ['joined', 'lobby', 'reconnecting'];
+const RESUMABLE = ['joined', 'reconnecting'];
 
 const isOfferer = (local, remote) => {
   if (local.joined !== remote.joined) return local.joined > remote.joined;
@@ -71,14 +71,17 @@ const relax = (timer) => {
   return timer;
 };
 
+const defaultSchedule = (callback, timeoutMs) =>
+  setTimeout(callback, timeoutMs);
+
 const pause = (schedule, ms) =>
   new Promise((resolve) => {
     schedule(resolve, ms);
   });
 
-const RETRYABLE = new Set(['call/not-found', 'call/forbidden']);
+const RETRYABLE = ['call/not-found', 'call/forbidden'];
 
-const isRetryable = (error) => RETRYABLE.has(error?.code);
+const isRetryable = (error) => RETRYABLE.includes(error?.code);
 
 const guard = async (work, session) => {
   try {
@@ -262,7 +265,7 @@ class CallLink extends Emitter {
     const data = typeof event === 'string' ? event : event?.data;
     if (typeof data !== 'string' || data.length > MESSAGE_LIMIT) return;
     const message = jsonParse(data);
-    if (!isRecord(message) || !TYPES.has(message.type)) return;
+    if (!isRecord(message) || !TYPES.includes(message.type)) return;
     const now = Date.now();
     if (now - this.#messageStart >= 1000) {
       this.#messageStart = now;
@@ -328,7 +331,7 @@ class CallSession extends Emitter {
     this.router = new SignalRouter();
     this.#ice = ice;
     this.#now = typeof now === 'function' ? now : () => Date.now();
-    this.#schedule = schedule ?? ((fn, ms) => setTimeout(fn, ms));
+    this.#schedule = schedule ?? defaultSchedule;
     const create = () => new RtcConnection();
     this.#createConnection = connection ?? create;
     this.#relay = new PeerRelay(this, this.#links);
@@ -355,7 +358,7 @@ class CallSession extends Emitter {
       const result = await this.api.call.join(payload);
       return this.#joined(result);
     } catch (error) {
-      const kept = input.resume === true && RESUMABLE.has(phase);
+      const kept = input.resume === true && RESUMABLE.includes(phase);
       this.#setPhase(kept ? phase : 'idle');
       throw error;
     }
@@ -654,7 +657,7 @@ class CallSession extends Emitter {
     const joined = participantOf(state.participants, endpoint);
     const waiting = participantOf(state.lobby, endpoint);
     if (joined || waiting) return true;
-    return LIVE.has(this.phase);
+    return LIVE.includes(this.phase);
   }
 
   #apply(state) {
@@ -875,16 +878,18 @@ class CallSession extends Emitter {
   }
 
   #clearPlans() {
-    const timers = [];
-    for (const timer of this.#planTimers.values()) timers.push(timer);
+    const timers = new Array(this.#planTimers.size).fill(0);
+    let index = 0;
+    for (const timer of this.#planTimers.values()) timers[index++] = timer;
     this.#plans.clear();
     this.#planTimers.clear();
     for (const timer of timers) clearTimeout(timer);
   }
 
   #closeLinks() {
-    const links = [];
-    for (const link of this.#links.values()) links.push(link);
+    const links = new Array(this.#links.size).fill(null);
+    let index = 0;
+    for (const link of this.#links.values()) links[index++] = link;
     this.#links.clear();
     for (const link of links) {
       link.retired = true;
@@ -909,7 +914,7 @@ class CallSession extends Emitter {
       const call = this.call;
       const endpoint = this.endpoint;
       guard(() => this.api.call.ping({ call, endpoint }), this);
-      if (RESUMABLE.has(this.phase)) this.#armHeartbeat();
+      if (RESUMABLE.includes(this.phase)) this.#armHeartbeat();
     };
     const timer = relax(this.#schedule(run, HEARTBEAT_MS));
     this.#heartbeat = { run, timer };
@@ -925,7 +930,7 @@ class CallSession extends Emitter {
   #setPhase(phase) {
     if (this.phase === phase) return;
     this.phase = phase;
-    if (RESUMABLE.has(phase)) {
+    if (RESUMABLE.includes(phase)) {
       if (!this.#heartbeat) this.#armHeartbeat();
     } else {
       this.#clearHeartbeat();

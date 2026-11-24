@@ -3,34 +3,21 @@ import { createButton, defaultsOf, paintSceneFields } from './record-panel.js';
 import { valueOf } from './record-panel.js';
 import { builtInScenes, scenesOf, sceneOf, brandOf } from './studio-layout.js';
 import { brandFont, countdownUntil, fadeAlpha } from './studio-layout.js';
-import {
-  DEFAULT_MUSIC_VOLUME,
-  TRANSITIONS,
-  OVERLAYS,
-} from './studio-layout.js';
+import { DEFAULT_MUSIC_VOLUME, TRANSITIONS } from './studio-layout.js';
+import { OVERLAYS } from './studio-layout.js';
 import { textsOf, overlayOpacity, commentText } from './studio-layout.js';
 import { StudioClip } from './studio-clip.js';
 import { groupOf, SCENES, BRAND, MUSIC, TEXTS } from './studio-storage.js';
-import {
-  readJSON,
-  writeJSON,
-  readAssets,
-  readAsset,
-} from './studio-storage.js';
-import {
-  withStudioDirectory,
-  addAsset,
-  deleteAsset,
-} from './studio-storage.js';
+import { readJSON, writeJSON, readAssets } from './studio-storage.js';
+import { readAsset } from './studio-storage.js';
+import { withStudioDirectory, addAsset } from './studio-storage.js';
+import { deleteAsset } from './studio-storage.js';
 import { createDestinationControls } from './stream-panel.js';
 import { createSceneControls, createSceneEditor } from './studio-panel.js';
 import { createBrandControls, createAssetControls } from './studio-panel.js';
 import { createSceneRow, createAssetRow, paintValues } from './studio-panel.js';
-import {
-  createTextControls,
-  createBannerRow,
-  createLowerThird,
-} from './studio-panel.js';
+import { createTextControls, createBannerRow } from './studio-panel.js';
+import { createLowerThird } from './studio-panel.js';
 import { paintOptions, paintList } from './studio-panel.js';
 
 const STAGES = [
@@ -348,7 +335,8 @@ class Studio {
         alpha: 1,
       });
     }
-    for (const [kind, entry] of this.#shown) {
+    for (const kind of this.#shown.keys()) {
+      const entry = this.#shown.get(kind);
       const alpha = overlayOpacity(entry, now, reduced);
       if (entry.to === 0 && alpha === 0) this.#shown.delete(kind);
       if (alpha === 0) continue;
@@ -409,6 +397,8 @@ class Studio {
       this.enabled = false;
       this.#stopClip();
     }
+    const typeChanged = scene?.type !== before?.type;
+    const minutesChanged = scene?.minutes !== before?.minutes;
     if (scene?.id !== before?.id) {
       const now = Date.now();
       const fades =
@@ -417,10 +407,7 @@ class Studio {
         fades && before ? { scene: before, until: this.#until } : null;
       this.#switchedAt = now;
       this.#startCountdown(now);
-    } else if (
-      scene?.type !== before?.type ||
-      scene?.minutes !== before?.minutes
-    ) {
+    } else if (typeChanged || minutesChanged) {
       this.#startCountdown(Date.now());
     }
   }
@@ -828,7 +815,7 @@ class Studio {
         ? settings.scenes.map((current) =>
             current.id === scene.id ? scene : current,
           )
-        : [...settings.scenes, scene];
+        : settings.scenes.concat(scene);
       return { ...settings, scenes, active: settings.active || scene.id };
     });
     if (this.#notice || this.#draft !== draft) return;

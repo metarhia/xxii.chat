@@ -165,8 +165,10 @@ const framesScript = (url) => `
   canvas.height = 18;
   const context = canvas.getContext('2d', { willReadFrequently: true });
   const rect = window.rect;
-  const hashes = [];
-  for (const time of ${JSON.stringify(FRAME_TIMES)}) {
+  const times = ${JSON.stringify(FRAME_TIMES)};
+  const hashes = new Array(times.length).fill(0);
+  for (let index = 0; index < times.length; index++) {
+    const time = times[index];
     video.currentTime = time;
     await new Promise((resolve) => {
       video.onseeked = resolve;
@@ -182,7 +184,7 @@ const framesScript = (url) => `
     for (let i = 0; i < data.length; i += 3) {
       sum = (sum + data[i] * 31 + data[i + 1]) | 0;
     }
-    hashes.push(sum);
+    hashes[index] = sum;
   }
   video.remove();
   return { hashes, duration: video.duration, rect };`;
@@ -237,9 +239,9 @@ test(
     await delay(1500);
     assert.equal(await run('return document.hidden;'), true);
 
-    const samples = [];
+    const samples = new Array(HIDDEN_STEPS).fill(null);
     for (let step = 0; step < HIDDEN_STEPS; step++) {
-      samples.push(await run('return window.sample();'));
+      samples[step] = await run('return window.sample();');
       await delay(STEP_MS);
     }
     assert.ok(samples.every((item) => item.hidden === true));

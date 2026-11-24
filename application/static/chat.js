@@ -10,7 +10,7 @@ const REACTIONS = {
   dislike: '👎',
 };
 
-const REACTION_NAMES = [...Object.keys(REACTIONS), 'done'];
+const REACTION_NAMES = Object.keys(REACTIONS).concat('done');
 const ICONS = { chat: '💬', feed: '📢', folder: '📁' };
 const PREFIXES = { chat: '!', feed: '#' };
 const CHANNELS = ['feed', 'chat'];
@@ -369,7 +369,8 @@ const dropDeleted = (messages, records, replies) => {
   }
   if (dropped.size === 0) return messages;
   for (const id of dropped) records.delete(id);
-  for (const [parent, thread] of replies) {
+  for (const parent of replies.keys()) {
+    const thread = replies.get(parent);
     const shown = thread.filter((reply) => !dropped.has(reply.id));
     if (shown.length > 0) replies.set(parent, shown);
     else replies.delete(parent);
@@ -421,12 +422,8 @@ const threadsOf = (replica, chat) => {
       const record = replica.get(id);
       const hasTime = typeof record.timestamp === 'number';
       const isShown = record.chat === chat && hasTime;
-      if (
-        !isShown ||
-        (record.call === '' && !Number.isFinite(record.stopped))
-      ) {
-        continue;
-      }
+      const isDraft = record.call === '' && !Number.isFinite(record.stopped);
+      if (!isShown || isDraft) continue;
       const recording = { id, kind: 'recording', ...record };
       recordings.push(recording);
       records.set(id, recording);

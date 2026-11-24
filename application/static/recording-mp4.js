@@ -64,8 +64,8 @@ const afterDates = (read, box) => {
 };
 
 const videoScaleOf = (read, media) => {
-  let handler;
-  let scale;
+  let handler = '';
+  let scale = undefined;
   for (const box of boxesOf(read, media.start, media.end)) {
     if (box.type === 'hdlr') {
       const bytes = fieldAt(read, box, 8, 4);
@@ -80,8 +80,8 @@ const videoTracksOf = (read, movie) => {
   const scales = new Map();
   for (const track of boxesOf(read, movie.start, movie.end)) {
     if (track.type !== 'trak') continue;
-    let id;
-    let scale;
+    let id = 0;
+    let scale = 0;
     for (const box of boxesOf(read, track.start, track.end)) {
       if (box.type === 'tkhd') id = afterDates(read, box);
       if (box.type === 'mdia') scale = videoScaleOf(read, box);
@@ -100,10 +100,10 @@ const decodeTimeOf = (read, box) => {
 };
 
 const fragmentDurationOf = (read, fragment, scales) => {
-  let duration;
+  let duration = undefined;
   for (const track of boxesOf(read, fragment.start, fragment.end)) {
     if (track.type !== 'traf') continue;
-    let id;
+    let id = 0;
     let time = null;
     for (const box of boxesOf(read, track.start, track.end)) {
       if (box.type === 'tfhd') id = uintAt(read, box, 4);
@@ -119,7 +119,7 @@ const fragmentDurationOf = (read, fragment, scales) => {
 
 const mp4DurationOf = (read, size) => {
   let scales = new Map();
-  let duration;
+  let duration = undefined;
   for (const box of boxesOf(read, 0, size)) {
     if (box.type === 'moov') scales = videoTracksOf(read, box);
     if (box.type === 'moof' && scales.size > 0) {

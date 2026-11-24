@@ -77,7 +77,10 @@ const fixture = `
     ['second', 'interrupted', ${JSON.stringify(OTHER)}],
     ['paused', 'paused', []],
   ];
-  for (const [id, state, bytes] of variants) {
+  for (const variant of variants) {
+    const id = variant[0];
+    const state = variant[1];
+    const bytes = variant[2];
     const dir = await recordings.getDirectoryHandle(id, { create: true });
     const started = new Date(2026, 10, 19, 14, 5).getTime();
     const meta = { chatName: '!Київ / R&D', state, started, extension: 'webm' };
@@ -209,7 +212,9 @@ test('scenario 18: export recordings through the library', async (t) => {
       const root = await navigator.storage.getDirectory();
       const folder = await root.getDirectoryHandle('exported');
       const files = {};
-      for await (const [name, handle] of folder.entries()) {
+      for await (const entry of folder.entries()) {
+        const name = entry[0];
+        const handle = entry[1];
         const file = await handle.getFile();
         files[name] = Array.from(new Uint8Array(await file.arrayBuffer()));
       }
@@ -217,14 +222,14 @@ test('scenario 18: export recordings through the library', async (t) => {
     `);
     const secondName = NAME.replace('.webm', ' (2).webm');
     const thirdName = NAME.replace('.webm', ' (3).webm');
-    assert.deepEqual(Object.keys(result.files).sort(), [
+    assert.deepEqual(Object.keys(result.files).toSorted(), [
       secondName,
       thirdName,
       NAME,
     ]);
     assert.deepEqual(result.files[NAME], OCCUPIED);
     const exports = [result.files[secondName], result.files[thirdName]];
-    assert.deepEqual(exports.sort(), [BYTES, OTHER].sort());
+    assert.deepEqual(exports.toSorted(), [BYTES, OTHER].toSorted());
     const queries = result.permissions.filter(({ query }) => query);
     const grants = result.permissions.filter(({ request }) => request);
     assert.deepEqual(queries, Array(2).fill({ query: 'readwrite' }));

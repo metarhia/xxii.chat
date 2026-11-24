@@ -2,11 +2,8 @@ import { generateUUID } from './metautil.js';
 import { MAX_ENABLED, DEFAULT_BITRATE } from './whip.js';
 import { WhipStream, problemOf, destinationOf } from './whip.js';
 import { readDestinations, writeDestinations } from './whip.js';
-import {
-  createDestinationRow,
-  fillEditor,
-  readEditor,
-} from './stream-panel.js';
+import { createDestinationRow, fillEditor } from './stream-panel.js';
+import { readEditor } from './stream-panel.js';
 
 const OWNER = 'stream';
 const LIMIT_TEXT = `At most ${MAX_ENABLED} destinations can go live at once`;
@@ -228,7 +225,7 @@ class Streaming {
         ? this.destinations.map((item) =>
             item.id === draft.id ? destination : item,
           )
-        : [...this.destinations, destination];
+        : this.destinations.concat(destination);
       this.#notice = '';
       this.#draft = null;
       this.#save(list);
