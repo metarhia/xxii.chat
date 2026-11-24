@@ -22,7 +22,7 @@
     "types": "tsc -p tsconfig.json",
     "lint": "eslint . && prettier -c \"**/*.js\" \"**/*.json\" \"**/*.md\"",
     "fix": "eslint . --fix && prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\"",
-    "static": "cp node_modules/metacom/metacom.mjs application/static/metacom.js && cp node_modules/globalstorage/globalstorage.mjs application/static/globalstorage.js && cp node_modules/metacom/node_modules/metautil/metautil.mjs application/static/metautil.js"
+    "static": "cp node_modules/metacom/metacom.mjs application/static/metacom.js && cp node_modules/globalstorage/globalstorage.mjs application/static/globalstorage.js && cp node_modules/metautil/metautil.mjs application/static/metautil.js"
   },
   "engines": {
     "node": ">=24"
@@ -37,9 +37,10 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "globalstorage": "file:../globalstorage",
-    "impress": "file:../impress",
-    "metacom": "file:../..",
-    "metaice": "file:../metaice"
+    "globalstorage": "git+https://github.com/metarhia/globalstorage.git#master",
+    "impress": "git+https://github.com/metarhia/impress.git#metacom-4",
+    "metacom": "git+https://github.com/metarhia/metacom.git#master",
+    "metaice": "git+https://github.com/metarhia/metaice.git#main",
+    "metautil": "^5.5.2"
   }
 }

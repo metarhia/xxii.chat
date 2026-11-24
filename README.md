@@ -6,9 +6,8 @@ server, [metacom](https://github.com/metarhia/metacom) transport, and
 sync. Terminal-like UI follows the
 [chat terminal theme](https://www.figma.com/design/eMClRRHH4GKf3G58RhfK8d).
 
-- Install dependencies: `npm i`, `metacom`, `globalstorage`, `impress`, and
-  `metaice` are linked from `../..`, `../globalstorage`, `../impress`, and
-  `../metaice`
+- Run `npm ci` to install metacom and globalstorage from `master`,
+  metaice from `main`, and impress from `metacom-4`.
 - Start server: `node server`
 - The `api` group serves the app on `XXII_PORT` (default `8000`):
   [`http://127.0.0.1:8000/`](http://127.0.0.1:8000/). One port, no balancer,
