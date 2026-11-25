@@ -21,13 +21,10 @@
   async missing(checksums) {
     if (!Array.isArray(checksums)) return [];
     const attached = domain.files.attached();
-    const missing = [];
-    for (const checksum of checksums.slice(0, domain.files.LIMIT)) {
-      if (!attached.has(checksum)) continue;
-      const exists = await domain.files.exists(checksum);
-      if (!exists) missing.push(checksum);
-    }
-    return missing;
+    const list = checksums.slice(0, domain.files.LIMIT);
+    const known = list.filter((checksum) => attached.has(checksum));
+    const found = await Promise.all(known.map(domain.files.exists));
+    return known.filter((checksum, index) => !found[index]);
   },
 
   async *digest(source, hash) {

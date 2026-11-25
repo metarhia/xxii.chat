@@ -47,7 +47,7 @@
     const joined = async (clients, peer) => {
       const client = person(clients, peer);
       const endpoint = `${peer}:1`;
-      const opened = await domain.call.start(client, {
+      const opened = await domain.call.open(client, {
         chat: `room-${peer}`,
         endpoint,
         nick: peer,

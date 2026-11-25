@@ -5,7 +5,7 @@
     cors: { origin: '*' },
   },
   rtc: {
-    ports: [Number(process.env.XXII_ICE_PORT ?? 3478)],
+    ports: [Number(process.env.XXII_ICE_PORT || 3478)],
     transports: ['udp', 'tcp'],
     protocols: ['stun.turn'],
   },

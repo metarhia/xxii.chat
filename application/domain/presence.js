@@ -26,8 +26,7 @@
       watched.add(client);
       client.on('close', () => domain.presence.leave(client));
     }
-    domain.presence.publish();
-    return domain.presence.list();
+    return domain.presence.publish();
   },
 
   leave(client) {
@@ -45,19 +44,26 @@
     domain.presence.publish();
   },
 
+  peerOf(client) {
+    const peer = domain.presence.owners.get(client);
+    return typeof peer === 'string' ? peer : '';
+  },
+
   list() {
     return Array.from(domain.presence.peers.values());
   },
 
   publish() {
-    const data = Object.freeze({ peers: domain.presence.list() });
+    const peers = domain.presence.list();
+    const data = Object.freeze({ peers });
     for (const client of domain.presence.clients.values()) {
       client.emit('presence/update', data);
     }
+    return peers;
   },
 
   signal(sender, message) {
-    const source = domain.presence.owners.get(sender);
+    const source = domain.presence.peerOf(sender);
     const isRtc = message?.protocol === 'metacom:rtc';
     if (!isRtc || !source || message.source !== source) return false;
     const client = domain.presence.clients.get(message.target);
