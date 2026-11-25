@@ -87,9 +87,48 @@ const readMap = (key) => {
 
 const writeMap = (key, map) => writeSetting(key, JSON.stringify([...map]));
 
+const readJson = (storage, key) => {
+  try {
+    const text = storage?.getItem(key);
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeJson = (storage, key, value) => {
+  try {
+    storage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const cloneTemplate = (template, selector) => {
   const fragment = template.content.cloneNode(true);
   return fragment.querySelector(selector);
+};
+
+const optionOf = (value, label) => {
+  const option = document.createElement('option');
+  option.value = `${value}`;
+  option.textContent = label;
+  return option;
+};
+
+const labeled = (control, label) => {
+  const field = document.createElement('label');
+  if (control.type === 'checkbox') {
+    field.className = 'check';
+    field.append(control, label);
+    return field;
+  }
+  field.className = 'call-field';
+  const caption = document.createElement('span');
+  caption.textContent = label;
+  field.append(caption, control);
+  return field;
 };
 
 const syncChildren = (parent, nodes) => {
@@ -140,5 +179,7 @@ const isReducedMotion = () => matchMedia(REDUCED_MOTION).matches;
 
 export { timeOf, dateOf, dayKey, dayOf, dayLabel, plural };
 export { formatSize, fitSize, readSetting, writeSetting, readMap, writeMap };
-export { cloneTemplate, syncChildren, setBadge, fillText };
+export { readJson, writeJson };
+export { cloneTemplate, optionOf, labeled };
+export { syncChildren, setBadge, fillText };
 export { isEditable, isReducedMotion };

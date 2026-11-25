@@ -65,10 +65,14 @@ const lengthOf = (value, fallback) =>
 const sizeOf = (value, fallback) =>
   Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
 
-const countOf = (value) => {
-  if (!Number.isFinite(value)) return DEFAULT_SPEAKERS;
-  return Math.min(MAX_SPEAKERS, Math.max(MIN_SPEAKERS, Math.round(value)));
-};
+const bounded = (value, min, max, fallback) =>
+  Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+
+const countOf = (value, min, max, fallback) =>
+  Math.round(bounded(value, min, max, fallback));
+
+const speakersOf = (value) =>
+  countOf(value, MIN_SPEAKERS, MAX_SPEAKERS, DEFAULT_SPEAKERS);
 
 const qualityOf = (options) => {
   const name = choose(options?.quality, QUALITY_NAMES, DEFAULT_QUALITY);
@@ -88,7 +92,7 @@ const programOf = (options) => {
     gap: lengthOf(input.gap, Math.round(GAP * scale)),
     radius: lengthOf(input.radius, Math.round(RADIUS * scale)),
     people: choose(input.people, PEOPLE, 'speakers'),
-    maxSpeakers: countOf(input.maxSpeakers),
+    maxSpeakers: speakersOf(input.maxSpeakers),
     screen: choose(input.screen, SCREENS, 'screenSpeakers'),
     placement: choose(input.placement, PLACEMENTS, 'strip'),
     others: choose(input.others, OTHERS, 'hidden'),
@@ -527,5 +531,6 @@ export { TILE_ASPECT, REFERENCE_HEIGHT, QUALITIES, PEOPLE, SCREENS };
 export { PLACEMENTS, OTHERS, POSITIONS, NO_VIDEO };
 export { MIN_SPEAKERS, MAX_SPEAKERS, MAX_GRID, MAX_OTHERS, MAX_SCREENS };
 export { ENTER_MS, LEAVE_MS, RECENT_MS };
-export { choose, flagOf, qualityOf, programOf, gridShape, gridRects };
+export { choose, flagOf, bounded, countOf };
+export { qualityOf, programOf, gridShape, gridRects };
 export { drawArgsOf, selectSpeakers, onScreenOf, layoutProgram };

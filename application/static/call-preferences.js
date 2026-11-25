@@ -4,6 +4,7 @@ import { TITLE_LIMIT, validateSettings } from './call-settings.js';
 import { readDevices, writeDevices, canSink } from './media.js';
 import { canPickFolder, folderRecord, pickFolder } from './recording-folder.js';
 import { chooseRecordingFolder } from './recording-folder.js';
+import { optionOf } from './view.js';
 
 const deviceKinds = {
   mic: 'audioinput',
@@ -44,10 +45,7 @@ const settingField = (name) => {
   const control = document.createElement(choices ? 'select' : 'input');
   if (choices) {
     for (const value of choices) {
-      const option = document.createElement('option');
-      option.value = `${value}`;
-      option.textContent = valueLabels[name]?.(value) ?? value;
-      control.append(option);
+      control.append(optionOf(value, valueLabels[name]?.(value) ?? value));
     }
   } else if (name === 'title') {
     control.type = 'text';
@@ -70,12 +68,9 @@ const fillDevice = (select, devices, selected, noun) => {
   const options = [{ deviceId: '', label: 'default' }];
   options.push(...devices.filter((device) => device.deviceId));
   select.replaceChildren(
-    ...options.map(({ deviceId, label }, index) => {
-      const option = document.createElement('option');
-      option.value = deviceId;
-      option.textContent = label || `${noun} ${index}`;
-      return option;
-    }),
+    ...options.map(({ deviceId, label }, index) =>
+      optionOf(deviceId, label || `${noun} ${index}`),
+    ),
   );
   select.value = options.some((item) => item.deviceId === selected)
     ? selected

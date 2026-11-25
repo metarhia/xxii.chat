@@ -3,11 +3,11 @@ import { drawArgsOf, selectSpeakers } from './layout.js';
 import { onScreenOf, layoutProgram } from './layout.js';
 import { colorOf, initialsOf } from './avatar.js';
 import { idOf } from './members.js';
+import { tickOn } from './clock.js';
 import { brandFont, chipStyleOf, countdownText } from './studio-layout.js';
 import { logoRect, overlayRect, tickerOffset } from './studio-layout.js';
 import { commentLines, clipSource } from './studio-layout.js';
 
-const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 const FONT = '"Fira Code", ui-monospace, "SFMono-Regular", Menlo, monospace';
 
@@ -142,6 +142,32 @@ const ellipsize = (measure, text, width) => {
   return measure(result) <= width ? result : '';
 };
 
+const FIT_LIMIT = 512;
+const fitted = new Map();
+let wrapped = { key: '', lines: [] };
+
+const measureOf = (context) => (text) => context.measureText(text).width;
+
+const fitText = (context, text, width) => {
+  const key = `${context.font}\n${width}\n${text}`;
+  let result = fitted.get(key);
+  if (result === undefined) {
+    if (fitted.size >= FIT_LIMIT) fitted.clear();
+    result = ellipsize(measureOf(context), text, width);
+    fitted.set(key, result);
+  }
+  return result;
+};
+
+const wrapComment = (context, text, width) => {
+  const key = `${context.font}\n${width}\n${text}`;
+  if (wrapped.key !== key) {
+    const lines = commentLines(text, measureOf(context), width);
+    wrapped = { key, lines };
+  }
+  return wrapped.lines;
+};
+
 const fontOf = (size, weight = 500) => `${weight} ${size}px ${FONT}`;
 
 const pathOf = (context, box, radius) => {
@@ -229,15 +255,14 @@ const paintChip = (context, tile, scale, frame = null, nameOnly = false) => {
   }
   const brand = frame?.brand;
   context.font = brand ? brandFont(frame.font, size) : fontOf(size);
-  const measure = (text) => context.measureText(text).width;
-  const text = ellipsize(measure, tile.label, tile.width - 4 * pad);
+  const text = fitText(context, tile.label, tile.width - 4 * pad);
   if (text === '') return;
   const box = {
     x: tile.x + pad,
     y: nameOnly
       ? tile.y + (tile.height - size - pad) / 2
       : tile.y + tile.height - pad - (size + pad),
-    width: measure(text) + 2 * pad,
+    width: context.measureText(text).width + 2 * pad,
     height: size + pad,
   };
   const style = brand && chipStyleOf(brand.chipStyle, box.height);
@@ -263,8 +288,7 @@ const paintName = (context, tile, source, scale, frame) => {
   const size = Math.round(Math.min(tile.height * 0.6, CHIP_SIZE * scale));
   if (size < MIN_FONT) return;
   context.font = fontOf(size);
-  const measure = (text) => context.measureText(text).width;
-  const text = ellipsize(measure, tile.label, tile.width - 2 * pad);
+  const text = fitText(context, tile.label, tile.width - 2 * pad);
   context.fillStyle = LIGHT;
   context.textAlign = 'left';
   context.textBaseline = 'middle';
@@ -347,25 +371,25 @@ const paintOverlay = (context, entry, box, frame, scale) => {
     context.textAlign = 'left';
     context.textBaseline = 'middle';
     context.font = brandFont(font, size);
-    const measure = (value) => context.measureText(value).width;
     if (nick) {
       context.fillStyle = brand.accent;
       const row = text ? y + 28 * scale : y + height / 2;
-      context.fillText(ellipsize(measure, nick, limit), left, row);
+      context.fillText(fitText(context, nick, limit), left, row);
     }
     context.fillStyle = brand.text;
     if (kind === 'ticker') {
-      const offset = tickerOffset(entry.elapsed, width, measure(text));
+      const textWidth = context.measureText(text).width;
+      const offset = tickerOffset(entry.elapsed, width, textWidth);
       context.fillText(text, x + offset, y + height / 2);
     } else if (kind === 'comment') {
-      const lines = commentLines(text, measure, limit);
+      const lines = wrapComment(context, text, limit);
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
         context.fillText(line, left, y + (61 + 27 * index) * scale);
       }
     } else {
       const row = nick ? y + 63 * scale : y + height / 2;
-      context.fillText(ellipsize(measure, text, limit), left, row);
+      context.fillText(fitText(context, text, limit), left, row);
     }
   } finally {
     context.restore();
@@ -410,11 +434,7 @@ const paintSlate = (context, scene, frame, now, width, height, scale) => {
   context.textBaseline = 'middle';
   context.fillStyle = frame.brand.text;
   context.font = brandFont(frame.font, Math.round(56 * scale), 600);
-  const title = ellipsize(
-    (text) => context.measureText(text).width,
-    scene.text,
-    max,
-  );
+  const title = fitText(context, scene.text, max);
   context.fillText(title, x, countdown ? y - 85 * scale : y);
   if (!countdown) return;
   context.fillStyle = frame.brand.accent;
@@ -442,8 +462,7 @@ class Compositor {
   #options = null;
   #context = null;
   #shared = null;
-  #worker = null;
-  #listener = null;
+  #untick = null;
   #motion = new Map();
   #speech = new Map();
   #videos = new Map();
@@ -489,32 +508,20 @@ class Compositor {
   }
 
   start() {
-    if (this.#listener || this.#isStopped) return;
-    const worker = this.#shared ?? new Worker(CLOCK_URL);
-    this.#worker = worker;
-    this.#listener = ({ data }) => {
-      if (data.type === 'tick') this.#onTick();
-    };
-    worker.addEventListener('message', this.#listener);
-    if (!this.#shared) worker.postMessage({ type: 'start', fps: this.fps });
+    if (this.#untick || this.#isStopped) return;
+    this.#untick = tickOn(this.#shared, this.fps, () => this.#onTick());
     this.draw();
   }
 
   stop() {
     if (this.#isStopped) return;
     this.#isStopped = true;
-    const worker = this.#worker;
-    if (worker) worker.removeEventListener('message', this.#listener);
-    if (worker && !this.#shared) {
-      worker.postMessage({ type: 'stop' });
-      worker.terminate();
-    }
+    this.#untick?.();
+    this.#untick = null;
     for (const entry of this.#videos.values()) releaseVideo(entry.video);
     this.#videos.clear();
     this.#motion.clear();
     this.#speech.clear();
-    this.#worker = null;
-    this.#listener = null;
     this.track.stop();
   }
 
@@ -648,15 +655,14 @@ class Compositor {
       paintSlate(context, scene, frame, now, width, height, scale);
     }
     const byId = new Map(sources.map((source) => [source.id, source]));
+    const clip = frame?.clip;
     for (const tile of tiles) {
       const source = byId.get(tile.id);
-      const clip = frame?.clip;
       const video =
         tile.id === clip?.id ? clip.media : this.#videos.get(tile.id)?.video;
       paintTile(context, tile, source, video, scale, frame);
     }
     if (!scene) return [];
-    const clip = frame.clip;
     const full = clip?.mode === 'full' && isReady(clip.media);
     if (full) paintBackground(context, clip.media, width, height, color);
     const overlays = overlaysOf(scene, frame, width, height, full);
@@ -678,7 +684,7 @@ class Compositor {
       const video = createVideo(source.track);
       this.#videos.set(source.id, { track: source.track, video });
     }
-    for (const id of Array.from(this.#videos.keys())) {
+    for (const id of this.#videos.keys()) {
       if (seen.has(id)) continue;
       releaseVideo(this.#videos.get(id).video);
       this.#videos.delete(id);

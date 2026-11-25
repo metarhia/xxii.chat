@@ -33,6 +33,7 @@ const ASSETS = [
   '/mirror.js',
   '/mirror-worker.js',
   '/clock-worker.js',
+  '/clock.js',
   '/call-hands.js',
   '/call-settings.js',
   '/call-preferences.js',

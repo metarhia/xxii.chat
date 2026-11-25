@@ -1,6 +1,8 @@
 import { readCallStats } from './call-stats.js';
 import { createMirror, pathOf, capabilitiesOf } from './mirror.js';
-import { Emitter, jsonParse } from './metautil.js';
+import { Emitter } from './metautil.js';
+import { createClock } from './clock.js';
+import { readJson, writeJson } from './view.js';
 
 const CAMERA = {
   width: { ideal: 1280 },
@@ -34,7 +36,6 @@ const SCREEN_MESSAGES = {
   InvalidStateError: 'Click share again to choose a screen.',
 };
 
-const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const CLOCK_FPS = 30;
 const MIRROR_NOTICE = 'Camera mirroring is unavailable';
 
@@ -67,14 +68,7 @@ const messageOf = (error) =>
   MESSAGES[error?.name] ?? 'Could not open the camera or mic.';
 
 const readDevices = (storage) => {
-  if (!storage) return { ...EMPTY_DEVICES };
-  let parsed = null;
-  try {
-    const text = storage.getItem(DEVICES_KEY);
-    parsed = text ? jsonParse(text) : null;
-  } catch {
-    return { ...EMPTY_DEVICES };
-  }
+  const parsed = readJson(storage, DEVICES_KEY);
   if (!parsed || typeof parsed !== 'object') return { ...EMPTY_DEVICES };
   const camera = typeof parsed.camera === 'string' ? parsed.camera : '';
   const mic = typeof parsed.mic === 'string' ? parsed.mic : '';
@@ -83,12 +77,7 @@ const readDevices = (storage) => {
 };
 
 const writeDevices = (storage, devices) => {
-  if (!storage) return;
-  try {
-    storage.setItem(DEVICES_KEY, JSON.stringify(devices));
-  } catch {
-    return;
-  }
+  if (storage) writeJson(storage, DEVICES_KEY, devices);
 };
 
 const isMobile = () => {
@@ -127,16 +116,9 @@ const canSink = () => {
   return typeof proto?.setSinkId === 'function';
 };
 
-const hasId = (list, id) => {
-  for (const device of list) {
-    if (device.deviceId === id) return true;
-  }
-  return false;
-};
-
 const missingId = (list, id) => {
   if (id === '' || list.length === 0) return false;
-  return !hasId(list, id);
+  return !list.some((device) => device.deviceId === id);
 };
 
 const stopStream = (stream) => {
@@ -609,6 +591,10 @@ class MediaCapture {
     };
   }
 
+  get note() {
+    return this.message || this.notice;
+  }
+
   async openPreview() {
     try {
       await this.start();
@@ -799,7 +785,8 @@ class MediaCapture {
       if (generation !== this.#cameraGen) return;
       this.message = messageOf(error);
       this.cameraOn = false;
-      this.useCamera(null);
+      this.stopCamera();
+      this.#notify();
     }
   }
 
@@ -869,19 +856,13 @@ class MediaCapture {
   }
 
   #clockWorker() {
-    if (this.#clock) return this.#clock;
-    const worker = new Worker(CLOCK_URL);
-    worker.postMessage({ type: 'start', fps: CLOCK_FPS });
-    this.#clock = worker;
-    return worker;
+    this.#clock ??= createClock(CLOCK_FPS);
+    return this.#clock;
   }
 
   #releaseClock() {
-    const worker = this.#clock;
+    this.#clock?.terminate();
     this.#clock = null;
-    if (!worker) return;
-    worker.postMessage({ type: 'stop' });
-    worker.terminate();
   }
 
   async openScreen(shared = true) {
@@ -989,14 +970,6 @@ class MediaCapture {
     }
   }
 
-  previewStream() {
-    const track = this.cameraTrack;
-    const Stream = globalThis.MediaStream;
-    const live = track && track.readyState === 'live' && this.cameraOn;
-    if (!live || !Stream) return null;
-    return new Stream([track]);
-  }
-
   async applySink(element) {
     if (!this.canSink || typeof element?.setSinkId !== 'function') return;
     try {
@@ -1024,11 +997,6 @@ class MediaCapture {
       this.notice = 'Local speaking detection is unavailable in this browser.';
     }
     if (track && !this.micOn) this.#armMute();
-    this.#notify();
-  }
-
-  useCamera(track) {
-    if (!track) this.stopCamera();
     this.#notify();
   }
 
@@ -1144,8 +1112,7 @@ class MediaCapture {
   }
 }
 
-export { CAMERA, CAMERA_MOBILE, MIC, SCREEN, MediaCapture };
-export { BANDWIDTH_ROWS, CODECS, LOSS_HOLD_MS, CLEAN_HOLD_MS };
+export { MediaCapture, CODECS };
 export { bandwidthRow, validateHint, encodingPolicy, adaptBandwidth };
 export { readLinkStats, LinkMediaPolicy };
 export { createSpeakerState, selectSpeaker, CallLevels };

@@ -97,9 +97,7 @@ class TileMenu {
       { action: 'tile-fullscreen', label: 'Full screen tile' },
     ];
     if (!local) {
-      const shown = stage.statsAll
-        ? !stage.statsHidden.has(endpoint)
-        : stage.statsShown.has(endpoint);
+      const shown = stage.statsVisible(endpoint);
       items.push({
         action: 'tile-stats',
         label: shown ? 'Hide stats' : 'Show stats',

@@ -1,3 +1,6 @@
+import { isHashObject } from './metautil.js';
+import { readJson, writeJson } from './view.js';
+
 const ICE_KEY = 'xxii:ice';
 const PUBLIC_STUN = [
   'stun:stun.l.google.com:19302',
@@ -43,32 +46,16 @@ const keptServers = (servers) => {
 };
 
 const normalizeIce = (value) => {
-  const isRecord = value && typeof value === 'object' && !Array.isArray(value);
-  if (!isRecord) return iceDefaults();
+  if (!isHashObject(value)) return iceDefaults();
   const publicStun = value.publicStun === true;
   const forceRelay = value.forceRelay === true;
   const servers = keptServers(value.servers);
   return { publicStun, forceRelay, servers };
 };
 
-const readIce = (storage) => {
-  try {
-    const raw = storage.getItem(ICE_KEY);
-    if (typeof raw !== 'string' || raw === '') return iceDefaults();
-    return normalizeIce(JSON.parse(raw));
-  } catch {
-    return iceDefaults();
-  }
-};
+const readIce = (storage) => normalizeIce(readJson(storage, ICE_KEY));
 
-const writeIce = (storage, settings) => {
-  try {
-    storage.setItem(ICE_KEY, JSON.stringify(settings));
-    return true;
-  } catch {
-    return false;
-  }
-};
+const writeIce = (storage, settings) => writeJson(storage, ICE_KEY, settings);
 
 const rtcServer = (server) => {
   const entry = { urls: [server.url] };
@@ -112,13 +99,4 @@ const buildIce = ({ servers, settings }) => {
   return { iceServers, iceTransportPolicy, freshUntil };
 };
 
-export {
-  ICE_KEY,
-  PUBLIC_STUN,
-  ICE_SCHEMES,
-  CACHE_LEAD_SEC,
-  isIceUrl,
-  readIce,
-  writeIce,
-  buildIce,
-};
+export { ICE_KEY, CACHE_LEAD_SEC, isIceUrl, readIce, writeIce, buildIce };

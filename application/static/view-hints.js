@@ -94,4 +94,4 @@ class ViewHints {
   }
 }
 
-export { tileHint, ViewHints };
+export { ViewHints };

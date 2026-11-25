@@ -8,11 +8,7 @@ const stop = () => {
 const start = (fps) => {
   stop();
   const interval = 1000 / fps;
-  let count = 0;
-  timer = setInterval(() => {
-    count++;
-    self.postMessage({ type: 'tick', count, time: performance.now() });
-  }, interval);
+  timer = setInterval(() => self.postMessage({ type: 'tick' }), interval);
 };
 
 self.addEventListener('message', ({ data }) => {

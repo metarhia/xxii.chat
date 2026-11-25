@@ -1,6 +1,4 @@
-import * as logic from './relay-logic.js';
-
-const {
+import {
   RELAY_WIDTH,
   RELAY_HEIGHT,
   RELAY_FPS,
@@ -11,11 +9,12 @@ const {
   relayVideoSource,
   relaySlot,
   relayVideoEncoding,
-} = logic;
+} from './relay-logic.js';
 
 const SOUND_MS = 2500;
 const HINT_OWNER = 'peer-relay';
 const VIDEO_SLOTS = ['camera', 'screen'];
+const ROUTED_SLOTS = ['mic', 'camera', 'screen', 'screenAudio'];
 const VIDEO_NOTICE = 'The browser could not limit forwarded video.';
 const VIDEO_WORK = new WeakMap();
 
@@ -216,7 +215,7 @@ class PeerRelay {
 
   receiver(endpoint, slot) {
     const relay = this.route(endpoint);
-    if (!relay || !['mic', 'camera', 'screen', 'screenAudio'].includes(slot)) {
+    if (!relay || !ROUTED_SLOTS.includes(slot)) {
       return this.#links.get(endpoint)?.receiver(slot) ?? null;
     }
     const source = relaySlot(this.#person(endpoint), slot);
@@ -224,16 +223,19 @@ class PeerRelay {
     return this.#links.get(relay)?.receiver(source) ?? null;
   }
 
+  #orphan(item) {
+    return !this.#joined(item) || !this.#person(item.relay);
+  }
+
   update(people) {
     this.#people = people ?? [];
     const pair = this.#served;
     if (pair && !this.#joined(pair)) this.#release(pair, 'not-joined');
     for (const item of this.#routes.values()) {
-      const absent = !this.#joined(item) || !this.#person(item.relay);
-      if (absent) this.#endRoute(item);
+      if (this.#orphan(item)) this.#endRoute(item);
     }
     for (const item of this.#requests.values()) {
-      if (!this.#joined(item) || !this.#person(item.relay)) this.#cancel(item);
+      if (this.#orphan(item)) this.#cancel(item);
     }
     this.refresh();
   }

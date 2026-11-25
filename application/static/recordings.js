@@ -8,7 +8,7 @@ import { pickExportFile, exportToFolder } from './recording-export.js';
 import { partLabel } from './recording-export.js';
 import { canPickFolder, folderHandle } from './recording-folder.js';
 import { folderRecord, folderPermission } from './recording-folder.js';
-import { cloneTemplate } from './view.js';
+import { cloneTemplate, optionOf } from './view.js';
 import { RecordingWriter } from './recorder.js';
 
 const STATE_LABELS = {
@@ -105,13 +105,12 @@ const readEntry = async (directory) => {
 
 const entriesOf = async (recordings) => {
   if (!recordings) return [];
-  const entries = [];
+  const reads = [];
   for await (const directory of recordings.values()) {
-    if (directory.kind !== 'directory') continue;
-    const entry = await readEntry(directory);
-    if (entry) entries.push(entry);
+    if (directory.kind === 'directory') reads.push(readEntry(directory));
   }
-  return sortRecordings(entries);
+  const entries = await Promise.all(reads);
+  return sortRecordings(entries.filter(Boolean));
 };
 
 class Recordings {
@@ -317,10 +316,7 @@ class Recordings {
     select.hidden = false;
     for (let index = 0; index < entry.segments.length; index++) {
       const part = entry.segments[index];
-      const option = document.createElement('option');
-      option.value = part.name;
-      option.textContent = partLabel(index + 1);
-      select.append(option);
+      select.append(optionOf(part.name, partLabel(index + 1)));
     }
     if (this.selected === entry.id && this.selectedPart) {
       select.value = this.selectedPart;

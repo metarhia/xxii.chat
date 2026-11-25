@@ -2,6 +2,7 @@ import { createButton, createSceneFields } from './record-panel.js';
 import { SCENE_TYPES, TRANSITIONS, CORNERS, FONTS } from './studio-layout.js';
 import { CHIP_STYLES, OVERLAYS } from './studio-layout.js';
 import { groupOf } from './studio-storage.js';
+import { optionOf, labeled } from './view.js';
 
 const OVERLAY_LABELS = {
   logo: 'Logo',
@@ -35,26 +36,6 @@ const fieldset = (name, label) => {
   legend.textContent = label;
   box.append(legend);
   return box;
-};
-
-const optionOf = (value, label) => {
-  const option = document.createElement('option');
-  option.value = value;
-  option.textContent = label;
-  return option;
-};
-
-const labeled = (control, label) => {
-  const field = document.createElement('label');
-  field.className = control.type === 'checkbox' ? 'check' : 'call-field';
-  if (control.type === 'checkbox') {
-    field.append(control, label);
-  } else {
-    const caption = document.createElement('span');
-    caption.textContent = label;
-    field.append(caption, control);
-  }
-  return field;
 };
 
 const input = (name, label, type, attributes = {}) => {

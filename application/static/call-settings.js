@@ -1,3 +1,5 @@
+import { readJson } from './view.js';
+
 const SETTINGS_KEY = 'xxii:call-settings';
 const LEGACY_AUTO_LOWER_KEY = 'xxii:call-auto-lower';
 const TITLE_LIMIT = 48;
@@ -59,14 +61,6 @@ const validateSettings = (input) => {
   return settings;
 };
 
-const parse = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
-
 const writeSettings = (storage, settings) => {
   if (!storage) return false;
   try {
@@ -81,8 +75,7 @@ const writeSettings = (storage, settings) => {
 const readSettings = (storage) => {
   if (!storage) return { ...DEFAULTS };
   try {
-    const text = storage.getItem(SETTINGS_KEY);
-    const saved = parse(text);
+    const saved = readJson(storage, SETTINGS_KEY);
     if (saved && typeof saved === 'object') return validateSettings(saved);
     const legacy = storage.getItem(LEGACY_AUTO_LOWER_KEY);
     const settings = { ...DEFAULTS };
@@ -127,8 +120,8 @@ const toastText = (toast) => {
 
 const showsToast = (count) => count <= TOAST_LIMIT;
 
-export { SETTINGS_KEY, OPTIONS, DEFAULTS, TOAST_LIMIT, TOAST_SHOW_MS };
-export { TOAST_MERGE_MS, validateSettings, readSettings, writeSettings };
+export { SETTINGS_KEY, OPTIONS, DEFAULTS, TOAST_SHOW_MS };
+export { validateSettings, readSettings, writeSettings };
 export { createToast, addToast, toastText, showsToast };
 export { targetLabel, segmentLabel };
 export { TITLE_LIMIT, titleOf };

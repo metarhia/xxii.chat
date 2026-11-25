@@ -7,8 +7,8 @@ import { titleOf, spaceOf, timeText, sizeText } from './recording-files.js';
 import { defaultsOf, valueOf, paintRecordControl } from './record-panel.js';
 import { canPickFolder, chooseRecordingFolder } from './recording-folder.js';
 import { requireRecordingFolder } from './recording-folder.js';
+import { tickOn } from './clock.js';
 
-const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const TICK_FPS = 2;
 const SPACE_TICKS = 20;
 const PERSIST_KEY = 'xxii:storage-persist';
@@ -44,7 +44,7 @@ class RecordingSession {
   #writer = null;
   #mixer = null;
   #compositor = null;
-  #clock = null;
+  #untick = null;
   #current = null;
   #holds = new Set();
   #defaults = null;
@@ -432,23 +432,14 @@ class RecordingSession {
   }
 
   #ensureClock() {
-    if (this.#clock) return;
-    const worker = new Worker(CLOCK_URL);
-    this.#clock = worker;
+    if (this.#untick) return;
     this.#ticks = 0;
-    worker.onmessage = ({ data }) => {
-      if (data.type === 'tick') this.#onTick();
-    };
-    worker.postMessage({ type: 'start', fps: TICK_FPS });
+    this.#untick = tickOn(null, TICK_FPS, () => this.#onTick());
   }
 
   #stopClock() {
-    const worker = this.#clock;
-    if (!worker) return;
-    worker.onmessage = null;
-    worker.postMessage({ type: 'stop' });
-    worker.terminate();
-    this.#clock = null;
+    this.#untick?.();
+    this.#untick = null;
   }
 
   #onTick() {

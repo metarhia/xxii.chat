@@ -1,6 +1,7 @@
+import { tickOn } from './clock.js';
+
 const FPS = 30;
 const START_MS = 5000;
-const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const MIRROR_URL = new URL('./mirror-worker.js', import.meta.url);
 
 const capabilitiesOf = (scope = globalThis) => ({
@@ -116,15 +117,9 @@ const startCanvas = async (track, clock) => {
   }
   draw();
   const output = canvas.captureStream().getVideoTracks()[0];
-  const worker = clock || new Worker(CLOCK_URL);
-  const onTick = ({ data }) => {
-    if (data.type === 'tick') draw();
-  };
-  worker.addEventListener('message', onTick);
-  if (!clock) worker.postMessage({ type: 'start', fps: FPS });
+  const untick = tickOn(clock, FPS, draw);
   const stop = () => {
-    worker.removeEventListener('message', onTick);
-    if (!clock) worker.terminate();
+    untick();
     stopVideo();
   };
   return { output, stop };
