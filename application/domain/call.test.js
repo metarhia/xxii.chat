@@ -67,7 +67,7 @@
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     const begin = (client, chat, endpoint, extra = {}) =>
-      domain.call.start(client, {
+      domain.call.open(client, {
         chat,
         endpoint,
         nick: extra.nick ?? 'nick',
@@ -93,7 +93,6 @@
       }
       domain.call.calls.clear();
       domain.call.endpoints.clear();
-      domain.call.buckets.clear();
     };
 
     const row = (state, endpoint) =>

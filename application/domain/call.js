@@ -51,11 +51,7 @@ const otherPeer = (chat, peer) => {
   return parts[0];
 };
 
-const peerOf = (client) => {
-  const peer = domain.presence.owners.get(client);
-  if (typeof peer !== 'string') return '';
-  return peer;
-};
+const peerOf = (client) => domain.presence.peerOf(client);
 
 const owns = (client, endpoint) => {
   const peer = peerOf(client);
@@ -82,20 +78,6 @@ const takeToken = (bucket, rate, burst, now) => {
   return true;
 };
 
-const allow = (endpoint, kind) => {
-  const now = Date.now();
-  const signal = kind === 'signal';
-  const rate = signal ? config.call.signalRate : config.call.updateRate;
-  const burst = signal ? SIGNAL_BURST : UPDATE_BURST;
-  const key = `${endpoint}\n${kind}`;
-  let bucket = domain.call.buckets.get(key);
-  if (!bucket) {
-    bucket = { tokens: burst, time: now };
-    domain.call.buckets.set(key, bucket);
-  }
-  return takeToken(bucket, rate, burst, now);
-};
-
 const ownerOf = (chat) => {
   const record = db.globalstorage?.replica?.get(chat);
   return record?.owner ?? '';
@@ -109,15 +91,9 @@ const isAdmin = (state, peer, owner) => {
 };
 
 const adminsOf = (state, owner) => {
-  const admins = [];
-  if (state.host !== '' && !admins.includes(state.host)) {
-    admins.push(state.host);
-  }
-  for (const peer of state.cohosts) {
-    if (!admins.includes(peer)) admins.push(peer);
-  }
-  if (owner !== '' && !admins.includes(owner)) admins.push(owner);
-  return admins;
+  const admins = new Set([state.host, ...state.cohosts, owner]);
+  admins.delete('');
+  return Array.from(admins);
 };
 
 const countOn = (state, flag) => {
@@ -130,11 +106,11 @@ const countOn = (state, flag) => {
 
 const blocked = (state, item, args) => {
   const camera = args.camera === true && !item.camera;
-  const cameras = countOn(state, 'camera') >= config.call.maxCameras;
-  if (camera && cameras) return true;
+  if (camera && countOn(state, 'camera') >= config.call.maxCameras) {
+    return true;
+  }
   const screen = args.screen === true && !item.screen;
-  const screens = countOn(state, 'screen') >= config.call.maxScreens;
-  return screen && screens;
+  return screen && countOn(state, 'screen') >= config.call.maxScreens;
 };
 
 const memberOf = (state, client, peer, endpoint, nick, now) => ({
@@ -153,6 +129,10 @@ const memberOf = (state, client, peer, endpoint, nick, now) => ({
   stage: !state.joinBackstage || peer === state.host || state.cohosts.has(peer),
   live: false,
   title: '',
+  limits: {
+    signal: { tokens: SIGNAL_BURST, time: now },
+    update: { tokens: UPDATE_BURST, time: now },
+  },
 });
 
 const peopleOf = (state, admins) => {
@@ -225,8 +205,6 @@ const forget = (client, endpoint) => {
   domain.call.endpoints.delete(endpoint);
   const set = domain.call.clientEndpoints.get(client);
   if (set) set.delete(endpoint);
-  domain.call.buckets.delete(`${endpoint}\nsignal`);
-  domain.call.buckets.delete(`${endpoint}\nupdate`);
 };
 
 const clearRing = (state) => {
@@ -265,20 +243,24 @@ const announce = (state, ended) => {
   }
 };
 
-const publish = async (state) => {
+const viewsOf = (state) => {
   const version = state.version;
-  state.version += 1;
   const owner = ownerOf(state.chat);
   const admins = Object.freeze(adminsOf(state, owner));
   const people = Object.freeze(peopleOf(state, admins));
   const lobby = Object.freeze(lobbyOf(state));
   const member = Object.freeze(viewOf(state, admins, people, EMPTY, version));
   const admin = Object.freeze(viewOf(state, admins, people, lobby, version));
+  return (peer) => (isAdmin(state, peer, owner) ? admin : member);
+};
+
+const publish = async (state) => {
+  state.version += 1;
+  const viewFor = viewsOf(state);
   for (const item of state.participants.values()) {
-    const data = isAdmin(state, item.peer, owner) ? admin : member;
-    item.client.emit('call/state', data);
+    item.client.emit('call/state', viewFor(item.peer));
   }
-  return { member, admin, owner };
+  return viewFor;
 };
 
 const callOfChat = (chat) => {
@@ -306,7 +288,7 @@ const createCall = (fields) => {
     kind: fields.kind,
     title: fields.title,
     started: fields.started,
-    version: 1,
+    version: 0,
     policy: fields.policy,
     token,
     locked: false,
@@ -323,24 +305,27 @@ const createCall = (fields) => {
 };
 
 const enter = async (state, client, peer, endpoint, nick) => {
+  const full = state.participants.size >= config.call.maxParticipants;
+  if (full) return fail('call/full');
   const now = Date.now();
   const member = memberOf(state, client, peer, endpoint, nick, now);
   state.participants.set(endpoint, member);
   state.lobby.delete(endpoint);
   remember(client, endpoint, state.id);
   clearRing(state);
-  const sent = await publish(state);
+  const viewFor = await publish(state);
   announce(state, false);
-  const admin = isAdmin(state, peer, sent.owner);
-  const payload = admin ? sent.admin : sent.member;
-  return { status: 'joined', state: payload };
+  return { status: 'joined', state: viewFor(peer) };
 };
 
-const knock = async (state, client, peer, endpoint, nick) => {
+const wait = async (state, client, peer, endpoint, args) => {
+  const sitting = state.lobby.has(endpoint);
+  const full = state.lobby.size >= config.call.maxLobby;
+  if (full && !sitting) return fail('call/full');
   const entry = {
     endpoint,
     peer,
-    nick: clip(nick, NICK_LIMIT),
+    nick: clip(args.nick, NICK_LIMIT),
     knocked: Date.now(),
     client,
   };
@@ -353,13 +338,11 @@ const knock = async (state, client, peer, endpoint, nick) => {
 const finish = async (state, by, actor) => {
   clearRing(state);
   const clients = new Set();
-  for (const item of state.participants.values()) {
-    clients.add(item.client);
-    forget(item.client, item.endpoint);
-  }
-  for (const item of state.lobby.values()) {
-    clients.add(item.client);
-    forget(item.client, item.endpoint);
+  for (const items of [state.participants, state.lobby]) {
+    for (const item of items.values()) {
+      clients.add(item.client);
+      forget(item.client, item.endpoint);
+    }
   }
   if (actor) clients.add(actor);
   state.participants.clear();
@@ -370,12 +353,9 @@ const finish = async (state, by, actor) => {
   announce(state, true);
 };
 
-const releaseParticipant = async (state, endpoint) => {
-  if (!domain.call.calls.has(state.id)) return;
-  const item = state.participants.get(endpoint);
-  if (!item) return;
-  state.participants.delete(endpoint);
-  forget(item.client, endpoint);
+const depart = async (state, item) => {
+  state.participants.delete(item.endpoint);
+  forget(item.client, item.endpoint);
   if (state.participants.size === 0) {
     await finish(state, '', item.client);
     return;
@@ -384,29 +364,21 @@ const releaseParticipant = async (state, endpoint) => {
   announce(state, false);
 };
 
+const unknock = async (state, entry) => {
+  state.lobby.delete(entry.endpoint);
+  forget(entry.client, entry.endpoint);
+  await publish(state);
+};
+
 const release = async (client, endpoint) => {
   const located = domain.call.endpoints.get(endpoint);
-  if (!located || located.client !== client) {
-    forget(client, endpoint);
-    return;
-  }
-  const state = domain.call.calls.get(located.call);
-  if (!state) {
-    forget(client, endpoint);
-    return;
-  }
-  if (state.participants.has(endpoint)) {
-    await releaseParticipant(state, endpoint);
-    return;
-  }
-  if (!state.lobby.has(endpoint)) {
-    forget(client, endpoint);
-    return;
-  }
-  state.lobby.delete(endpoint);
-  forget(client, endpoint);
-  if (!domain.call.calls.has(state.id)) return;
-  await publish(state);
+  const own = located?.client === client;
+  const state = own ? domain.call.calls.get(located.call) : undefined;
+  const item = state?.participants.get(endpoint);
+  if (item) return depart(state, item);
+  const entry = state?.lobby.get(endpoint);
+  if (entry) return unknock(state, entry);
+  return forget(client, endpoint);
 };
 
 const removeClient = async (client) => {
@@ -435,21 +407,7 @@ const ring = (state, peer, nick) => {
 const again = async (state, peer, endpoint) => {
   const item = state.participants.get(endpoint);
   item.seen = Date.now();
-  const owner = ownerOf(state.chat);
-  const admins = adminsOf(state, owner);
-  const people = peopleOf(state, admins);
-  const show = isAdmin(state, peer, owner);
-  const lobby = show ? lobbyOf(state) : EMPTY;
-  const version = state.version - 1;
-  const data = viewOf(state, admins, people, lobby, version);
-  return { status: 'joined', state: data };
-};
-
-const wait = async (state, client, peer, endpoint, args) => {
-  const sitting = state.lobby.has(endpoint);
-  const full = state.lobby.size >= config.call.maxLobby;
-  if (full && !sitting) return fail('call/full');
-  return knock(state, client, peer, endpoint, args.nick);
+  return { status: 'joined', state: viewsOf(state)(peer) };
 };
 
 const arrive = async (client, state, args) => {
@@ -468,8 +426,6 @@ const arrive = async (client, state, args) => {
     if (decision === 'denied') return fail('call/locked');
     if (decision === 'lobby') return wait(state, client, peer, endpoint, args);
   }
-  const full = state.participants.size >= config.call.maxParticipants;
-  if (full) return fail('call/full');
   return enter(state, client, peer, endpoint, args.nick);
 };
 
@@ -546,11 +502,8 @@ const openCall = async (client, args) => {
 };
 
 const bytesOf = (message) => {
-  if (!message || typeof message !== 'object') return -1;
   try {
-    const text = JSON.stringify(message);
-    if (typeof text !== 'string') return -1;
-    return text.length;
+    return JSON.stringify(message).length;
   } catch {
     return -1;
   }
@@ -599,16 +552,9 @@ const request = (state, by, endpoint, action) => {
 const removeTarget = async (state, by, endpoint) => {
   const target = state.participants.get(endpoint);
   if (!target) return true;
-  state.participants.delete(endpoint);
-  forget(target.client, endpoint);
   const data = Object.freeze({ call: state.id, endpoint, by });
   target.client.emit('call/removed', data);
-  if (state.participants.size === 0) {
-    await finish(state, '', target.client);
-    return true;
-  }
-  await publish(state);
-  announce(state, false);
+  await depart(state, target);
   return true;
 };
 
@@ -655,14 +601,9 @@ const lowerOne = async (state, endpoint) => {
 
 const muteAll = (state, by, owner) => {
   for (const item of state.participants.values()) {
-    if (isAdmin(state, item.peer, owner)) continue;
-    const data = Object.freeze({
-      call: state.id,
-      endpoint: item.endpoint,
-      action: 'mute',
-      by,
-    });
-    item.client.emit('call/request', data);
+    if (!isAdmin(state, item.peer, owner)) {
+      request(state, by, item.endpoint, 'mute');
+    }
   }
   return true;
 };
@@ -724,6 +665,14 @@ const accessOf = async (client, id) => {
   return { error: null, state, peer, owner };
 };
 
+const joinedOf = (client, id, endpoint) => {
+  if (!owns(client, endpoint)) return { error: fail('call/forbidden') };
+  const state = domain.call.calls.get(id);
+  const item = state?.participants.get(endpoint);
+  if (!item) return { error: fail('call/not-joined') };
+  return { error: null, state, item };
+};
+
 const arm = () => {
   if (domain.call.timer) return;
   const timer = setInterval(() => {
@@ -733,19 +682,10 @@ const arm = () => {
   domain.call.timer = timer;
 };
 
-const sweepAll = async () => {
-  const now = Date.now();
-  const limit = config.call.timeoutMs;
-  const ids = Array.from(domain.call.calls.keys());
-  for (const id of ids) {
-    const state = domain.call.calls.get(id);
-    if (!state) continue;
-    const stale = [];
-    for (const item of state.participants.values()) {
-      if (now - item.seen > limit) stale.push(item.endpoint);
-    }
-    for (const endpoint of stale) await releaseParticipant(state, endpoint);
-  }
+const hangUp = async (state, actor, name) => {
+  const callers = callerClients(state);
+  await finish(state, '', actor);
+  emitRinging(callers, state.id, name);
 };
 
 ({
@@ -753,16 +693,16 @@ const sweepAll = async () => {
   endpoints: new Map(),
   clientEndpoints: new WeakMap(),
   watched: new WeakSet(),
-  buckets: new Map(),
   pending: new WeakMap(),
   timer: null,
   stopping: false,
 
-  async start(client, args) {
-    if (args === undefined) {
-      arm();
-      return true;
-    }
+  async start() {
+    arm();
+    return true;
+  },
+
+  async open(client, args) {
     return openCall(client, args);
   },
 
@@ -811,11 +751,9 @@ const sweepAll = async () => {
   },
 
   ping(client, args) {
-    if (!owns(client, args.endpoint)) return fail('call/forbidden');
-    const state = domain.call.calls.get(args.call);
-    const item = state?.participants.get(args.endpoint);
-    if (!item) return fail('call/not-joined');
-    item.seen = Date.now();
+    const joined = joinedOf(client, args.call, args.endpoint);
+    if (joined.error) return joined.error;
+    joined.item.seen = Date.now();
     return true;
   },
 
@@ -826,11 +764,13 @@ const sweepAll = async () => {
   },
 
   async update(client, args) {
-    if (!owns(client, args.endpoint)) return fail('call/forbidden');
-    const state = domain.call.calls.get(args.call);
-    const item = state?.participants.get(args.endpoint);
-    if (!item) return fail('call/not-joined');
-    if (!allow(args.endpoint, 'update')) return fail('call/rate');
+    const joined = joinedOf(client, args.call, args.endpoint);
+    if (joined.error) return joined.error;
+    const { state, item } = joined;
+    const rate = config.call.updateRate;
+    if (!takeToken(item.limits.update, rate, UPDATE_BURST, Date.now())) {
+      return fail('call/rate');
+    }
     if (blocked(state, item, args)) return fail('call/limit');
     const changed = applyUpdate(item, args);
     if (changed) await publish(state);
@@ -840,13 +780,17 @@ const sweepAll = async () => {
   signal(client, args) {
     const from = args.from;
     const to = args.to;
-    if (!owns(client, from)) return fail('call/forbidden');
-    const state = domain.call.calls.get(args.call);
-    const source = state?.participants.get(from);
-    const target = state?.participants.get(to);
-    if (!source || !target) return fail('call/not-joined');
+    const joined = joinedOf(client, args.call, from);
+    if (joined.error) return joined.error;
+    const state = joined.state;
+    const target = state.participants.get(to);
+    if (!target) return fail('call/not-joined');
     if (!envelopeOk(from, to, args.message)) return fail('call/forbidden');
-    if (!allow(from, 'signal')) return fail('call/rate');
+    const rate = config.call.signalRate;
+    const limit = joined.item.limits.signal;
+    if (!takeToken(limit, rate, SIGNAL_BURST, Date.now())) {
+      return fail('call/rate');
+    }
     const data = Object.freeze({
       call: state.id,
       from,
@@ -862,8 +806,6 @@ const sweepAll = async () => {
     if (access.error) return access.error;
     const entry = access.state.lobby.get(args.endpoint);
     if (!entry) return true;
-    const full = access.state.participants.size >= config.call.maxParticipants;
-    if (full) return fail('call/full');
     const joined = await enter(
       access.state,
       entry.client,
@@ -871,6 +813,7 @@ const sweepAll = async () => {
       entry.endpoint,
       entry.nick,
     );
+    if (joined instanceof Error) return joined;
     const data = Object.freeze({
       call: access.state.id,
       endpoint: entry.endpoint,
@@ -885,14 +828,12 @@ const sweepAll = async () => {
     if (access.error) return access.error;
     const entry = access.state.lobby.get(args.endpoint);
     if (!entry) return true;
-    access.state.lobby.delete(args.endpoint);
-    forget(entry.client, args.endpoint);
     const data = Object.freeze({
       call: access.state.id,
       endpoint: args.endpoint,
     });
     entry.client.emit('call/denied', data);
-    await publish(access.state);
+    await unknock(access.state, entry);
     return true;
   },
 
@@ -918,10 +859,7 @@ const sweepAll = async () => {
     const state = domain.call.calls.get(args.call);
     const peer = peerOf(client);
     if (!state?.ringing || peer !== state.ringing.peer) return true;
-    const callers = callerClients(state);
-    clearRing(state);
-    await finish(state, '', client);
-    emitRinging(callers, state.id, 'declined');
+    await hangUp(state, client, 'declined');
     return true;
   },
 
@@ -933,7 +871,7 @@ const sweepAll = async () => {
   },
 
   active(client) {
-    const peer = client ? peerOf(client) : '';
+    const peer = peerOf(client);
     const list = new Array(domain.call.calls.size).fill(null);
     let index = 0;
     for (const state of domain.call.calls.values()) {
@@ -956,14 +894,30 @@ const sweepAll = async () => {
   },
 
   async sweep() {
-    await sweepAll();
+    const now = Date.now();
+    const limit = config.call.timeoutMs;
+    for (const state of Array.from(domain.call.calls.values())) {
+      if (!domain.call.calls.has(state.id)) continue;
+      let last = null;
+      for (const item of state.participants.values()) {
+        if (now - item.seen <= limit) continue;
+        state.participants.delete(item.endpoint);
+        forget(item.client, item.endpoint);
+        last = item;
+      }
+      if (!last) continue;
+      if (state.participants.size === 0) {
+        await finish(state, '', last.client);
+        continue;
+      }
+      await publish(state);
+      announce(state, false);
+    }
   },
 
   async miss(id) {
     const state = domain.call.calls.get(id);
     if (!clearRing(state)) return;
-    const callers = callerClients(state);
-    await finish(state, '', null);
-    emitRinging(callers, id, 'missed');
+    await hangUp(state, null, 'missed');
   },
 });

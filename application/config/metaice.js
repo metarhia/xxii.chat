@@ -2,16 +2,8 @@
   host: '',
   publicAddress: process.env.XXII_TURN_PUBLIC_ADDRESS ?? '',
   listen: '0.0.0.0',
-  port: (() => {
-    const raw = process.env.XXII_ICE_PORT ?? '';
-    if (raw === '') return 3478;
-    return Number(raw);
-  })(),
-  tlsPort: (() => {
-    const raw = process.env.XXII_TURN_TLS_PORT ?? '';
-    if (raw === '') return 0;
-    return Number(raw);
-  })(),
+  port: Number(process.env.XXII_ICE_PORT || 3478),
+  tlsPort: Number(process.env.XXII_TURN_TLS_PORT || 0),
   relayPorts: [49160, 49359],
   tls: null,
   realm: 'xxii',

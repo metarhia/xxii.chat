@@ -6,5 +6,5 @@
     'call/exists': 'Call already exists',
   },
 
-  method: async (args) => domain.call.start(context.client, args),
+  method: async (args) => domain.call.open(context.client, args),
 });
