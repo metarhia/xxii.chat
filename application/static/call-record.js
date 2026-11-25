@@ -60,16 +60,22 @@ class CallRecording extends RecordingSession {
   }
 
   programOptions() {
-    const studio = this.#stage.studio;
-    const scene = studio?.enabled && studio.activeScene;
-    if (scene) return { ...this.options, ...scene.program, studio };
+    const scene = this.#scene;
+    if (scene) {
+      const studio = this.#stage.studio;
+      return { ...this.options, ...scene.program, studio };
+    }
     const background = this.image ?? (this.options.background || undefined);
     return { ...this.options, background };
   }
 
-  storedOptions() {
+  get #scene() {
     const studio = this.#stage.studio;
-    const scene = studio?.enabled && studio.activeScene;
+    return studio?.enabled ? studio.activeScene : null;
+  }
+
+  storedOptions() {
+    const scene = this.#scene;
     if (scene) {
       const background = scene.background.image
         ? 'image'
@@ -99,8 +105,7 @@ class CallRecording extends RecordingSession {
   }
 
   recordView() {
-    const studio = this.#stage.studio;
-    const scene = studio?.enabled && studio.activeScene;
+    const scene = this.#scene;
     if (!scene) return null;
     const { color } = scene.background;
     const options = { ...this.options, ...scene.program, background: color };

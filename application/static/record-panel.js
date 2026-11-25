@@ -3,6 +3,7 @@ import { NO_VIDEO, QUALITIES, MIN_SPEAKERS, MAX_SPEAKERS } from './layout.js';
 import { DEFAULTS, OPTIONS, targetLabel } from './call-settings.js';
 import { segmentLabel } from './call-settings.js';
 import { canPickFolder } from './recording-folder.js';
+import { optionOf, labeled } from './view.js';
 
 const SURFACE_COLOR = '#0f1418';
 const VOLUME_MAX = 200;
@@ -145,10 +146,8 @@ const createSelect = (field) => {
   select.dataset.record = field.name;
   select.dataset.kind = field.kind;
   for (const value of field.values) {
-    const option = document.createElement('option');
-    option.value = `${value}`;
-    option.textContent = field.labels?.[value] ?? labelOf(field.name, value);
-    select.append(option);
+    const label = field.labels?.[value] ?? labelOf(field.name, value);
+    select.append(optionOf(value, label));
   }
   return select;
 };
@@ -163,42 +162,29 @@ const createCheck = (field) => {
 
 const createField = (field) => {
   const isFlag = field.kind === 'flag';
-  const label = document.createElement('label');
-  label.className = isFlag ? 'check' : 'call-field';
+  const control = isFlag ? createCheck(field) : createSelect(field);
+  const label = labeled(control, field.label);
   label.dataset.field = field.name;
-  if (isFlag) {
-    label.append(createCheck(field), field.label);
-    return label;
-  }
-  const caption = document.createElement('span');
-  caption.textContent = field.label;
-  label.append(caption, createSelect(field));
   return label;
 };
 
 const createBackground = () => {
   const box = document.createElement('div');
   box.className = 'record-background';
-  const color = document.createElement('label');
-  color.className = 'call-field';
-  const caption = document.createElement('span');
-  caption.textContent = 'Background';
   const input = document.createElement('input');
   input.type = 'color';
   input.value = SURFACE_COLOR;
   input.dataset.record = 'background';
   input.dataset.kind = 'color';
-  color.append(caption, input);
-  const image = document.createElement('label');
-  image.className = 'call-field';
-  const imageCaption = document.createElement('span');
-  imageCaption.textContent = 'Background image';
   const file = document.createElement('input');
   file.type = 'file';
   file.accept = 'image/*';
   file.dataset.record = 'image';
-  image.append(imageCaption, file);
-  box.append(color, image, createButton('record-background', 'default'));
+  box.append(
+    labeled(input, 'Background'),
+    labeled(file, 'Background image'),
+    createButton('record-background', 'default'),
+  );
   return box;
 };
 
@@ -338,28 +324,20 @@ const paintRows = (box, rows, make) => {
 };
 
 const createPinRow = (person) => {
-  const label = document.createElement('label');
-  label.className = 'check';
   const input = document.createElement('input');
   input.type = 'checkbox';
   input.dataset.pin = person.endpoint;
-  label.append(input, person.nick || 'guest');
-  return label;
+  return labeled(input, person.nick || 'guest');
 };
 
 const createVolumeRow = (person) => {
-  const label = document.createElement('label');
-  label.className = 'call-field';
-  const caption = document.createElement('span');
-  caption.textContent = person.nick || 'guest';
   const input = document.createElement('input');
   input.type = 'range';
   input.min = '0';
   input.max = `${VOLUME_MAX}`;
   input.step = `${VOLUME_STEP}`;
   input.dataset.volume = person.endpoint;
-  label.append(caption, input);
-  return label;
+  return labeled(input, person.nick || 'guest');
 };
 
 const volumeOf = (options, endpoint) => {
@@ -444,8 +422,8 @@ const paintRecordControl = (root, view) => {
   paintRecordPanel(root, view);
 };
 
-export { FIELDS, PROGRAM_FIELDS, VOLUME_STEP, defaultsOf, labelOf, valueOf };
-export { SURFACE_COLOR, createSceneFields, paintSceneFields };
+export { FIELDS, PROGRAM_FIELDS, defaultsOf, labelOf, valueOf };
+export { createSceneFields, paintSceneFields };
 export { createRecordPanel, createRecordControl, paintRecordControl };
 export { createProgramControls, createRecordFields, createField };
 export { createButton };

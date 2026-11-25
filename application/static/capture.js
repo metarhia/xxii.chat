@@ -3,6 +3,7 @@ import { membersOf } from './members.js';
 import { RecordingSession } from './recording-session.js';
 import { createField, createProgramControls } from './record-panel.js';
 import { createRecordFields } from './record-panel.js';
+import { labeled } from './view.js';
 
 const LAYOUTS = {
   bubble: { people: 'speaker', screen: 'screenSpeaker', placement: 'bubble' },
@@ -28,13 +29,10 @@ const createSources = () => {
     screenAudio: 'screen audio',
   };
   for (const name of Object.keys(labels)) {
-    const label = document.createElement('label');
-    label.className = 'check';
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.dataset.source = name;
-    label.append(input, labels[name]);
-    sources.append(label);
+    sources.append(labeled(input, labels[name]));
   }
   return sources;
 };
@@ -144,7 +142,7 @@ class SoloCapture extends RecordingSession {
       ? 'Camera and mic capture are unavailable.'
       : '';
     const noScreen = !media.canScreen ? 'Screen capture is unavailable.' : '';
-    note.textContent = media.message || media.notice || unsupported || noScreen;
+    note.textContent = media.note || unsupported || noScreen;
     note.hidden = note.textContent === '';
   }
 

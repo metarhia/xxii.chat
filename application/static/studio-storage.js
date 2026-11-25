@@ -1,4 +1,5 @@
-import { assetOf, isObject } from './studio-layout.js';
+import { assetOf } from './studio-layout.js';
+import { isHashObject } from './metautil.js';
 
 const LOCK = 'xxii:studio';
 const DIRECTORY = 'studio';
@@ -62,7 +63,7 @@ const assetsOf = (value) => {
   const assets = new Map();
   if (!Array.isArray(value)) return assets;
   for (const entry of value) {
-    if (!isObject(entry)) continue;
+    if (!isHashObject(entry)) continue;
     const { checksum, name, type, size } = entry;
     const group = groupOf(type);
     if (!assetOf(checksum) || typeof name !== 'string' || !name || !group) {

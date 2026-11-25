@@ -7,6 +7,8 @@ import { DEFAULT_MUSIC_VOLUME, TRANSITIONS } from './studio-layout.js';
 import { OVERLAYS } from './studio-layout.js';
 import { textsOf, overlayOpacity, commentText } from './studio-layout.js';
 import { StudioClip } from './studio-clip.js';
+import { countOf } from './layout.js';
+import { labeled } from './view.js';
 import { groupOf, SCENES, BRAND, MUSIC, TEXTS } from './studio-storage.js';
 import { readJSON, writeJSON, readAssets } from './studio-storage.js';
 import { readAsset } from './studio-storage.js';
@@ -60,14 +62,11 @@ const createStageLists = (people, createRow) =>
   });
 
 const createSwitch = (name, label) => {
-  const field = document.createElement('label');
-  field.className = 'check';
   const input = document.createElement('input');
   input.type = 'checkbox';
   input.dataset.studio = name;
   input.setAttribute('role', 'switch');
-  field.append(input, label);
-  return field;
+  return labeled(input, label);
 };
 
 const createRow = (person, isAdmin) => {
@@ -132,10 +131,7 @@ const createStudioPanel = () => {
   return panel;
 };
 
-const volumeOf = (value) =>
-  Number.isFinite(value)
-    ? Math.min(100, Math.max(0, Math.round(value)))
-    : DEFAULT_MUSIC_VOLUME;
+const volumeOf = (value) => countOf(value, 0, 100, DEFAULT_MUSIC_VOLUME);
 
 const readFont = async () => {
   if (!document.fonts) return 'system-ui';

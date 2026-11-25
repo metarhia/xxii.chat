@@ -1,5 +1,7 @@
-import { choose, flagOf, REFERENCE_HEIGHT } from './layout.js';
+import { choose, flagOf, bounded, countOf } from './layout.js';
+import { REFERENCE_HEIGHT } from './layout.js';
 import { defaultsOf, PROGRAM_FIELDS } from './record-panel.js';
+import { isHashObject } from './metautil.js';
 
 const SCENE_TYPES = ['live', 'countdown', 'intermission'];
 const TRANSITIONS = ['fade', 'cut'];
@@ -30,16 +32,7 @@ const DEFAULT_BRAND = {
   chipStyle: 'block',
 };
 
-const isObject = (value) =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
 const textOf = (value) => (typeof value === 'string' ? value.trim() : '');
-
-const bounded = (value, min, max, fallback) =>
-  Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
-
-const countOf = (value, min, max, fallback) =>
-  Math.round(bounded(value, min, max, fallback));
 
 const assetOf = (value) =>
   typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) ? value : '';
@@ -60,7 +53,7 @@ const chipColorOf = (value) => {
 };
 
 const programOf = (value, defaults) => {
-  const input = isObject(value) ? value : {};
+  const input = isHashObject(value) ? value : {};
   const program = {};
   for (const { name, kind, values } of PROGRAM_FIELDS) {
     const option = input[name];
@@ -73,7 +66,7 @@ const programOf = (value, defaults) => {
   const pins = Array.isArray(input.pinned) ? input.pinned : [];
   const endpoints = pins.filter((pin) => pin && textOf(pin) === pin);
   program.pinned = [...new Set(endpoints)];
-  const source = isObject(input.volumes) ? input.volumes : null;
+  const source = isHashObject(input.volumes) ? input.volumes : null;
   const volumes = {};
   if (source) {
     for (const key in source) {
@@ -87,7 +80,7 @@ const programOf = (value, defaults) => {
 };
 
 const sceneOf = (value, defaults = defaultsOf()) => {
-  if (!isObject(value)) return null;
+  if (!isHashObject(value)) return null;
   const id = textOf(value.id);
   const name = textOf(value.name);
   const type = choose(value.type, SCENE_TYPES, '');
@@ -132,7 +125,7 @@ const builtInScenes = (defaults = defaultsOf()) => {
 
 const scenesOf = (value, defaults = defaultsOf()) => {
   const fallback = () => builtInScenes(defaults);
-  if (!isObject(value) || !Array.isArray(value.scenes)) {
+  if (!isHashObject(value) || !Array.isArray(value.scenes)) {
     return fallback();
   }
   const transition = choose(value.transition, TRANSITIONS, '');
@@ -147,7 +140,7 @@ const scenesOf = (value, defaults = defaultsOf()) => {
 };
 
 const brandOf = (value) => {
-  const input = isObject(value) ? value : {};
+  const input = isHashObject(value) ? value : {};
   const { accent, text, font, chipStyle, logo } = DEFAULT_BRAND;
   return {
     accent: colorOf(input.accent, accent),
@@ -196,7 +189,7 @@ const brandFont = (family, size, weight = 500) =>
   `${weight} ${size}px ${family === 'Fira Code' ? '"Fira Code"' : 'system-ui'}`;
 
 const textsOf = (value) => {
-  const source = isObject(value) ? value : {};
+  const source = isHashObject(value) ? value : {};
   const saved = Array.isArray(source.banners) ? source.banners : [];
   const banners = new Map();
   for (const item of saved) {
@@ -283,7 +276,7 @@ const clipSource = (clip) => {
 
 export { SCENE_TYPES, TRANSITIONS, CORNERS, FONTS, CHIP_STYLES, OVERLAYS };
 export { DEFAULT_MUSIC_VOLUME };
-export { isObject, assetOf, sceneOf, scenesOf, builtInScenes, brandOf };
+export { assetOf, sceneOf, scenesOf, builtInScenes, brandOf };
 export { countdownUntil, countdownText, fadeAlpha, logoRect, chipStyleOf };
 export { brandFont };
 export { textsOf, overlayOpacity, overlayRect, tickerOffset };

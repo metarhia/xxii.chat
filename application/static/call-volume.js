@@ -175,4 +175,4 @@ class ParticipantVolume {
   }
 }
 
-export { volumeValue, ParticipantVolume };
+export { volumeValue, disconnectNode, ParticipantVolume };

@@ -74,4 +74,4 @@ const membersOf = (state) => {
   return everyone.filter((person) => person.endpoint).map(make);
 };
 
-export { idOf, membersOf, trackOf };
+export { idOf, liveOf, shownOf, membersOf, trackOf };

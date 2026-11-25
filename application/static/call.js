@@ -1,4 +1,4 @@
-import { Emitter, jsonParse } from './metautil.js';
+import { Emitter, jsonParse, isHashObject } from './metautil.js';
 import { RtcConnection, emitError } from './metacom.js';
 import { CODECS, LinkMediaPolicy, validateHint } from './media.js';
 import { RELAY_SLOTS } from './relay-logic.js';
@@ -10,7 +10,6 @@ const CALL_SLOTS = [
   { slot: 'screen', kind: 'video' },
   { slot: 'screenAudio', kind: 'audio' },
 ];
-const SLOTS = CALL_SLOTS.map((item) => item.slot);
 const LINK_SLOTS = CALL_SLOTS.concat(RELAY_SLOTS);
 const RECONNECT_MS = [1000, 2000, 5000, 10000];
 const HEARTBEAT_MS = 10000;
@@ -59,11 +58,6 @@ const participantOf = (list, endpoint) => {
   return null;
 };
 
-const isRecord = (value) => {
-  const isObject = typeof value === 'object' && value !== null;
-  return isObject && !Array.isArray(value);
-};
-
 const isOffer = (message) => message?.description?.type === 'offer';
 
 const relax = (timer) => {
@@ -98,8 +92,8 @@ const onEvent = (session, name) => (data) => {
 class SignalRouter {
   #listeners = new Map();
   #buffers = new Map();
-  #limit = 256;
-  #ttlMs = 30000;
+  #limit;
+  #ttlMs;
 
   constructor({ limit = 256, ttlMs = 30000 } = {}) {
     this.#limit = limit;
@@ -265,7 +259,7 @@ class CallLink extends Emitter {
     const data = typeof event === 'string' ? event : event?.data;
     if (typeof data !== 'string' || data.length > MESSAGE_LIMIT) return;
     const message = jsonParse(data);
-    if (!isRecord(message) || !TYPES.includes(message.type)) return;
+    if (!isHashObject(message) || !TYPES.includes(message.type)) return;
     const now = Date.now();
     if (now - this.#messageStart >= 1000) {
       this.#messageStart = now;
@@ -310,7 +304,6 @@ class CallSession extends Emitter {
   #keep = false;
   #attempts = new Map();
   #plans = new Map();
-  #planTimers = new Map();
   #heartbeat = null;
   #onPageHide = null;
   #viewHints = new Map();
@@ -612,10 +605,7 @@ class CallSession extends Emitter {
   }
 
   #onState(state) {
-    const version = state.version;
-    const stale = typeof version === 'number' && version < this.#version;
-    if (stale || !this.#concerns(state)) return;
-    this.#apply(state);
+    if (this.#concerns(state)) this.#apply(state);
   }
 
   #onSignal(data) {
@@ -687,8 +677,7 @@ class CallSession extends Emitter {
   async #openMissing(state, local) {
     const configuration = await this.#ice();
     if (this.#state !== state) return;
-    const stopped = this.phase === 'idle' || this.phase === 'leaving';
-    if (stopped || !Array.isArray(state.participants)) return;
+    if (this.#stopped || !Array.isArray(state.participants)) return;
     for (const remote of state.participants) {
       if (remote.endpoint === this.endpoint) continue;
       const pending = this.#plans.has(remote.endpoint);
@@ -773,6 +762,7 @@ class CallSession extends Emitter {
   }
 
   #dropMissing(participants) {
+    if (this.#keep) return;
     const present = new Set();
     if (Array.isArray(participants)) {
       for (const item of participants) present.add(item.endpoint);
@@ -780,8 +770,7 @@ class CallSession extends Emitter {
     const endpoints = new Set(this.#links.keys());
     for (const endpoint of this.#plans.keys()) endpoints.add(endpoint);
     for (const endpoint of endpoints) {
-      if (present.has(endpoint) || this.#keep) continue;
-      this.#drop(endpoint);
+      if (!present.has(endpoint)) this.#drop(endpoint);
     }
   }
 
@@ -790,25 +779,30 @@ class CallSession extends Emitter {
     this.#attempts.delete(endpoint);
     const link = this.#links.get(endpoint);
     if (!link) return;
-    this.#links.delete(endpoint);
+    this.#retire(endpoint, link);
     this.#relay.disconnected(endpoint);
+  }
+
+  #retire(endpoint, link) {
+    this.#links.delete(endpoint);
     link.retired = true;
     link.close();
   }
 
+  get #stopped() {
+    return this.phase === 'idle' || this.phase === 'leaving';
+  }
+
   #onLinkClose(endpoint, link) {
     if (link.retired || this.#links.get(endpoint) !== link) return;
-    this.#links.delete(endpoint);
-    link.retired = true;
-    link.close();
+    this.#retire(endpoint, link);
     this.#relay.disconnected(endpoint);
     this.#linkFailed(endpoint, link.role);
   }
 
   #linkFailed(endpoint, role, blocked = false) {
     if (!this.#paired(endpoint)) return;
-    const stopped = this.phase === 'idle' || this.phase === 'leaving';
-    if (stopped) return;
+    if (this.#stopped) return;
     const attempt = this.#attempts.get(endpoint) ?? 0;
     this.#attempts.set(endpoint, attempt + 1);
     this.#relay.failed(endpoint, attempt + 1);
@@ -843,53 +837,43 @@ class CallSession extends Emitter {
 
   #plan(endpoint, delay, role) {
     this.#cancelPlan(endpoint);
+    const plan = { timer: 0 };
     const run = () => {
-      if (this.#plans.get(endpoint) !== run) return;
+      if (this.#plans.get(endpoint) !== plan) return;
       this.#plans.delete(endpoint);
-      this.#planTimers.delete(endpoint);
       this.#reopen(endpoint, role);
     };
-    this.#plans.set(endpoint, run);
-    const timer = relax(this.#schedule(run, delay));
-    this.#planTimers.set(endpoint, timer);
+    this.#plans.set(endpoint, plan);
+    plan.timer = relax(this.#schedule(run, delay));
   }
 
   #reopen(endpoint, role) {
     if (this.#links.has(endpoint) || !this.#paired(endpoint)) return;
-    const stopped = this.phase === 'idle' || this.phase === 'leaving';
-    if (stopped) return;
+    if (this.#stopped) return;
     const remote = participantOf(this.#state.participants, endpoint);
     guard(async () => {
       const configuration = await this.#ice();
       const pending = this.#plans.has(endpoint) || this.#links.has(endpoint);
       const gone = !this.#paired(endpoint) || pending;
-      const halted = this.phase === 'idle' || this.phase === 'leaving';
-      if (gone || halted) return;
+      if (gone || this.#stopped) return;
       this.#open(remote, role, configuration);
     }, this);
   }
 
   #cancelPlan(endpoint) {
-    const timer = this.#planTimers.get(endpoint);
-    if (timer === undefined) return;
+    const plan = this.#plans.get(endpoint);
+    if (!plan) return;
     this.#plans.delete(endpoint);
-    this.#planTimers.delete(endpoint);
-    clearTimeout(timer);
+    clearTimeout(plan.timer);
   }
 
   #clearPlans() {
-    const timers = new Array(this.#planTimers.size).fill(0);
-    let index = 0;
-    for (const timer of this.#planTimers.values()) timers[index++] = timer;
+    for (const plan of this.#plans.values()) clearTimeout(plan.timer);
     this.#plans.clear();
-    this.#planTimers.clear();
-    for (const timer of timers) clearTimeout(timer);
   }
 
   #closeLinks() {
-    const links = new Array(this.#links.size).fill(null);
-    let index = 0;
-    for (const link of this.#links.values()) links[index++] = link;
+    const links = Array.from(this.#links.values());
     this.#links.clear();
     for (const link of links) {
       link.retired = true;
@@ -939,5 +923,5 @@ class CallSession extends Emitter {
   }
 }
 
-export { CALL_SLOTS, LINK_SLOTS, SLOTS, isOfferer, delayOf };
-export { SignalRouter, CallLink, CallSession };
+export { LINK_SLOTS, isOfferer, delayOf };
+export { SignalRouter, CallSession };

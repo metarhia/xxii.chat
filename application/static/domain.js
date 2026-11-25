@@ -39,16 +39,6 @@ import { CallStage, RingAlert } from './stage.js';
 import { Recordings } from './recordings.js';
 import { SoloCapture } from './capture.js';
 
-const TASKS = {
-  clear: {
-    label: 'clear database',
-    busy: 'clearing...',
-    request: 'Database clear requested',
-    done: 'Database cleared successfully',
-    failed: 'Database clear failed',
-  },
-};
-
 const PANELS = {
   pins: 'Pinned',
   members: 'Members',
@@ -430,10 +420,15 @@ const recordingLabel = (record, isLive) => {
   return isLive ? `● ${nick} recording` : `● ${nick} recorded`;
 };
 
+const isInCall = (session) =>
+  session?.phase === 'joined' || session?.phase === 'reconnecting';
+
+const isMissed = (record) => record.peak === 1 && isPair(record.chat);
+
 const callLabel = (record, live) => {
   const nick = record.nick || 'guest';
   if (typeof record.ended === 'number') {
-    const missed = record.peak === 1 && isPair(record.chat);
+    const missed = isMissed(record);
     if (missed) return `📞 missed call from ${nick}`;
     const minutes = minutesOf(record);
     const names = record.names ?? '';
@@ -450,7 +445,7 @@ const callAction = (record, live) => {
     if (!live) return null;
     return { action: 'join-call', label: 'join' };
   }
-  const missed = record.peak === 1 && isPair(record.chat);
+  const missed = isMissed(record);
   if (!missed) return null;
   return { action: 'call-back', label: 'call back' };
 };
@@ -1515,19 +1510,19 @@ class ChatApplication extends Application {
     return text.toLowerCase().includes(this.filter);
   }
 
-  channelEntity() {
-    return isFeed(this.replica, this.chat) ? 'feed' : 'chat';
+  channelEntity(chat = this.chat) {
+    return isFeed(this.replica, chat) ? 'feed' : 'chat';
   }
 
-  chatName() {
-    if (!isPair(this.chat)) {
-      const entity = this.channelEntity();
-      const name = this.replica.get(this.chat)?.name ?? this.chat;
+  chatName(chat = this.chat) {
+    if (!isPair(chat)) {
+      const entity = this.channelEntity(chat);
+      const name = this.replica.get(chat)?.name ?? chat;
       return labelOf({ entity, name });
     }
-    const peer = this.peerOf(this.chat);
-    const contact = this.listContacts().find((item) => item.peer === peer);
-    return `@${contact?.nick ?? shortId(peer)}`;
+    const peer = this.peerOf(chat);
+    const nick = peer === this.peerId ? '' : this.nickMap().get(peer);
+    return `@${nick || shortId(peer)}`;
   }
 
   chatDescription(items) {
@@ -1754,19 +1749,14 @@ class ChatApplication extends Application {
   }
 
   summarize(byReaction, nicks) {
-    const reactions = Object.keys(REACTIONS);
-    const summary = new Array(reactions.length).fill(null);
-    let total = 0;
-    for (let i = 0; i < reactions.length; i++) {
-      const reaction = reactions[i];
-      const authors = byReaction?.get(reaction) ?? new Set();
+    if (!byReaction) return [];
+    const summary = Object.keys(REACTIONS).map((reaction) => {
+      const authors = byReaction.get(reaction) ?? new Set();
       const names = Array.from(authors, (id) => nicks.get(id) ?? shortId(id));
       const mine = authors.has(this.peerId);
-      const count = authors.size;
-      total += count;
-      summary[i] = { reaction, count, mine, names: names.toSorted() };
-    }
-    return total > 0 ? summary : [];
+      return { reaction, count: authors.size, mine, names: names.toSorted() };
+    });
+    return summary.some((item) => item.count > 0) ? summary : [];
   }
 
   fillReactions(container, reactions) {
@@ -2324,11 +2314,11 @@ class ChatApplication extends Application {
     if (!this.releaseCapture()) return;
     const context = {
       chat,
-      chatName: chat ? this.callTitle(chat) : 'capture',
+      chatName: chat ? this.chatName(chat) : 'capture',
       call: '',
     };
     const hooks = {
-      endpoint: `${this.peerId}:${tabId()}`,
+      endpoint: this.callEndpoint(),
       nick: () => this.username,
       notice: (text) => this.showNotification(text, 'warning'),
       fail: (error) => this.report(error),
@@ -2420,7 +2410,7 @@ class ChatApplication extends Application {
     const host = location.hostname;
     const servers = await this.api.ice.servers({ host });
     const settings = readIce(localStorage);
-    const built = buildIce({ servers, settings, now });
+    const built = buildIce({ servers, settings });
     const { iceServers, iceTransportPolicy, freshUntil } = built;
     const value = { iceServers, iceTransportPolicy };
     this.iceCache = { freshUntil, value };
@@ -2562,9 +2552,7 @@ class ChatApplication extends Application {
     if (!selection) return;
     const top = box.getBoundingClientRect().top;
     const offset = box.scrollHeight - box.scrollTop;
-    this.selection = null;
-    this.threadTarget = '';
-    this.hideBack();
+    this.dropThread(true);
     this.renderSelection();
     this.renderComposer();
     const shift = box.getBoundingClientRect().top - top;
@@ -2576,6 +2564,10 @@ class ChatApplication extends Application {
 
   closeThread() {
     if (this.selection) this.closeLayer('selection');
+  }
+
+  loadedThread() {
+    return this.threadItems().filter((id) => this.cache.has(id));
   }
 
   dropThread(keepLayer = false) {
@@ -2624,7 +2616,7 @@ class ChatApplication extends Application {
 
   stepThread(step) {
     if (!this.selection) return;
-    const ids = this.threadItems().filter((id) => this.cache.has(id));
+    const ids = this.loadedThread();
     const index = ids.indexOf(this.chosenOf(ids)) + step;
     if (index < 0 || index >= ids.length) return;
     const id = ids[index];
@@ -2840,7 +2832,7 @@ class ChatApplication extends Application {
     if (isComposer && isEmpty && isUp) {
       event.preventDefault();
       if (this.selection) {
-        const ids = this.threadItems().filter((id) => this.cache.has(id));
+        const ids = this.loadedThread();
         return void this.selectById(this.chosenOf(ids));
       }
       return void this.selectLast();
@@ -3314,9 +3306,9 @@ class ChatApplication extends Application {
     const { chat } = this;
     const replica = this.replicaOf(chat);
     if (!replica.get(id)) return;
-    const authors = reactionsOf(replica, chat).get(id)?.get(reaction);
     const author = this.peerId;
-    const active = authors?.has(author) !== true;
+    const key = `${id}/${author}/${reaction}`;
+    const active = replica.get(key)?.active !== true;
     setReaction(replica, { chat, message: id, author, reaction, active });
     const verb = active ? 'Added' : 'Removed';
     this.logger.log(`${verb} reaction:`, reaction, 'to message:', id);
@@ -3707,24 +3699,6 @@ class ChatApplication extends Application {
     this.showNotification('Request failed', 'error');
   }
 
-  async runTask(button, name, action) {
-    const task = TASKS[name];
-    this.logger.log(`${task.request}...`);
-    button.disabled = true;
-    button.textContent = task.busy;
-    try {
-      await action();
-      this.logger.log(task.done);
-      this.showNotification(task.done);
-    } catch (error) {
-      this.logger.log(`${task.failed}:`, error.message);
-      this.showNotification(task.failed, 'error');
-    } finally {
-      button.disabled = false;
-      button.textContent = task.label;
-    }
-  }
-
   showVersion({ version, next }) {
     const button = this.versionBtn;
     button.textContent = next ? `v${version} → v${next}` : `v${version}`;
@@ -3763,24 +3737,28 @@ class ChatApplication extends Application {
     );
   }
 
-  clearDatabase() {
-    const clear = () => this.api.chat.clear();
-    return this.runTask(this.clearMessagesBtn, 'clear', clear);
+  async clearDatabase() {
+    const button = this.clearMessagesBtn;
+    this.logger.log('Database clear requested...');
+    button.disabled = true;
+    button.textContent = 'clearing...';
+    try {
+      await this.api.chat.clear();
+      this.logger.log('Database cleared successfully');
+      this.showNotification('Database cleared successfully');
+    } catch (error) {
+      this.logger.log('Database clear failed:', error.message);
+      this.showNotification('Database clear failed', 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'clear database';
+    }
   }
 
   showInstallButton(visible = true) {
     const text = 'App installed successfully!';
     if (!visible) this.showNotification(text);
     this.installBtn.classList.toggle('hidden', !visible);
-  }
-
-  callTitle(chat) {
-    const current = this.chat;
-    if (current === chat) return this.chatName();
-    this.chat = chat;
-    const title = this.chatName();
-    this.chat = current;
-    return title;
   }
 
   ensureCallStage() {
@@ -3806,7 +3784,7 @@ class ChatApplication extends Application {
         this.usernameInput.value = nick;
         this.syncUsername();
       },
-      titleOf: (chat) => this.callTitle(chat),
+      titleOf: (chat) => this.chatName(chat),
       update: (flags) => this.pushCallState(flags),
       ice: () => this.iceConfiguration(),
       stream: (args) => this.api.stream.whip(args),
@@ -3848,10 +3826,7 @@ class ChatApplication extends Application {
   noteCallDown() {
     if (!this.hasConnected) return;
     const session = this.callSession;
-    const phase = session?.phase ?? '';
-    const joined = phase === 'joined';
-    const live = joined || phase === 'reconnecting';
-    if (!live) return;
+    if (!isInCall(session)) return;
     this.callLost = true;
     session.hold();
   }
@@ -3870,10 +3845,7 @@ class ChatApplication extends Application {
     if (!this.callLost) return;
     this.callLost = false;
     const session = this.callSession;
-    const phase = session?.phase ?? '';
-    const joined = phase === 'joined';
-    const live = joined || phase === 'reconnecting';
-    if (!session || !live) return;
+    if (!isInCall(session)) return;
     const stored = this.replicaOf(session.chat).get(session.call);
     const started = stored?.timestamp;
     const host = typeof stored?.host === 'string' ? stored.host : '';
@@ -3899,9 +3871,7 @@ class ChatApplication extends Application {
     if (!data || typeof data.call !== 'string') return;
     const call = data.call;
     if (data.ended === true) {
-      this.liveCalls.delete(call);
-      this.markBookEnded(call);
-      this.ring.stop(call);
+      this.endLive(call);
     } else {
       const chat = typeof data.chat === 'string' ? data.chat : '';
       const count = typeof data.count === 'number' ? data.count : 0;
@@ -3913,6 +3883,12 @@ class ChatApplication extends Application {
     this.scheduleRender();
   }
 
+  endLive(call) {
+    this.liveCalls.delete(call);
+    this.markBookEnded(call);
+    this.ring.stop(call);
+  }
+
   onCallEnded(data) {
     const call = data?.call;
     if (typeof call !== 'string') return;
@@ -3921,9 +3897,7 @@ class ChatApplication extends Application {
       const text = `${stage.nickOf(data.by)} ended the call`;
       this.showNotification(text, 'info', stage.announcements);
     }
-    this.liveCalls.delete(call);
-    this.markBookEnded(call);
-    this.ring.stop(call);
+    this.endLive(call);
     this.dropPrejoin(call);
     this.scheduleRender();
   }
@@ -4115,12 +4089,8 @@ class ChatApplication extends Application {
     if (book.peak > 1) return;
     book.peak = 1;
     const replica = this.replicaOf(book.chat);
-    const current = replica.get(book.id);
-    if (typeof current?.ended === 'number') {
-      book.closed = true;
-      return;
-    }
     book.closed = true;
+    if (typeof replica.get(book.id)?.ended === 'number') return;
     const ended = Date.now();
     const names = book.names.join(', ');
     saveCallEnd(replica, book.id, { ended, peak: 1, names });
@@ -4150,27 +4120,32 @@ class ChatApplication extends Application {
     stage.detach();
   }
 
-  presentCallLink(link) {
-    if (this.panel === 'capture') {
-      this.closePanel();
-      if (this.panel === 'capture') return;
-    }
-    this.attachCallEvents();
-    const endpoint = `${this.peerId}:${tabId()}`;
+  leaveCapture() {
+    if (this.panel === 'capture') this.closePanel();
+    return this.panel !== 'capture';
+  }
+
+  callEndpoint() {
+    return `${this.peerId}:${tabId()}`;
+  }
+
+  attachSession(endpoint, call, chat, token, camera) {
     const ice = () => this.iceConfiguration();
-    const session = new CallSession({
-      api: this.api,
-      endpoint,
-      call: link.call,
-      chat: '',
-      ice,
-      pagehide: false,
-    });
-    const token = link.token;
-    if (token !== '') this.callToken = token;
-    const stage = this.ensureCallStage();
-    stage.attach(session, token, true);
+    const { api } = this;
+    const options = { api, endpoint, call, chat, ice, pagehide: false };
+    const session = new CallSession(options);
+    this.ensureCallStage().attach(session, token, camera);
     this.callSession = session;
+    return session;
+  }
+
+  presentCallLink(link) {
+    if (!this.leaveCapture()) return;
+    this.attachCallEvents();
+    const { call, token } = link;
+    if (token !== '') this.callToken = token;
+    const endpoint = this.callEndpoint();
+    const session = this.attachSession(endpoint, call, '', token, true);
     session.begin();
     this.linkReady = this.finishCallLink(session);
   }
@@ -4206,11 +4181,7 @@ class ChatApplication extends Application {
   }
 
   async startCall(chat, options = {}) {
-    if (this.callOpening) return;
-    if (this.panel === 'capture') {
-      this.closePanel();
-      if (this.panel === 'capture') return;
-    }
+    if (this.callOpening || !this.leaveCapture()) return;
     this.callOpening = true;
     this.renderCaptureButtons();
     try {
@@ -4225,7 +4196,7 @@ class ChatApplication extends Application {
     await this.closeCall();
     await this.bindCalls();
     this.attachCallEvents();
-    const endpoint = `${this.peerId}:${tabId()}`;
+    const endpoint = this.callEndpoint();
     const nick = this.username;
     const opened = await this.openCall(chat, endpoint, nick);
     const given = options.token;
@@ -4235,21 +4206,16 @@ class ChatApplication extends Application {
     if (token !== '') this.callToken = token;
     if (opened.created) this.recordCallStart(chat, opened);
     else this.prepareJoinedCall(chat, opened.id);
-    const ice = () => this.iceConfiguration();
-    const session = new CallSession({
-      api: this.api,
+    const session = this.attachSession(
       endpoint,
-      call: opened.id,
+      opened.id,
       chat,
-      ice,
-      pagehide: false,
-    });
-    const stage = this.ensureCallStage();
-    stage.attach(session, token, camera);
-    this.callSession = session;
+      token,
+      camera,
+    );
     this.followCall(session);
     session.begin();
-    if (opened.state) stage.onCallState(opened.state);
+    if (opened.state) this.callStage.onCallState(opened.state);
   }
 
   focusCallChat(id) {

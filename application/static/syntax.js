@@ -756,9 +756,10 @@ const yamlLine = (line, tokens) => {
   return line.slice(dash[0].length);
 };
 
-const scanYamlValue = (rest, tokens) => {
-  const list = tokenizeGeneric(rest, YAML_VALUE);
-  for (const token of list) pushToken(tokens, token.type, token.text);
+const scanValue = (text, def, tokens) => {
+  for (const token of tokenizeGeneric(text, def)) {
+    pushToken(tokens, token.type, token.text);
+  }
 };
 
 const tokenizeYaml = (code) => {
@@ -779,19 +780,13 @@ const tokenizeYaml = (code) => {
     }
     const rest = yamlLine(body, tokens);
     if (YAML_SCALAR.test(rest.trim())) block = indent;
-    scanYamlValue(rest + line.slice(body.length), tokens);
+    scanValue(rest + line.slice(body.length), YAML_VALUE, tokens);
   }
   return tokens.list;
 };
 
 const SECTION = /^(\s*)(\[\[?[^\]\n]*\]\]?)(.*)$/;
 const ASSIGN = /^(\s*)([\w.\-"' ]+?)(\s*)([=:])(\s*)(.*)$/;
-
-const scanValue = (text, def, tokens) => {
-  for (const token of tokenizeGeneric(text, def)) {
-    pushToken(tokens, token.type, token.text);
-  }
-};
 
 const tokenizeProperties = (code, def) => {
   const tokens = createTokens();

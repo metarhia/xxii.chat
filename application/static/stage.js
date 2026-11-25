@@ -2,7 +2,7 @@ import { ParticipantVolume } from './call-volume.js';
 import { TileMenu } from './call-tile-menu.js';
 import { peerOf, colorOf, initialsOf } from './avatar.js';
 import { statsText } from './call-stats.js';
-import { trackOf } from './members.js';
+import { liveOf, shownOf, trackOf } from './members.js';
 import { MediaCapture, CallLevels, isMobile } from './media.js';
 import { pausesCameraInBackground } from './media.js';
 import { requestCallNotifications } from './notifications.js';
@@ -12,6 +12,7 @@ import { CallRecording } from './call-record.js';
 import { Streaming } from './streaming.js';
 import { createRecordPanel, createRecordControl } from './record-panel.js';
 import { createButton } from './record-panel.js';
+import { optionOf, labeled } from './view.js';
 import { Studio, createStudioPanel, createStageLists } from './studio.js';
 import { stageMove } from './studio.js';
 import { CALL_LAYOUTS, STRIP_POSITIONS } from './call-layout.js';
@@ -28,7 +29,6 @@ import { showsToast, toastText, TOAST_SHOW_MS } from './call-settings.js';
 import { titleOf } from './call-settings.js';
 
 const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
-const phoneView = () => matchMedia(PHONE).matches;
 
 const LEAVE_RECORDING =
   'You are recording this call. Stop the recording and leave?';
@@ -139,15 +139,11 @@ const REMOTE_REQUEST = {
 
 const POLICIES = ['open', 'link', 'approval'];
 
-const createField = (id, label) => {
-  const wrap = document.createElement('label');
-  wrap.className = 'call-field';
-  const caption = document.createElement('span');
-  caption.textContent = label;
+const createField = (id, label, values = []) => {
   const select = document.createElement('select');
   select.id = id;
-  wrap.append(caption, select);
-  return wrap;
+  for (const value of values) select.append(optionOf(value, value));
+  return labeled(select, label);
 };
 
 const createVideo = (muted) => {
@@ -194,6 +190,10 @@ const paintPerson = (root, track, name, color) => {
   avatar.style.background = color;
   avatar.textContent = initialsOf(name);
 };
+
+const BLOCKED = ['locked', 'full'];
+
+const textOf = (value) => (typeof value === 'string' ? value : '');
 
 const admissionOf = (preview, token) => {
   if (!preview) return { action: 'join', reason: '' };
@@ -291,18 +291,8 @@ const createLayoutControls = () => {
   summary.textContent = 'view';
   const menu = document.createElement('div');
   menu.className = 'share-menu';
-  const layout = createField('call-layout', 'layout');
-  const strip = createField('call-strip', 'strip position');
-  for (const field of [layout, strip]) {
-    const select = field.querySelector('select');
-    const values = field === layout ? CALL_LAYOUTS : STRIP_POSITIONS;
-    for (const value of values) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value;
-      select.append(option);
-    }
-  }
+  const layout = createField('call-layout', 'layout', CALL_LAYOUTS);
+  const strip = createField('call-strip', 'strip position', STRIP_POSITIONS);
   menu.append(
     layout,
     strip,
@@ -318,14 +308,7 @@ const createLayoutControls = () => {
 const createHostControls = () => {
   const box = document.createElement('div');
   box.className = 'call-host hidden';
-  const policy = createField('call-policy', 'policy');
-  const select = policy.querySelector('select');
-  for (const value of POLICIES) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = value;
-    select.append(option);
-  }
+  const policy = createField('call-policy', 'policy', POLICIES);
   const muteAll = createButton('mute-all', 'Mute all');
   const lock = createButton('lock', 'Lock');
   const lower = createButton('lower-hands', 'Lower all hands');
@@ -695,10 +678,7 @@ class RingAlert {
     this.call = '';
     this.chat = '';
     this.nick = '';
-    this.peer = '';
-    this.tab = '';
     this.tag = '';
-    this.notice = '';
     this.noteError = '';
     this.context = null;
     this.oscillator = null;
@@ -711,19 +691,12 @@ class RingAlert {
   show(ring) {
     this.stop();
     this.generation += 1;
-    const call = typeof ring.call === 'string' ? ring.call : '';
+    const call = textOf(ring.call);
     if (call === '') return;
-    const chat = typeof ring.chat === 'string' ? ring.chat : '';
-    const nick = typeof ring.nick === 'string' ? ring.nick : '';
-    const peer = typeof ring.peer === 'string' ? ring.peer : '';
-    const tab = typeof ring.tab === 'string' ? ring.tab : '';
     this.call = call;
-    this.chat = chat;
-    this.nick = nick;
-    this.peer = peer;
-    this.tab = tab;
-    this.tag = `${call}:${tab}`;
-    this.notice = '';
+    this.chat = textOf(ring.chat);
+    this.nick = textOf(ring.nick);
+    this.tag = `${call}:${textOf(ring.tab)}`;
     this.noteError = '';
     this.root = createIncoming(this);
     document.body.append(this.root);
@@ -742,10 +715,7 @@ class RingAlert {
     this.call = '';
     this.chat = '';
     this.nick = '';
-    this.peer = '';
-    this.tab = '';
     this.tag = '';
-    this.notice = '';
     this.noteError = '';
     this.root?.remove();
     this.root = null;
@@ -776,7 +746,6 @@ class RingAlert {
   }
 
   setNotice(text) {
-    this.notice = text;
     const note = this.root?.querySelector('.incoming-note');
     if (!note) return;
     note.textContent = text;
@@ -1018,13 +987,13 @@ class CallStage {
     this.#onCall = (state) => this.onCallState(state);
     this.#onNotice = (text) => {
       if (!this.qualityNotices.includes(text)) this.qualityNotices.push(text);
-      this.showNote(this.media?.message || this.media?.notice || '');
+      this.showNote(this.media?.note || '');
     };
     this.#onQuality = (quality) => this.onQuality(quality);
     this.#onStats = ({ endpoint, stats }) => {
       if (!this.session || !this.tileList().includes(endpoint)) return;
       this.stats.set(endpoint, stats);
-      this.paintStats();
+      this.paintStats(endpoint);
     };
     this.#onDenied = () => {
       this.hooks.notice?.('The admin did not let you in');
@@ -1045,18 +1014,6 @@ class CallStage {
     this.session = session;
     this.token = token;
     this.chat = session.chat;
-    this.joining = false;
-    this.people = [];
-    this.lobby = [];
-    this.preview = null;
-    this.isAdmin = false;
-    this.hostPeer = '';
-    this.policy = '';
-    this.locked = false;
-    this.prompt = '';
-    this.kind = '';
-    this.mediaNote = '';
-    this.remote = new Map();
     this.volume = new ParticipantVolume(this.#onNotice);
     this.tileMenu = new TileMenu(this);
     this.media = new MediaCapture();
@@ -1150,10 +1107,7 @@ class CallStage {
     this.statsAll = false;
     this.levels?.stop();
     this.levels = null;
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = null;
-    clearInterval(this.resizeTimer);
-    this.resizeTimer = null;
+    this.stopLayout();
     for (const track of this.trackListeners.keys()) this.unwatchTrack(track);
     this.pin = '';
     this.spotlight = '';
@@ -1208,9 +1162,7 @@ class CallStage {
     this.host.classList.remove('hidden');
     const title = this.hooks.titleOf(this.chat);
     const view = this.viewOf(mode, title);
-    this.resizeObserver?.disconnect();
-    clearInterval(this.resizeTimer);
-    this.resizeTimer = null;
+    this.stopLayout();
     this.host.replaceChildren(view);
     this.root.dataset.call = mode;
     this.closePip(false);
@@ -1226,7 +1178,7 @@ class CallStage {
       this.observeLayout();
       this.syncControls();
       this.paintPrompt();
-      this.showNote(this.media?.message || this.media?.notice || '');
+      this.showNote(this.media?.note || '');
       this.renderTiles();
       this.paintPeople();
       this.paintRecording();
@@ -1257,9 +1209,7 @@ class CallStage {
     this.closeSheet();
     this.hooks.popLayer('call');
     this.mode = 'mini';
-    this.resizeObserver?.disconnect();
-    clearInterval(this.resizeTimer);
-    this.resizeTimer = null;
+    this.stopLayout();
     this.host.classList.add('hidden');
     this.host.replaceChildren();
     this.root.dataset.call = 'mini';
@@ -1267,7 +1217,7 @@ class CallStage {
     this.mini.addEventListener('click', (event) => this.onMiniClick(event));
     document.body.append(this.mini);
     this.syncControls();
-    this.showNote(this.media?.message || this.media?.notice || '');
+    this.showNote(this.media?.note || '');
     this.paintMini();
     this.updateViewHints();
     this.hooks.changed();
@@ -1275,7 +1225,7 @@ class CallStage {
 
   updatePhone() {
     if (this.mode !== 'call') return;
-    if (phoneView()) {
+    if (this.phone?.matches) {
       this.hooks.pushLayer('call');
     } else {
       this.closeSheet();
@@ -1313,7 +1263,7 @@ class CallStage {
   }
 
   openSheet(name) {
-    if (!phoneView() || this.mode !== 'call') return;
+    if (!this.phone?.matches || this.mode !== 'call') return;
     const isFirst = this.sheet === '';
     this.sheet = name;
     this.root.dataset.callSheet = name;
@@ -1366,7 +1316,7 @@ class CallStage {
         ?.setCameraPaused(document.hidden)
         .catch((error) => this.hooks.fail(error));
     }
-    if (document.hidden || !(isMobile() || phoneView())) {
+    if (document.hidden || !(isMobile() || this.phone?.matches)) {
       return void this.releaseWake();
     }
     if (this.wakeRequest || this.wakeLock) return;
@@ -1486,7 +1436,7 @@ class CallStage {
   }
 
   closeMenus() {
-    const roots = [this.host, this.mini, this.pip?.root];
+    const roots = [this.host, ...this.miniRoots()];
     let closed = false;
     for (const root of roots) {
       const open = root ? root.querySelectorAll('details[open]') : [];
@@ -1552,9 +1502,7 @@ class CallStage {
   async join() {
     if (this.mode !== 'prejoin' || this.joining || !this.session) return;
     const admission = admissionOf(this.preview, this.token);
-    const blocked =
-      admission.action === 'locked' || admission.action === 'full';
-    if (blocked) return;
+    if (BLOCKED.includes(admission.action)) return;
     requestCallNotifications();
     this.joining = true;
     this.syncControls();
@@ -1563,8 +1511,7 @@ class CallStage {
       if (this.hooks.ready) await this.hooks.ready();
       if (this.mode !== 'prejoin' || !this.session) return;
       const next = admissionOf(this.preview, this.token);
-      const stopped = next.action === 'locked' || next.action === 'full';
-      if (stopped) {
+      if (BLOCKED.includes(next.action)) {
         this.joining = false;
         this.syncControls();
         return;
@@ -1640,23 +1587,17 @@ class CallStage {
     if (!this.session || state?.call !== this.session.call) return;
     const list = Array.isArray(state.participants) ? state.participants : [];
     const people = [];
-    let isAdmin = false;
     for (const item of list) {
-      const endpoint = item.endpoint;
-      if (!endpoint) continue;
-      const nick = typeof item.nick === 'string' ? item.nick : '';
-      const peer = typeof item.peer === 'string' ? item.peer : '';
-      const camera = item.camera === true;
-      const screen = item.screen === true;
-      const mic = item.mic !== false;
-      const admin = item.admin === true;
-      const hand = item.hand > 0 ? item.hand : 0;
-      if (endpoint === this.session.endpoint) isAdmin = admin;
-      const person = { endpoint, nick, peer, camera, screen, mic };
+      if (!item.endpoint) continue;
       people.push({
-        ...person,
-        admin,
-        hand,
+        endpoint: item.endpoint,
+        nick: textOf(item.nick),
+        peer: textOf(item.peer),
+        camera: item.camera === true,
+        screen: item.screen === true,
+        mic: item.mic !== false,
+        admin: item.admin === true,
+        hand: item.hand > 0 ? item.hand : 0,
         recording: item.recording === true,
         live: item.live === true,
         optOut: item.optOut === true,
@@ -1672,14 +1613,14 @@ class CallStage {
     const local = people.find((person) => person.endpoint === me);
     this.people = people;
     this.hands = orderOf(people);
-    this.isAdmin = isAdmin;
-    this.hostPeer = typeof state.host === 'string' ? state.host : '';
-    this.policy = typeof state.policy === 'string' ? state.policy : '';
+    this.isAdmin = local?.admin === true;
+    this.hostPeer = textOf(state.host);
+    this.policy = textOf(state.policy);
     this.locked = state.locked === true;
     this.joinBackstage = state.joinBackstage === true;
-    this.kind = typeof state.kind === 'string' ? state.kind : '';
+    this.kind = textOf(state.kind);
     this.lobby = Array.isArray(state.lobby) ? state.lobby : [];
-    this.spotlight = typeof state.spotlight === 'string' ? state.spotlight : '';
+    this.spotlight = textOf(state.spotlight);
     const present = new Set(people.map((person) => person.endpoint));
     for (const endpoint of this.remote.keys()) {
       if (present.has(endpoint)) continue;
@@ -1700,9 +1641,7 @@ class CallStage {
     this.restoreRemote();
     this.levels?.sample();
     for (const endpoint of this.remote.keys()) {
-      const screen = this.screenTrack(endpoint);
-      const audio = screen ? trackOf(this, endpoint, 'screenAudio') : null;
-      this.attachAudio(endpoint, audio, 'screenAudio');
+      this.attachScreenAudio(endpoint);
     }
     if (this.mode === 'call' || this.mode === 'mini') {
       this.renderTiles();
@@ -1854,11 +1793,9 @@ class CallStage {
     }
     if (slot === 'relayAudio') this.syncRelayAudios(endpoint);
     if (slot === 'screenAudio' || slot === 'screen') {
-      const playing = this.screenTrack(endpoint);
-      const audio = playing ? trackOf(this, endpoint, 'screenAudio') : null;
-      this.attachAudio(endpoint, audio, 'screenAudio');
+      this.attachScreenAudio(endpoint);
     }
-    if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
+    this.renderTiles();
   }
 
   syncRelayAudios(relay) {
@@ -1873,12 +1810,10 @@ class CallStage {
   onRelay(endpoint) {
     if (endpoint) {
       this.attachAudio(endpoint, trackOf(this, endpoint, 'mic'));
-      const screen = this.screenTrack(endpoint);
-      const audio = screen ? trackOf(this, endpoint, 'screenAudio') : null;
-      this.attachAudio(endpoint, audio, 'screenAudio');
+      this.attachScreenAudio(endpoint);
     }
     this.paintSound();
-    if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
+    this.renderTiles();
   }
 
   onQuality(quality) {
@@ -1912,7 +1847,7 @@ class CallStage {
         this.attachAudio(endpoint, trackOf(this, endpoint, slot), slot);
       }
       if (ended && slot === 'relayAudio') this.syncRelayAudios(endpoint);
-      if (this.mode === 'call' || this.mode === 'mini') this.renderTiles();
+      this.renderTiles();
     };
     this.trackListeners.set(track, refresh);
     track.addEventListener('ended', refresh);
@@ -1927,7 +1862,7 @@ class CallStage {
     this.syncControls();
     this.paintPreview();
     this.paintStats();
-    this.showNote(this.media.message || this.media.notice);
+    this.showNote(this.media.note);
     if (this.mode !== 'call' && this.mode !== 'mini') return;
     this.renderTiles();
     this.pushTracks();
@@ -2105,7 +2040,7 @@ class CallStage {
   syncControls() {
     this.recording?.paint();
     this.paintSound();
-    const roots = [this.host, this.mini, this.pip?.root];
+    const roots = [this.host, ...this.miniRoots()];
     for (const root of roots) {
       if (root) this.paintButtons(root);
     }
@@ -2121,8 +2056,7 @@ class CallStage {
     const join = host.querySelector('[data-action="join"]');
     if (!join) return;
     const admission = admissionOf(this.preview, this.token);
-    const blocked =
-      admission.action === 'locked' || admission.action === 'full';
+    const blocked = BLOCKED.includes(admission.action);
     join.disabled = this.joining || blocked;
     const asking = admission.action === 'lobby';
     join.textContent = asking ? 'ask to join' : 'join';
@@ -2206,7 +2140,7 @@ class CallStage {
   }
 
   showNote(text) {
-    this.mediaNote = typeof text === 'string' ? text : '';
+    this.mediaNote = textOf(text);
     this.paintNote();
   }
 
@@ -2295,8 +2229,7 @@ class CallStage {
   }
 
   async setHand(value) {
-    const session = this.session;
-    if (!session) return;
+    if (!this.session) return;
     await this.hooks.update({ hand: value });
   }
 
@@ -2649,6 +2582,7 @@ class CallStage {
   }
 
   renderTiles() {
+    if (this.mode !== 'call' && this.mode !== 'mini') return;
     if (this.mode === 'mini') {
       this.paintMini();
       this.updateViewHints();
@@ -2658,17 +2592,29 @@ class CallStage {
     if (!grid) return;
     const endpoints = this.tileList();
     const seen = new Set(endpoints);
+    const kept = new Map();
     const tiles = grid.querySelectorAll('.call-tile:not(.screen-tile)');
     for (const tile of tiles) {
-      if (!seen.has(tile.dataset.endpoint)) tile.remove();
+      const endpoint = tile.dataset.endpoint;
+      if (seen.has(endpoint)) kept.set(endpoint, tile);
+      else tile.remove();
     }
-    for (const endpoint of endpoints) this.paintTile(grid, endpoint);
+    for (const endpoint of endpoints) {
+      this.paintTile(grid, endpoint, kept.get(endpoint));
+    }
     this.paintScreens(grid, endpoints);
     this.paintStats();
     this.applyLayout();
     this.paintSpeaking();
     this.paintMini();
     this.updateViewHints();
+  }
+
+  stopLayout() {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    clearInterval(this.resizeTimer);
+    this.resizeTimer = null;
   }
 
   observeLayout() {
@@ -2763,7 +2709,7 @@ class CallStage {
     const result = callLayout(people, {
       width: Math.max(0, grid.clientWidth - 16),
       height: Math.max(0, grid.clientHeight - 16),
-      mobile: phoneView(),
+      mobile: this.phone?.matches,
       self: this.session?.endpoint,
       layout: this.layout,
       strip: this.strip,
@@ -2839,12 +2785,8 @@ class CallStage {
     this.viewHints?.update(remote);
   }
 
-  paintTile(grid, endpoint) {
-    let tile = null;
-    const tiles = grid.querySelectorAll('.call-tile:not(.screen-tile)');
-    for (const item of tiles) {
-      if (item.dataset.endpoint === endpoint) tile = item;
-    }
+  paintTile(grid, endpoint, found) {
+    let tile = found;
     if (!tile) {
       tile = createTile(endpoint);
       grid.append(tile);
@@ -2856,9 +2798,7 @@ class CallStage {
     const color = colorOf(endpoint);
     paintPerson(tile, this.videoTrack(endpoint), name, color);
     const chip = tile.querySelector('.call-name');
-    const mic = local
-      ? this.media?.micOn
-      : this.people.find((person) => person.endpoint === endpoint)?.mic;
+    const mic = local ? this.media?.micOn : this.personOf(endpoint)?.mic;
     const paused = local && this.media?.cameraOn && this.media?.cameraPaused;
     const status = paused ? ' · camera paused' : '';
     const via = this.relaySuffix(endpoint);
@@ -2879,18 +2819,17 @@ class CallStage {
   }
 
   peerOf(endpoint) {
-    return (
-      this.people.find((person) => person.endpoint === endpoint)?.peer ||
-      peerOf(endpoint)
-    );
+    return this.personOf(endpoint)?.peer || peerOf(endpoint);
+  }
+
+  statsVisible(endpoint) {
+    if (this.statsAll) return !this.statsHidden.has(endpoint);
+    return this.statsShown.has(endpoint);
   }
 
   toggleStats(endpoint = '') {
     if (endpoint) {
-      const shown = this.statsAll
-        ? !this.statsHidden.has(endpoint)
-        : this.statsShown.has(endpoint);
-      if (shown) {
+      if (this.statsVisible(endpoint)) {
         this.statsShown.delete(endpoint);
         this.statsHidden.add(endpoint);
       } else {
@@ -2916,16 +2855,15 @@ class CallStage {
 relaying for ${from} and ${to}`;
   }
 
-  paintStats() {
+  paintStats(only = '') {
     const tiles = this.host?.querySelectorAll('.call-tile') ?? [];
     for (const tile of tiles) {
       const endpoint = tile.dataset.endpoint;
+      if (only && endpoint !== only) continue;
       const local = endpoint === this.session?.endpoint;
       const sample = this.stats.get(endpoint);
       const overlay = tile.querySelector('.tile-stats');
-      const shown = this.statsAll
-        ? !this.statsHidden.has(endpoint)
-        : this.statsShown.has(endpoint);
+      const shown = this.statsVisible(endpoint);
       overlay.classList.toggle('hidden', !shown);
       if (shown) overlay.textContent = this.statsOf(local, sample);
       const bars = tile.querySelector('.connection-bars');
@@ -2944,31 +2882,26 @@ relaying for ${from} and ${to}`;
 
   screenTrack(endpoint) {
     if (endpoint === this.session?.endpoint) {
-      const track = this.media?.screenTrack;
-      return track?.readyState === 'live' ? track : null;
+      return liveOf(this.media?.screenTrack);
     }
-    const sharing = this.people.some(
-      (person) => person.endpoint === endpoint && person.screen,
-    );
-    if (!sharing) return null;
-    const track = trackOf(this, endpoint, 'screen');
-    return track?.readyState === 'live' ? track : null;
+    if (!this.personOf(endpoint)?.screen) return null;
+    return liveOf(trackOf(this, endpoint, 'screen'));
   }
 
   paintScreens(grid, endpoints) {
+    const kept = new Map();
     for (const tile of grid.querySelectorAll('.screen-tile')) {
-      if (!this.screenTrack(tile.dataset.endpoint)) {
-        showTrack(tile.querySelector('video'), null, false);
-        tile.remove();
+      if (this.screenTrack(tile.dataset.endpoint)) {
+        kept.set(tile.dataset.endpoint, tile);
+        continue;
       }
+      showTrack(tile.querySelector('video'), null);
+      tile.remove();
     }
     for (const endpoint of endpoints) {
       const track = this.screenTrack(endpoint);
       if (!track) continue;
-      let tile = null;
-      for (const item of grid.querySelectorAll('.screen-tile')) {
-        if (item.dataset.endpoint === endpoint) tile = item;
-      }
+      let tile = kept.get(endpoint);
       if (!tile) {
         tile = createTile(endpoint);
         tile.classList.add('screen-tile');
@@ -2976,7 +2909,7 @@ relaying for ${from} and ${to}`;
         tile.querySelector('.avatar-wrap').remove();
         grid.append(tile);
       }
-      showTrack(tile.querySelector('video'), track, false);
+      showTrack(tile.querySelector('video'), track);
       const local = endpoint === this.session?.endpoint;
       const localOnly = local && !this.media.screenShared;
       const label = localOnly ? 'captured, not shared' : 'screen';
@@ -2995,12 +2928,13 @@ relaying for ${from} and ${to}`;
   }
 
   paintMini() {
-    if (!this.session) return;
+    const roots = this.miniRoots();
+    if (!this.session || roots.length === 0) return;
     const endpoint = this.featured();
     const local = endpoint === this.session.endpoint;
     const name = this.nameOf(endpoint);
     const color = colorOf(endpoint);
-    for (const root of this.miniRoots()) {
+    for (const root of roots) {
       root.dataset.endpoint = endpoint;
       root.classList.toggle('local', local);
       paintPerson(root, this.videoTrack(endpoint), name, color);
@@ -3080,27 +3014,14 @@ relaying for ${from} and ${to}`;
       return live ? track : null;
     }
     if (this.session?.isAudioOnly(endpoint)) return null;
-    let listed = false;
-    let cameraOn = false;
-    for (const person of this.people) {
-      if (person.endpoint !== endpoint) continue;
-      listed = true;
-      cameraOn = person.camera === true;
-      break;
-    }
-    if (listed && !cameraOn) return null;
-    const track = trackOf(this, endpoint, 'camera');
-    const live = track && track.readyState === 'live' && !track.muted;
-    if (!live) return null;
-    return track;
+    const person = this.personOf(endpoint);
+    if (person && person.camera !== true) return null;
+    return shownOf(trackOf(this, endpoint, 'camera'));
   }
 
   nameOf(endpoint) {
     if (endpoint === this.session?.endpoint) return this.hooks.nick() || 'you';
-    for (const person of this.people) {
-      if (person.endpoint === endpoint) return person.nick || 'guest';
-    }
-    return 'guest';
+    return this.personOf(endpoint)?.nick || 'guest';
   }
 
   relaySuffix(endpoint) {
@@ -3108,28 +3029,34 @@ relaying for ${from} and ${to}`;
     return relay ? ` · via ${this.nameOf(relay)}` : '';
   }
 
+  attachScreenAudio(endpoint) {
+    const screen = this.screenTrack(endpoint);
+    const audio = screen ? trackOf(this, endpoint, 'screenAudio') : null;
+    this.attachAudio(endpoint, audio, 'screenAudio');
+  }
+
+  dropAudio(audio) {
+    this.volume?.detach(audio);
+    audio.srcObject = null;
+    audio.remove();
+  }
+
   attachAudio(endpoint, track, slot = 'mic') {
     const key = slot === 'mic' ? endpoint : `${endpoint}:${slot}`;
     let current = this.audios.get(key) ?? null;
-    const live = track && track.readyState === 'live';
-    if (!live) {
-      if (current) this.volume?.detach(current);
-      current?.remove();
-      if (current) current.srcObject = null;
+    if (!liveOf(track)) {
+      if (current) this.dropAudio(current);
       this.audios.delete(key);
       return;
     }
     const before = current?.srcObject?.getAudioTracks?.()[0];
     if (current && before !== track) {
-      this.volume?.detach(current);
-      current.srcObject = null;
-      current.remove();
+      this.dropAudio(current);
       current = null;
     }
     const audio = current ?? document.createElement('audio');
     audio.autoplay = true;
-    const playing = audio.srcObject?.getAudioTracks?.()[0] ?? null;
-    if (playing !== track) audio.srcObject = streamOf(track);
+    if (!current) audio.srcObject = streamOf(track);
     this.audios.set(key, audio);
     audio.dataset.slot = slot;
     audio.dataset.endpoint = endpoint;
@@ -3153,7 +3080,7 @@ relaying for ${from} and ${to}`;
 
   paintSound() {
     const blocked = this.soundBlocked || this.session?.relaySoundBlocked;
-    for (const root of [this.host, this.mini, this.pip?.root]) {
+    for (const root of [this.host, ...this.miniRoots()]) {
       const button = root?.querySelector('[data-action="enable-sound"]');
       if (button) button.classList.toggle('hidden', !blocked);
     }
@@ -3173,11 +3100,7 @@ relaying for ${from} and ${to}`;
   }
 
   stopAudios() {
-    for (const audio of this.audios.values()) {
-      this.volume?.detach(audio);
-      audio.srcObject = null;
-      audio.remove();
-    }
+    for (const audio of this.audios.values()) this.dropAudio(audio);
     this.audios.clear();
   }
 }

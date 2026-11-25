@@ -53,6 +53,5 @@ const stepAutoLower = (state, input, now) => {
   return { state: { since: -Infinity }, lower: true };
 };
 
-export { REACTIONS, REACTION_LIMIT, REACTION_WINDOW_MS, REACTION_SHOW_MS };
-export { AUTO_LOWER_MS, isReaction, orderOf, rosterOf, raisedOf };
+export { REACTIONS, REACTION_SHOW_MS, isReaction, orderOf, rosterOf };
 export { createLimiter, takeReaction, createAutoLower, stepAutoLower };

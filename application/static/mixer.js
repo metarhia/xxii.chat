@@ -1,7 +1,9 @@
-import { choose, flagOf } from './layout.js';
+import { choose, flagOf, bounded } from './layout.js';
 import { idOf } from './members.js';
+import { tickOn } from './clock.js';
+import { disconnectNode } from './call-volume.js';
+import { isHashObject } from './metautil.js';
 
-const CLOCK_URL = new URL('./clock-worker.js', import.meta.url);
 const CLOCK_FPS = 30;
 const SAMPLE_RATE = 48000;
 const RAMP_SECONDS = 0.05;
@@ -21,22 +23,19 @@ const RULES = {
   custom: (isShown, volume) => volume,
 };
 
-const isRecord = (value) => typeof value === 'object' && value !== null;
-
 const mixOf = (options) => {
   const input = options ?? {};
   return {
     audio: choose(input.audio, AUDIO, 'all'),
     includeMe: flagOf(input.includeMe, true),
     screenAudio: flagOf(input.screenAudio, true),
-    volumes: isRecord(input.volumes) ? input.volumes : {},
+    volumes: isHashObject(input.volumes) ? input.volumes : {},
   };
 };
 
 const volumeOf = (volumes, endpoint) => {
   const value = Object.hasOwn(volumes, endpoint) ? volumes[endpoint] : 1;
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(MAX_VOLUME, Math.max(0, value));
+  return bounded(value, 0, MAX_VOLUME, 1);
 };
 
 const gainOf = (entry, mix, onScreen) => {
@@ -97,14 +96,6 @@ const createMaster = (context) => {
   return { master, limiter, output };
 };
 
-const disconnectNode = (node) => {
-  try {
-    node.disconnect();
-  } catch {
-    return;
-  }
-};
-
 const rampTo = (param, value, now, seconds) => {
   if (typeof param.cancelAndHoldAtTime === 'function') {
     param.cancelAndHoldAtTime(now);
@@ -130,8 +121,7 @@ class Mixer {
   #options = null;
   #onScreen = null;
   #shared = null;
-  #worker = null;
-  #listener = null;
+  #untick = null;
   #context = null;
   #chain = null;
   #nodes = new Map();
@@ -162,14 +152,8 @@ class Mixer {
   }
 
   start() {
-    if (this.#listener || this.#isStopped) return;
-    const worker = this.#shared ?? new Worker(CLOCK_URL);
-    this.#worker = worker;
-    this.#listener = ({ data }) => {
-      if (data.type === 'tick') this.update();
-    };
-    worker.addEventListener('message', this.#listener);
-    if (!this.#shared) worker.postMessage({ type: 'start', fps: CLOCK_FPS });
+    if (this.#untick || this.#isStopped) return;
+    this.#untick = tickOn(this.#shared, CLOCK_FPS, () => this.update());
     const context = this.#context;
     if (context.state === 'suspended') context.resume().catch(() => undefined);
     this.update();
@@ -178,13 +162,9 @@ class Mixer {
   stop() {
     if (this.#isStopped) return;
     this.#isStopped = true;
-    const worker = this.#worker;
-    if (worker) worker.removeEventListener('message', this.#listener);
-    if (worker && !this.#shared) {
-      worker.postMessage({ type: 'stop' });
-      worker.terminate();
-    }
-    for (const id of Array.from(this.#nodes.keys())) this.#drop(id);
+    this.#untick?.();
+    this.#untick = null;
+    for (const id of this.#nodes.keys()) this.#drop(id);
     this.#clearMusic();
     this.#dropClip();
     this.#gains.clear();
@@ -192,8 +172,6 @@ class Mixer {
     disconnectNode(this.#chain.limiter);
     this.track.stop();
     this.#context.close().catch(() => undefined);
-    this.#worker = null;
-    this.#listener = null;
   }
 
   update() {
@@ -321,10 +299,10 @@ class Mixer {
       this.#gains.set(source.id, source.gain);
       this.#apply(source);
     }
-    for (const id of Array.from(this.#nodes.keys())) {
+    for (const id of this.#nodes.keys()) {
       if (!seen.has(id)) this.#drop(id);
     }
-    for (const id of Array.from(this.#gains.keys())) {
+    for (const id of this.#gains.keys()) {
       if (!seen.has(id)) this.#gains.delete(id);
     }
   }

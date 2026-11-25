@@ -1,5 +1,6 @@
 import { createButton } from './record-panel.js';
 import { NAME_LENGTH, MIN_BITRATE, MAX_BITRATE } from './whip.js';
+import { labeled } from './view.js';
 
 const MBPS = 1000000;
 
@@ -8,12 +9,7 @@ const createField = (name, label, type, attributes = {}) => {
   control.dataset.stream = name;
   control.type = type;
   Object.assign(control, attributes);
-  const field = document.createElement('label');
-  field.className = 'call-field';
-  const caption = document.createElement('span');
-  caption.textContent = label;
-  field.append(caption, control);
-  return field;
+  return labeled(control, label);
 };
 
 const createAction = (name, label, id = '') => {
@@ -133,5 +129,5 @@ const readEditor = (editor) => {
   };
 };
 
-export { MBPS, createDestinationControls, createDestinationRow };
+export { createDestinationControls, createDestinationRow };
 export { fillEditor, readEditor };

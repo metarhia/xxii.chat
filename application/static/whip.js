@@ -1,3 +1,5 @@
+import { readJson, writeJson } from './view.js';
+
 const STORAGE_KEY = 'xxii:destinations';
 const NAME_LENGTH = 48;
 const MIN_BITRATE = 1000000;
@@ -103,22 +105,11 @@ const destinationsOf = (raw) => {
   return result;
 };
 
-const readDestinations = (storage = globalThis.localStorage) => {
-  try {
-    return destinationsOf(JSON.parse(storage.getItem(STORAGE_KEY)));
-  } catch {
-    return [];
-  }
-};
+const readDestinations = (storage = globalThis.localStorage) =>
+  destinationsOf(readJson(storage, STORAGE_KEY));
 
-const writeDestinations = (destinations, storage = globalThis.localStorage) => {
-  try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(destinations));
-    return true;
-  } catch {
-    return false;
-  }
-};
+const writeDestinations = (destinations, storage = globalThis.localStorage) =>
+  writeJson(storage, STORAGE_KEY, destinations);
 
 const rankOf = (codec, order) => {
   const index = order.indexOf(codec.mimeType.toLowerCase());
@@ -391,9 +382,8 @@ class WhipStream {
     const { token } = this.#destination;
     if (this.#location && !this.#isRelayed) {
       const headers = headersOf(token);
-      fetch(this.#location, { method: 'DELETE', headers, keepalive: true })
-        .then(() => undefined)
-        .catch(() => undefined);
+      const options = { method: 'DELETE', headers, keepalive: true };
+      fetch(this.#location, options).catch(() => undefined);
     }
     this.#clear();
     this.#connection?.close();
@@ -601,7 +591,7 @@ class WhipStream {
 }
 
 export { STORAGE_KEY, NAME_LENGTH, DEFAULT_BITRATE, MAX_ENABLED };
-export { MIN_BITRATE, MAX_BITRATE, MAX_ATTEMPTS };
+export { MIN_BITRATE, MAX_BITRATE };
 export { WhipError, WhipStream };
 export { isEndpointUrl, problemOf, destinationOf, destinationsOf };
 export { readDestinations, writeDestinations };
