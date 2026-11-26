@@ -96,6 +96,7 @@ class RecordingWriter {
     this.#onError = (event) => {
       const message = event?.message || 'The recording worker failed';
       this.#reject(new Error(message));
+      this.stop();
     };
     this.#worker.addEventListener('message', this.#onMessage);
     this.#worker.addEventListener('error', this.#onError);
@@ -132,8 +133,8 @@ class RecordingWriter {
     return reply.meta;
   }
 
-  async close(recording, duration, people) {
-    const message = { type: 'close', recording, duration, people };
+  async close(recording, duration, people, mime) {
+    const message = { type: 'close', recording, duration, people, mime };
     const reply = await this.#request(message);
     return reply.meta;
   }
@@ -142,6 +143,14 @@ class RecordingWriter {
     const message = { type: 'abort', recording, duration };
     const reply = await this.#request(message);
     return reply.meta;
+  }
+
+  discardEdit(recording) {
+    return this.#request({ type: 'discard-edit', recording });
+  }
+
+  finishEdit(recording, duration) {
+    return this.#request({ type: 'finish-edit', recording, duration });
   }
 
   stop() {

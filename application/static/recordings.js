@@ -3,6 +3,7 @@ import { programFileOf, recordingUrlOf, routeOf } from './recording-files.js';
 import { dateText, titleOf, timeText, sizeText } from './recording-files.js';
 import { isFolderRecording, readMeta } from './recording-files.js';
 import { recordingsOf } from './recording-files.js';
+import { isPendingEdit, recordingLockOf } from './recording-files.js';
 import { exportNameOf, downloadUrlOf, exportFile } from './recording-export.js';
 import { pickExportFile, exportToFolder } from './recording-export.js';
 import { canPickFolder, folderHandle } from './recording-folder.js';
@@ -11,9 +12,11 @@ import { cloneTemplate } from './view.js';
 import { createIcon } from './icons.js';
 import { Menu, Press } from './overlays.js';
 import { RecordingWriter } from './recorder.js';
+import { RecordingEditor } from './recording-editor.js';
 
 const CARD_ACTIONS = {
   play: (list, card) => list.playCard(card),
+  edit: (list, card) => list.openEditor(card),
   download: (list, card) => {
     card.row.querySelector('.recording-download').click();
   },
@@ -118,7 +121,7 @@ const readEntry = async (directory) => {
   try {
     const handle = await directory.getFileHandle(META_FILE);
     const meta = await readMeta(handle);
-    if (typeof meta?.state !== 'string') return null;
+    if (typeof meta?.state !== 'string' || isPendingEdit(id, meta)) return null;
     const poster = await directory.getFileHandle(POSTER_FILE).catch(() => null);
     const posterUrl = poster ? recordingUrlOf(id, POSTER_FILE) : '';
     return { ...meta, id, posterUrl };
@@ -149,13 +152,28 @@ const countRecordings = async (storage) => {
   return entries.length;
 };
 
+const withRecording = (id, options, run) => {
+  if (!navigator.locks?.request) return run(true);
+  return navigator.locks.request(
+    recordingLockOf(id),
+    {
+      ifAvailable: true,
+      ...options,
+    },
+    run,
+  );
+};
+
 const removeRecording = async (recordings, entry) => {
   try {
-    await recordings.removeEntry(entry.id, { recursive: true });
-    if (isFolderRecording(entry)) {
-      await folderHandle(null, entry.id).catch(() => {});
-    }
-    return true;
+    return await withRecording(entry.id, {}, async (lock) => {
+      if (!lock) return false;
+      await recordings.removeEntry(entry.id, { recursive: true });
+      if (isFolderRecording(entry)) {
+        await folderHandle(null, entry.id).catch(() => {});
+      }
+      return true;
+    });
   } catch {
     return false;
   }
@@ -227,6 +245,8 @@ class Recordings {
     this.cards = new WeakMap();
     this.parts = new Map();
     this.partRevision = 0;
+    this.editor = null;
+    this.editorLayers = overlay.layers;
     this.menu = createCardMenu(overlay);
     this.press = new Press({
       hold: (row, x, y) => this.openMenu(row, { point: { x, y } }),
@@ -333,6 +353,7 @@ class Recordings {
   }
 
   close() {
+    this.closeEditor();
     this.revision++;
     this.linked = null;
     this.menu.close();
@@ -343,6 +364,10 @@ class Recordings {
   }
 
   dismiss() {
+    if (this.editor) {
+      this.editor.requestClose();
+      return true;
+    }
     if (this.menu.dismiss('escape')) return true;
     if (this.selected) {
       this.stopPlayback();
@@ -499,6 +524,71 @@ class Recordings {
     return part ? this.play(entry, part) : this.play(entry);
   }
 
+  openEditor({ entry, labels }) {
+    if (this.editor) return;
+    this.stopPlayback();
+    this.editor = new RecordingEditor(entry, {
+      name: textOf(entry.title) || labels.name,
+      source: (part, signal) => this.editSource(entry, part, signal),
+      withSource: (run) => this.withEditSource(entry, run),
+      close: () => this.closeEditor(),
+      saved: (id) => {
+        this.closeEditor();
+        this.link([id]);
+        this.refresh();
+      },
+    });
+    this.editorLayers?.push('recording-editor');
+    this.editor.open();
+  }
+
+  async withEditSource(entry, run) {
+    if (!navigator.locks?.request) {
+      throw new Error('Recording locks are unavailable.');
+    }
+    return withRecording(entry.id, { mode: 'shared' }, async (lock) => {
+      if (!lock) throw new Error('The recording is still open.');
+      const directory = await this.recordings.getDirectoryHandle(entry.id);
+      const file = await directory.getFileHandle(META_FILE);
+      if (!canChange(await readMeta(file))) {
+        throw new Error('The recording is still open.');
+      }
+      return run();
+    });
+  }
+
+  async editSource(entry, part, signal) {
+    signal.throwIfAborted();
+    if (entry.segments) {
+      try {
+        const file = await partFileOf(entry, part, () => !signal.aborted);
+        signal.throwIfAborted();
+        return file;
+      } catch (error) {
+        signal.throwIfAborted();
+        const label = `Part ${part.index + 1} (${part.name})`;
+        throw new Error(`${label}. ${error.message}`, { cause: error });
+      }
+    }
+    if (navigator.serviceWorker?.controller) {
+      return recordingUrlOf(entry.id, programFileOf(entry.extension));
+    }
+    return this.sourceFile(entry);
+  }
+
+  requestEditorClose() {
+    if (!this.editor) return true;
+    this.editor.requestClose();
+    return false;
+  }
+
+  closeEditor() {
+    if (!this.editor) return;
+    this.editor.close();
+    this.editor = null;
+    this.editorLayers?.pop('recording-editor');
+  }
+
   partOf(entry) {
     if (!isFolderRecording(entry)) return null;
     const index = this.parts.get(entry.id) ?? 0;
@@ -531,6 +621,9 @@ class Recordings {
     const { exports, entry } = card;
     const isSaving = card.row.dataset.saving !== undefined;
     const items = [{ action: 'play', label: 'Play', disabled: !card.canPlay }];
+    if (card.canPlay && entry.size !== 0) {
+      items.push({ action: 'edit', label: 'Edit' });
+    }
     if (exports.download) items.push({ action: 'download', label: 'Download' });
     if (exports.saveAs) {
       items.push({ action: 'save-as', label: 'Save as…', disabled: isSaving });
@@ -738,15 +831,21 @@ class Recordings {
     this.isChanging = true;
     this.setStatus('');
     try {
-      const directory = await this.recordings.getDirectoryHandle(entry.id);
-      const handle = await directory.getFileHandle(META_FILE);
-      const meta = await readMeta(handle);
-      if (!canChange(meta)) {
-        this.setStatus('The recording is still open.');
-        return false;
-      }
-      await update(handle, meta);
-      return true;
+      return await withRecording(entry.id, {}, async (lock) => {
+        if (!lock) {
+          this.setStatus('The recording is in use.');
+          return false;
+        }
+        const directory = await this.recordings.getDirectoryHandle(entry.id);
+        const handle = await directory.getFileHandle(META_FILE);
+        const meta = await readMeta(handle);
+        if (!canChange(meta)) {
+          this.setStatus('The recording is still open.');
+          return false;
+        }
+        await update(handle, meta);
+        return true;
+      });
     } catch {
       this.setStatus(`Could not ${action} this recording.`);
       return false;

@@ -187,7 +187,7 @@ const createBar = () => {
   const sound = createElement('button', 'link-btn call-sound');
   sound.type = 'button';
   sound.dataset.action = 'enable-sound';
-  sound.textContent = 'Enable sound';
+  sound.textContent = 'enable sound';
   const footer = createElement('footer', 'call-controls');
   footer.setAttribute('role', 'toolbar');
   footer.setAttribute('aria-label', 'Call controls');

@@ -2,6 +2,7 @@ const RECORDINGS = 'recordings';
 const META_FILE = 'meta.json';
 const POSTER_FILE = 'poster.jpg';
 const PROGRAM = 'program';
+const EDIT_PREFIX = 'edited-';
 const STATES = ['recording', 'paused', 'done', 'interrupted'];
 const OPEN_STATES = ['recording', 'paused'];
 
@@ -175,6 +176,11 @@ const createMeta = (input) => {
 
 const isOpen = (meta) => OPEN_STATES.includes(meta?.state);
 
+const recordingLockOf = (id) => `xxii-recording-${id}`;
+
+const isPendingEdit = (id, meta) =>
+  id.startsWith(EDIT_PREFIX) && meta?.state !== 'done';
+
 const isFolderRecording = (meta) => Array.isArray(meta.segments);
 
 const progressOf = (meta, event) => {
@@ -278,3 +284,4 @@ export { recordingUrlOf, timeText, sizeText };
 export { typeOf, extensionOf, routeOf, rangeOf };
 export { createMeta, nextMeta, isOpen, scheduleOf, markedOf, spaceOf };
 export { isFolderRecording, readMeta, recordingsOf };
+export { EDIT_PREFIX, isPendingEdit, recordingLockOf };

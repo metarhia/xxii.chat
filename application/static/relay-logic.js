@@ -30,6 +30,15 @@ const relayDenial = ({ joined, linked, busy, blocked }) => {
   return '';
 };
 
+const canSilence = (audio) => {
+  try {
+    audio.volume = 0;
+    return audio.volume === 0;
+  } catch {
+    return false;
+  }
+};
+
 const readRelayMessage = (message, local, sender) => {
   if (message?.type !== 'relay') return null;
   const { action, from, to, reason, peer } = message;
@@ -80,6 +89,7 @@ export {
   needsRelay,
   relayCandidates,
   relayDenial,
+  canSilence,
   readRelayMessage,
   relayVideoSource,
   relaySlot,
