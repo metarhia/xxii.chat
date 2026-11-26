@@ -198,18 +198,6 @@ const createChannel = (replica, entity, channel) => {
 const describe = (replica, entity, id, description) =>
   replica.assign(entity, id, { description });
 
-const createFolder = (replica, folder) => {
-  const { id, name, icon, owner, parent, created } = folder;
-  const fields = { name, icon, owner, parent, created };
-  return replica.assign('folder', id, { ...fields, visibility: 'unlisted' });
-};
-
-const setVisibility = (replica, id, visibility) =>
-  replica.assign('folder', id, { visibility });
-
-const placeItem = (replica, folder, item, active) =>
-  replica.assign('entry', `${folder}/${item}`, { folder, item, active });
-
 const createMessage = (replica, message) => {
   const { id, chat, author, nick, content, timestamp } = message;
   const fields = { chat, author, nick, content, timestamp };
@@ -279,7 +267,6 @@ const pin = (replica, record, pinned) =>
   replica.assign(entityOf(record), record.id, { pinned });
 
 const byCreated = (a, b) => a.created - b.created || (a.name > b.name ? 1 : -1);
-const byName = (a, b) => a.name.localeCompare(b.name);
 const byTime = (a, b) => a.timestamp - b.timestamp;
 
 const listChannels = (replica, entity) => {
@@ -298,53 +285,6 @@ const listAuthors = (replica) => {
     if (record.nick !== undefined) authors.push({ id, ...record });
   }
   return authors;
-};
-
-const isVisible = (folder, viewer) =>
-  folder.visibility === 'public' || folder.owner === viewer;
-
-const listFolders = (replica, viewer) => {
-  const folders = new Map();
-  for (const id of replica.keys('folder')) {
-    const record = replica.get(id);
-    const isShown = record.name !== undefined && isVisible(record, viewer);
-    if (isShown) folders.set(id, { id, ...record });
-  }
-  return folders;
-};
-
-// Concurrent moves can make parents a loop, such folders stay at the root
-const isInLoop = (folders, folder) => {
-  const seen = new Set();
-  let current = folders.get(folder.parent);
-  while (current && !seen.has(current.id)) {
-    if (current.id === folder.id) return true;
-    seen.add(current.id);
-    current = folders.get(current.parent);
-  }
-  return false;
-};
-
-const folderTree = (replica, viewer) => {
-  const folders = listFolders(replica, viewer);
-  const children = new Map();
-  for (const folder of folders.values()) {
-    const isNested = folders.has(folder.parent) && !isInLoop(folders, folder);
-    const parent = isNested ? folder.parent : '';
-    const siblings = children.get(parent) ?? [];
-    siblings.push(folder);
-    children.set(parent, siblings);
-  }
-  for (const siblings of children.values()) siblings.sort(byName);
-  const items = new Map();
-  for (const id of replica.keys('entry')) {
-    const { folder, item, active } = replica.get(id);
-    if (active !== true || !folders.has(folder)) continue;
-    const placed = items.get(folder) ?? new Set();
-    placed.add(item);
-    items.set(folder, placed);
-  }
-  return { folders, children, items };
 };
 
 const isDeleted = (record) => typeof record.deleted === 'number';
@@ -534,11 +474,10 @@ export { MAX_LENGTH, TEXT_LENGTH, QUOTE_LENGTH, MAX_FILE_SIZE, validate, seed };
 export { pairOf, isPair, directUnit };
 export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
-export { createFolder, setVisibility, placeItem };
 export { createMessage, editMessage, deleteMessage, isDeleted };
 export { createPost, startCall, endCall };
 export { startRecording, stopRecording };
 export { attachFile, setReaction, pin };
-export { listChannels, listAuthors, folderTree, activityOf };
+export { listChannels, listAuthors, activityOf };
 export { threadsOf, lineageOf };
 export { attachmentsOf, reactionsOf, unreadOf, filesOf };

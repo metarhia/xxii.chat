@@ -9,6 +9,32 @@ const SCREEN = ['M1.5 2.5h13V11h-13z', 'M5.5 14h5M8 11v3'];
 const SLASH = 'M2.5 1.5l11 13';
 const CIRCLE = 'M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z';
 
+const GEAR_TEETH = 8;
+const GEAR_BASE = 5;
+const GEAR_TIP = 6.9;
+const GEAR_FLANK = 15;
+const GEAR_CROWN = 8;
+
+const pointAt = (degrees, radius) => {
+  const angle = ((degrees - 90) * Math.PI) / 180;
+  const x = 8 + radius * Math.cos(angle);
+  const y = 8 + radius * Math.sin(angle);
+  return `${x.toFixed(2)} ${y.toFixed(2)}`;
+};
+
+const toothAt = (center) => [
+  pointAt(center - GEAR_FLANK, GEAR_BASE),
+  pointAt(center - GEAR_CROWN, GEAR_TIP),
+  pointAt(center + GEAR_CROWN, GEAR_TIP),
+  pointAt(center + GEAR_FLANK, GEAR_BASE),
+];
+
+const createGear = () => {
+  const step = 360 / GEAR_TEETH;
+  const teeth = Array.from({ length: GEAR_TEETH }, (_, i) => toothAt(i * step));
+  return `M${teeth.flat().join('L')}z`;
+};
+
 const ICONS = {
   mic: { paths: MIC },
   'mic-off': { paths: [...MIC, SLASH] },
@@ -61,12 +87,7 @@ const ICONS = {
   caret: { paths: ['m4 10 4-4 4 4'] },
   check: { paths: ['M3 8.5 6.5 12 13 4.5'] },
   settings: {
-    paths: [
-      'M8 3.8a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4z',
-      'M8 6.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z',
-      'M13.4 8H15M8 13.4V15M2.6 8H1M8 2.6V1M11.8 11.8l1.15 1.15',
-      'M4.2 11.8l-1.15 1.15M4.2 4.2 3.05 3.05M11.8 4.2l1.15-1.15',
-    ],
+    paths: [createGear(), 'M8 6.1a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8z'],
   },
   recordings: {
     paths: ['M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z'],

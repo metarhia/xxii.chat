@@ -209,7 +209,8 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       await wait(closed);
       await wait(`return directCamera.readyState === 'ended';`);
       const card = `.recording-card[data-id="${id}"]`;
-      await wait(`return !!document.querySelector('${card}');`);
+      await wait(`return !!document.querySelector(
+        '${card} [data-action="watch-recording"]');`);
       const saved = await run(`const replica = app.replicaOf(app.chat);
       restoreConfirm();
       return {
@@ -223,7 +224,7 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       assert.equal(saved.meta.call, '');
       assert.equal(saved.meta.chat, saved.chat);
       assert.ok(saved.meta.stopped >= saved.meta.timestamp);
-      assert.match(saved.text, /^● alex captured \d+ min$/);
+      assert.match(saved.text, /^● alex captured \d+ min▶ watch$/);
       assert.equal(saved.confirms.length, 2);
       assert.match(saved.confirms[0], /Stop the recording/);
       assert.deepEqual(saved.general, []);

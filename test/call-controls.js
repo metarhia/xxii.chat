@@ -371,6 +371,15 @@ test(
         `return document.querySelectorAll(
         '${MENU} [data-action=react]').length === 6 ? true : false;`,
       );
+      const lines = await run(
+        left,
+        `const row = document.querySelector('${MENU} .menu-reactions');
+        const tops = [...row.children].map((button) =>
+          Math.round(button.getBoundingClientRect().top));
+        return [...new Set(tops)].map((top) =>
+          tops.filter((value) => value === top).length);`,
+      );
+      assert.deepEqual(lines, [3, 3]);
       await run(left, click(`${MENU} [data-action=react]`));
       await waitFor(
         browser,

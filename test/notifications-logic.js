@@ -48,6 +48,21 @@ test('a direct message is titled with the nick', async () => {
   });
 });
 
+test('a hidden chat sends no notice', async () => {
+  const { noticeOf } = await notice;
+  const record = { chat: PAIR, content: 'hello' };
+  const isHidden = (chat) => chat === PAIR;
+  assert.equal(noticeOf(input(record, { isHidden })), null);
+  const returning = (chat, item) => chat === PAIR && item.timestamp <= 0;
+  assert.equal(noticeOf(input(record, { isHidden: returning })).chat, PAIR);
+  const seen = [];
+  const spy = (chat, item) => seen.push([chat, item.content]);
+  noticeOf(input(record, { isHidden: spy }));
+  assert.deepEqual(seen, [[PAIR, 'hello']]);
+  const other = (chat) => chat === 'elsewhere';
+  assert.equal(noticeOf(input(record, { isHidden: other })).chat, PAIR);
+});
+
 test('a reply in a group names the chat', async () => {
   const { noticeOf } = await notice;
   const record = { chat: 'general', replyTo: 'm0', content: 'agreed' };

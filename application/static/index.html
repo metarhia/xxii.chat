@@ -39,10 +39,6 @@
         <header class="brand">
           <img class="logo" src="/icon.svg" alt="Metarhia" />
           <h1>xxii.chat</h1>
-          <span class="peers"
-            ><span class="muted">peers:</span>
-            <span id="peer-count">0</span></span
-          >
         </header>
 
         <section class="section">
@@ -128,16 +124,21 @@
             <span id="profile-avatar" class="profile-avatar" aria-hidden="true"
               >?</span
             >
-            <span id="profile-nick" class="profile-nick muted"
-              >set your nick</span
-            >
-            <span
-              id="profile-dot"
-              class="dot"
-              data-status="offline"
-              role="img"
-              aria-label="offline"
-            ></span>
+            <span class="profile-text">
+              <span id="profile-nick" class="profile-nick muted"
+                >set your nick</span
+              >
+              <span class="profile-status">
+                <span
+                  id="profile-dot"
+                  class="dot"
+                  data-status="offline"
+                  role="img"
+                  aria-label="offline"
+                ></span>
+                <span id="profile-state">offline</span>
+              </span>
+            </span>
           </div>
           <button
             id="recordings-btn"
@@ -212,6 +213,17 @@
             <button id="search-btn" class="link-btn">Search</button>
             <button id="pins-btn" class="link-btn">Pin list</button>
             <button id="members-btn" class="link-btn">Members</button>
+            <button
+              id="chat-menu-btn"
+              class="link-btn"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              title="Chat actions"
+              aria-label="Chat actions"
+            >
+              ⋯
+            </button>
           </nav>
         </header>
         <div id="search-bar" class="search hidden">
@@ -677,6 +689,15 @@
         <header class="panel-header">
           <span id="panel-title" class="panel-title">Members</span>
           <span id="panel-meta" class="panel-meta muted" hidden></span>
+          <button
+            id="panel-close-btn"
+            class="link-btn panel-close"
+            type="button"
+            title="Close panel (Esc)"
+            aria-label="Close panel"
+          >
+            ×
+          </button>
         </header>
         <section class="panel-body" data-panel="pins">
           <div id="pin-list" class="pin-list"></div>
@@ -697,21 +718,13 @@
           ></video>
           <ul class="recordings-list list"></ul>
         </section>
-        <footer class="panel-bar">
-          <button
-            id="panel-close-btn"
-            class="link-btn"
-            type="button"
-            aria-label="Close panel"
-          >
-            close
-          </button>
-        </footer>
+        <footer class="panel-bar"></footer>
       </aside>
     </div>
 
     <div id="backdrop" class="backdrop hidden"></div>
     <div id="menu" class="menu hidden" role="menu"></div>
+    <div id="nav-menu" class="menu nav-menu hidden" role="menu"></div>
     <div
       id="switcher"
       class="switcher hidden"
@@ -782,6 +795,11 @@
       role="status"
       aria-live="polite"
     ></div>
+    <div id="undo-toast" class="notification undo-toast hidden" role="status">
+      <span id="undo-text"></span>
+      <span aria-hidden="true">·</span>
+      <button id="undo-btn" class="link-btn" type="button">undo</button>
+    </div>
 
     <template id="confirm-template">
       <dialog class="confirm">
@@ -886,6 +904,26 @@
           data-action="mine"
           title="Next unread reply to you"
         ></button>
+        <button
+          class="link-btn remove-btn hidden"
+          type="button"
+          data-action="remove"
+          title="Remove from folder"
+          aria-label="Remove from folder"
+        >
+          ×
+        </button>
+        <button
+          class="link-btn row-more"
+          type="button"
+          data-action="more"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          title="Actions"
+          aria-label="Actions"
+        >
+          ⋯
+        </button>
         <span class="badge hidden"></span>
         <span class="time"></span>
       </li>
@@ -897,11 +935,23 @@
         <span class="name"></span>
         <button
           class="link-btn remove-btn hidden"
+          type="button"
           data-action="remove"
           title="Remove from folder"
           aria-label="Remove from folder"
         >
           ×
+        </button>
+        <button
+          class="link-btn row-more"
+          type="button"
+          data-action="more"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          title="Actions"
+          aria-label="Actions"
+        >
+          ⋯
         </button>
         <span class="call-mark hidden"></span>
         <button
@@ -926,18 +976,25 @@
           <span class="folder-actions">
             <button
               class="link-btn"
+              type="button"
               data-action="add"
-              title="Add the open chat or feed"
-              aria-label="Add the open chat or feed"
+              title="Add the open chat"
+              aria-label="Add the open chat"
             >
               +
             </button>
-            <button
-              class="link-btn"
-              data-action="visibility"
-              title="Who sees this folder"
-            ></button>
           </span>
+          <button
+            class="link-btn row-more"
+            type="button"
+            data-action="more"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            title="Folder actions"
+            aria-label="Folder actions"
+          >
+            ⋯
+          </button>
           <span class="badge hidden"></span>
         </div>
         <ul class="list folder-items"></ul>

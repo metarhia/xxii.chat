@@ -485,9 +485,9 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     assert.equal(serverHas('secret direct')(deltas), false);
   });
 
-  await t.test('folders are listed for the owner or everyone', async () => {
-    const folderOf = (name) => `[...app.replica.keys('folder')]
-      .find((id) => app.replica.get(id).name === '${name}')`;
+  await t.test('folders stay personal and items stay listed', async () => {
+    const folderOf = (name) => `app.folders.list()
+      .find((folder) => folder.name === '${name}')?.id`;
     const rowOf = (id) => `document.querySelector(
       '.folder-row[data-folder="${id}"]')`;
     const feedItem = `app.feedList.querySelector('[data-id="${feedId}"]')`;
@@ -500,10 +500,21 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     );
     const projects = await run(grace, `return ${folderOf('Projects')};`);
     const alpha = await run(grace, `return ${folderOf('alpha')};`);
-    const folder = await run(grace, `return app.replica.get('${alpha}');`);
+    const folder = await run(
+      grace,
+      `return app.folders.list().find((item) => item.id === '${alpha}');`,
+    );
     assert.equal(folder.parent, projects);
     assert.equal(folder.icon, '📦');
-    assert.equal(folder.visibility, 'unlisted');
+    const local = await run(
+      grace,
+      `return {
+        saved: JSON.parse(localStorage.getItem('xxii:folders')).folders.length,
+        records: [...app.replica.keys('folder')].length +
+          [...app.replica.keys('entry')].length,
+      };`,
+    );
+    assert.deepEqual(local, { saved: 2, records: 0 });
     await run(
       grace,
       `app.render();
@@ -515,34 +526,28 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
         .querySelector('.folder-row[data-folder="${alpha}"]');
       const item = nested?.closest('.folder')
         .querySelector('.chat-item[data-id="${feedId}"]');
-      return Boolean(item) && ${feedItem} === null;`;
+      return Boolean(item) && ${feedItem} !== null;`;
     await wait(grace, placed);
-    const synced = `return [...app.replica.keys('entry')].length > 0;`;
-    await wait(linus, synced);
+    const entries = await run(
+      grace,
+      `return [...app.replica.keys('entry')].length;`,
+    );
+    assert.equal(entries, 0);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     const hidden = await run(
       linus,
       `app.render();
-      return app.folderList.children.length === 0 && ${feedItem} !== null;`,
+      return {
+        folders: app.folderList.children.length,
+        records: [...app.replica.keys('folder')].length +
+          [...app.replica.keys('entry')].length,
+        listed: ${feedItem} !== null,
+      };`,
     );
-    assert.equal(hidden, true);
-    await run(
-      grace,
-      `app.toggleVisibility('${projects}');
-      app.toggleVisibility('${alpha}');
-      return true;`,
-    );
-    const shared = `app.render();
-      const row = ${rowOf(alpha)};
-      if (!row) return false;
-      const item = row.closest('.folder')
-        .querySelector('.chat-item[data-id="${feedId}"]');
-      const actions = row.querySelector('.folder-actions');
-      const isReadOnly = actions.classList.contains('hidden');
-      return Boolean(item) && isReadOnly && ${feedItem} === null;`;
-    await wait(linus, shared);
-    await run(linus, `app.toggleFolder('${projects}'); return true;`);
+    assert.deepEqual(hidden, { folders: 0, records: 0, listed: true });
+    await run(grace, `app.toggleFolder('${projects}'); return true;`);
     const collapsed = await run(
-      linus,
+      grace,
       `const isOpen = ${rowOf(projects)}.closest('.folder')
         .classList.contains('open');
       const saved = localStorage.getItem('xxii:collapsed');
@@ -550,21 +555,18 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     );
     assert.equal(collapsed, true);
     await run(
-      linus,
-      `const chat = await import('/chat.js');
-      const owner = app.peerId;
-      const created = Date.now();
+      grace,
+      `const created = Date.now();
       const loop = (id, parent) => {
         const name = id.replace('-', ' ');
-        const folder = { id, name, icon: '📁', owner, parent, created };
-        chat.createFolder(app.replica, folder);
+        app.folders.create({ id, name, icon: '📁', parent, created });
       };
       loop('loop-a', 'loop-b');
       loop('loop-b', 'loop-a');
       return true;`,
     );
     const roots = await run(
-      linus,
+      grace,
       `app.render();
       const rows = app.folderList
         .querySelectorAll(':scope > .folder > .folder-row');
@@ -574,12 +576,22 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     assert.deepEqual(roots, ['loop-a', 'loop-b']);
     await run(
       grace,
-      `app.render();
-      document.querySelector('.chat-item[data-id="${feedId}"] .remove-btn')
-        .click();
+      `app.toggleFolder('${projects}');
+      app.render();
+      document.querySelector(
+        '.folder .chat-item[data-id="${feedId}"] .remove-btn').click();
       return true;`,
     );
-    await wait(linus, `app.render(); return ${feedItem} !== null;`);
+    const left = await run(
+      grace,
+      `app.render();
+      return {
+        inFolder: document.querySelector(
+          '.folder .chat-item[data-id="${feedId}"]') !== null,
+        listed: ${feedItem} !== null,
+      };`,
+    );
+    assert.deepEqual(left, { inFolder: false, listed: true });
     await run(grace, `app.selectChat('general'); return true;`);
   });
 

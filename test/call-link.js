@@ -116,6 +116,27 @@ const ASK = `const field = document.querySelector('.nick-field');
     throw new Error(label + ' visible ' + visible + ' disabled ' + disabled);
   }
   if (app.synced !== false) throw new Error('synced');
+  const chat = document.getElementById('chat-view').getBoundingClientRect();
+  const zone = document.getElementById('prejoin').getBoundingClientRect();
+  const bar = document.querySelector('#prejoin .side-bar');
+  const beside = innerWidth > 900;
+  if (beside && (chat.width < 200 || chat.right > zone.left + 1)) {
+    throw new Error('chat ' + chat.right + ' pre-join ' + zone.left);
+  }
+  if (!bar || !bar.contains(button)) throw new Error('join not in the bar');
+  const mic = document.querySelector('#prejoin .call-icon[data-action=mic]');
+  const camera = document.querySelector(
+    '#prejoin .call-icon[data-action=camera]');
+  const names = [mic?.ariaLabel, camera?.ariaLabel].join();
+  if (names !== 'Microphone,Camera') throw new Error(names);
+  if (mic.getAttribute('aria-pressed') !== 'true') throw new Error('mic');
+  const input = document.getElementById('message-input');
+  input.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Enter',
+    bubbles: true,
+    cancelable: true,
+  }));
+  if (app.callStage.joining) throw new Error('Enter in the composer joined');
   return true;`;
 
 const TYPE = `const input = document.querySelector('#prejoin-nick');
@@ -133,6 +154,14 @@ const WAITING = `const node = document.getElementById('lobby');
   }
   if (app.synced !== false) throw new Error('synced');
   if (nick !== 'bob') throw new Error(String(nick));
+  const chat = document.getElementById('chat-view').getBoundingClientRect();
+  const zone = node.getBoundingClientRect();
+  if (innerWidth > 900 && chat.right > zone.left + 1) {
+    throw new Error('chat ' + chat.right + ' lobby ' + zone.left);
+  }
+  if (!node.querySelector('.side-bar [data-action=cancel]')) {
+    throw new Error('no cancel in the bar');
+  }
   return true;`;
 
 const TOAST = `app.render();
