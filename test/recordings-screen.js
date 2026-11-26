@@ -273,6 +273,8 @@ test('recordings screen', { timeout: 240000 }, async (t) => {
       assert.deepEqual(await run(first, MENU_LABELS), [
         'Play',
         'Edit',
+        'Properties',
+        'Attach to chat',
         'Download',
         'Save as…',
         'Rename',
@@ -308,6 +310,8 @@ test('recordings screen', { timeout: 240000 }, async (t) => {
       assert.deepEqual(await run(first, MENU_LABELS), [
         'Play',
         'Edit',
+        'Properties',
+        'Attach to chat',
         'Download',
         'Save as…',
         'Rename',

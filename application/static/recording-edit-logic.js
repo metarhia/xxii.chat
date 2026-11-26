@@ -44,7 +44,7 @@ const partsOf = (parts) => {
   });
 };
 
-const segmentsOf = (parts, kept) => {
+const segmentsOf = (parts, kept, speed = 1) => {
   const segments = [];
   let index = 0;
   for (const range of kept) {
@@ -53,25 +53,57 @@ const segmentsOf = (parts, kept) => {
       const part = parts[i];
       const start = Math.max(range.start, part.start);
       const end = Math.min(range.end, part.end);
-      segments.push({
+      const segment = {
         part,
         start: start - part.start,
         end: end - part.start,
-        output: range.output + start - range.start,
-      });
+        output: (range.output + start - range.start) / speed,
+      };
+      if (speed !== 1) segment.speed = speed;
+      segments.push(segment);
     }
   }
   return segments;
 };
 
+const segmentDuration = ({ start, end, speed = 1 }) => (end - start) / speed;
+
 const segmentTimeOf = (segments, time) => {
   const segment =
-    segments.find((span) => time < span.output + span.end - span.start) ??
+    segments.find((span) => time < span.output + segmentDuration(span)) ??
     segments.at(-1);
   return {
     segment,
-    time: Math.min(segment.end, segment.start + time - segment.output),
+    time: Math.min(
+      segment.end,
+      segment.start + (time - segment.output) * (segment.speed ?? 1),
+    ),
   };
+};
+
+const remapEdit = (draft, before, after) => {
+  const removed = [
+    { start: 0, end: draft.start },
+    ...draft.cuts,
+    { start: draft.end, end: before.at(-1).end },
+  ];
+  const previous = new Map(before.map((part) => [part.key, part]));
+  const cuts = [];
+  for (const part of after) {
+    const old = previous.get(part.key);
+    if (!old) continue;
+    for (const cut of removed) {
+      const start = Math.max(old.start, cut.start);
+      const end = Math.min(old.end, cut.end);
+      if (end > start) {
+        cuts.push({
+          start: part.start + start - old.start,
+          end: part.start + end - old.start,
+        });
+      }
+    }
+  }
+  return { ...draft, start: 0, end: after.at(-1).end, cuts };
 };
 
 const timeInputOf = (time) => {
@@ -133,4 +165,5 @@ class EditHistory {
 }
 
 export { initialEdit, timelineOf, partsOf, segmentsOf, segmentTimeOf };
+export { remapEdit };
 export { timeInputOf, timeFromInput, EditHistory };

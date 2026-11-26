@@ -26,7 +26,7 @@ const storedDurationOf = (handle, size, extension, fallback) => {
       return { duration: duration ?? fallback, slot };
     }
   }
-  if (extension === 'mp4') {
+  if (extension === 'mp4' || extension === 'm4a') {
     const duration = mp4DurationOf(read, size) ?? fallback;
     return { duration, slot: null };
   }

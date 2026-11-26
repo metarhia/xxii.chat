@@ -447,11 +447,24 @@ progress, and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate
 names.
 
 Open **Edit** on a saved recording to trim the ends, apply cuts, and preview
-the parts you kept. Folder recordings show their playable parts on one
-timeline. Use the handles or enter times down to milliseconds. **Save edited
-copy** renders a separate file in this browser's library and keeps the original
-intact. The copy plays, downloads, and exports through the usual card actions.
-Keep the tab visible during the render, which takes about the edited duration.
+the parts you kept. Use **Clips** to append recordings or video files and
+change their order. Folder recordings show their playable parts on the same
+timeline. Use the handles or enter times down to milliseconds. **Cut silent
+pauses** marks quiet ranges for removal with a little sound padding and
+supports undo.
+
+**Picture, speed, and output** lets you crop the edges, rotate, mirror, fit
+or fill a new aspect ratio (including square, 1:2 and 9:16), and change
+speed. Set a resolution, quality, or maximum size for a smaller file. Choose
+video with sound, silent video, or audio only. **Save edited copy** renders a
+separate file to the browser library, and **Save as** also saves it to a file
+or downloads it. Keep the tab visible while rendering.
+
+Use **Import videos** to bring videos into Recordings. A card's menu shows
+**Properties** for the format, dimensions, duration, size, bitrate, and audio
+track. **Attach to chat** adds the file to the current chat's composer for
+review and sending. Attachments use the existing 10 MB limit. A video in a
+chat can be downloaded or saved to the browser library with **save video**.
 
 In Chromium with a folder picker, **Save recordings to** in Settings > Recordings
 (and in the call's Record tab) can send recordings straight to a chosen folder. Choose

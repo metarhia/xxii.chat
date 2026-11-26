@@ -1766,6 +1766,98 @@ svg {
   background: #000;
 }
 
+.recording-edit-visual {
+  position: relative;
+}
+
+.recording-edit-visual[data-edited='true'] video {
+  opacity: 0;
+}
+
+.recording-edit-visual canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.recording-edit-tools {
+  margin: 8px 0;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.recording-edit-tools summary {
+  cursor: pointer;
+}
+
+.recording-edit-parameters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.recording-edit-parameters label {
+  min-width: 0;
+}
+
+.recording-editor select,
+.recording-editor input[type='number'] {
+  max-width: 100%;
+  color: var(--text);
+  background: var(--field);
+}
+
+.recording-edit-parameters select,
+.recording-edit-parameters input[type='number'] {
+  display: block;
+  width: 100%;
+}
+
+.recording-edit-check input {
+  width: auto;
+}
+
+.recording-edit-library {
+  min-width: 0;
+  max-width: min(100%, 36ch);
+}
+
+.recording-edit-clips {
+  padding-left: 24px;
+}
+
+.recording-edit-clips li {
+  margin-block: 3px;
+}
+
+.recording-edit-clips li span {
+  margin-right: 8px;
+  overflow-wrap: anywhere;
+}
+
+.recording-edit-clips li button {
+  margin-left: 4px;
+}
+
+.recording-properties dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+}
+
+.recording-properties dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.video-library-btn {
+  white-space: nowrap;
+}
+
 .recording-edit-row,
 .recording-edit-cuts {
   display: flex;

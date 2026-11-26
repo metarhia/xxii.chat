@@ -661,6 +661,16 @@
           <button id="recordings-capture" class="link-btn" type="button">
             new capture
           </button>
+          <button id="recordings-import" class="link-btn" type="button">
+            import videos
+          </button>
+          <input
+            id="recordings-files"
+            type="file"
+            accept="video/*,.m4v"
+            multiple
+            hidden
+          />
           <button
             id="recordings-close"
             class="link-btn"
@@ -845,15 +855,16 @@
           </button>
           <fieldset class="recording-edit-body" data-edit="body" hidden>
             <legend class="visually-hidden">Recording edit</legend>
-            <video
-              playsinline
-              preload="auto"
-              aria-label="Recording preview"
-            ></video>
+            <div class="recording-edit-visual">
+              <video
+                playsinline
+                preload="auto"
+                aria-label="Recording preview"
+              ></video>
+              <canvas data-edit="frame" aria-label="Edited picture" hidden></canvas>
+            </div>
             <div class="recording-edit-row">
-              <button class="link-btn" type="button" data-edit="play">
-                play
-              </button>
+              <button class="link-btn" type="button" data-edit="play">play</button>
               <span data-edit="time"></span>
             </div>
             <input
@@ -866,16 +877,36 @@
               data-edit="scrub"
             />
             <div data-edit="source-controls">
+              <details class="recording-edit-tools">
+                <summary>Clips</summary>
+                <ol data-edit="clips" class="recording-edit-clips"></ol>
+                <div class="recording-edit-row">
+                  <label class="recording-edit-library"
+                    >Recording
+                    <select data-edit="library-source"></select>
+                  </label>
+                  <button class="link-btn" type="button" data-edit="add-recording">
+                    add recording
+                  </button>
+                  <button class="link-btn" type="button" data-edit="add-videos">
+                    add video files
+                  </button>
+                  <input
+                    type="file"
+                    data-edit="video-files"
+                    accept="video/*,.m4v"
+                    multiple
+                    hidden
+                  />
+                </div>
+              </details>
               <div class="recording-edit-track" data-edit="track">
                 <div
                   class="recording-edit-removals"
                   data-edit="removals"
                   aria-hidden="true"
                 ></div>
-                <div
-                  class="recording-edit-boundaries"
-                  data-edit="boundaries"
-                ></div>
+                <div class="recording-edit-boundaries" data-edit="boundaries"></div>
                 <button
                   class="recording-edit-handle"
                   type="button"
@@ -904,9 +935,7 @@
                 ></button>
               </div>
               <div class="recording-edit-row">
-                <label
-                  >Trim start <input type="text" data-time="start"
-                /></label>
+                <label>Trim start <input type="text" data-time="start" /></label>
                 <label>Trim end <input type="text" data-time="end" /></label>
                 <button class="link-btn" type="button" data-edit="new-cut">
                   new cut
@@ -924,9 +953,7 @@
                   <label
                     >Cut start <input type="text" data-time="cut-start"
                   /></label>
-                  <label
-                    >Cut end <input type="text" data-time="cut-end"
-                  /></label>
+                  <label>Cut end <input type="text" data-time="cut-end" /></label>
                   <button class="link-btn" type="button" data-edit="apply-cut">
                     apply cut
                   </button>
@@ -938,7 +965,152 @@
                   </button>
                 </div>
               </div>
+              <div class="recording-edit-row">
+                <label
+                  >Minimum pause
+                  <select data-edit="pause-minimum">
+                    <option value="500">0.5 s</option>
+                    <option value="1000" selected>1 s</option>
+                    <option value="2000">2 s</option>
+                    <option value="4000">4 s</option>
+                  </select>
+                </label>
+                <button class="link-btn" type="button" data-edit="silence">
+                  cut silent pauses
+                </button>
+              </div>
             </div>
+            <details class="recording-edit-tools">
+              <summary>Picture, speed, and output</summary>
+              <div class="recording-edit-parameters">
+                <label
+                  >Speed
+                  <select data-option="speed">
+                    <option value="0.5">0.5×</option>
+                    <option value="0.75">0.75×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="1.25">1.25×</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                  </select>
+                </label>
+                <label
+                  >Aspect ratio
+                  <select data-option="aspect">
+                    <option value="">Original</option>
+                    <option value="1:1">1:1 square</option>
+                    <option value="1:2">1:2</option>
+                    <option value="9:16">9:16 shorts</option>
+                    <option value="2:3">2:3</option>
+                    <option value="3:4">3:4</option>
+                    <option value="4:5">4:5</option>
+                    <option value="16:9">16:9</option>
+                    <option value="4:3">4:3</option>
+                    <option value="3:2">3:2</option>
+                    <option value="2:1">2:1</option>
+                    <option value="21:9">21:9</option>
+                  </select>
+                </label>
+                <label
+                  >Framing
+                  <select data-option="framing">
+                    <option value="fit">Fit inside</option>
+                    <option value="fill">Fill and crop</option>
+                  </select>
+                </label>
+                <label
+                  >Rotation
+                  <select data-option="rotation">
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                  </select>
+                </label>
+                <label class="recording-edit-check">
+                  <input type="checkbox" data-option="mirror" /> Mirror horizontally
+                </label>
+                <label
+                  >Crop left %
+                  <input
+                    type="number"
+                    data-option="cropLeft"
+                    min="0"
+                    max="95"
+                    step="0.1"
+                  />
+                </label>
+                <label
+                  >Crop right %
+                  <input
+                    type="number"
+                    data-option="cropRight"
+                    min="0"
+                    max="95"
+                    step="0.1"
+                  />
+                </label>
+                <label
+                  >Crop top %
+                  <input
+                    type="number"
+                    data-option="cropTop"
+                    min="0"
+                    max="95"
+                    step="0.1"
+                  />
+                </label>
+                <label
+                  >Crop bottom %
+                  <input
+                    type="number"
+                    data-option="cropBottom"
+                    min="0"
+                    max="95"
+                    step="0.1"
+                  />
+                </label>
+                <label
+                  >Short edge limit
+                  <select data-option="resolution">
+                    <option value="0">Original</option>
+                    <option value="240">240 px</option>
+                    <option value="360">360 px</option>
+                    <option value="480">480 px</option>
+                    <option value="720">720 px</option>
+                    <option value="1080">1080 px</option>
+                    <option value="1440">1440 px</option>
+                    <option value="2160">2160 px</option>
+                  </select>
+                </label>
+                <label
+                  >Quality
+                  <select data-option="quality">
+                    <option value="small">Smaller file</option>
+                    <option value="standard" selected>Standard</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label
+                  >Size limit (MB)
+                  <input
+                    type="number"
+                    data-option="target"
+                    min="0"
+                    step="0.1"
+                    placeholder="No limit"
+                  />
+                </label>
+                <label
+                  >Export
+                  <select data-option="output">
+                    <option value="video">Video with sound</option>
+                    <option value="mute">Silent video</option>
+                    <option value="audio">Audio only</option>
+                  </select>
+                </label>
+              </div>
+            </details>
             <p data-edit="validation" role="status" hidden></p>
             <div class="recording-edit-row">
               <button class="link-btn" type="button" data-edit="preview">
@@ -949,12 +1121,13 @@
               </button>
             </div>
             <div class="recording-edit-row recording-edit-save">
-              <label
-                >Copy title <input type="text" data-edit="copy-title"
-              /></label>
+              <label>Copy title <input type="text" data-edit="copy-title" /></label>
               <span data-edit="format"></span>
               <button class="link-btn" type="button" data-edit="save">
                 save edited copy
+              </button>
+              <button class="link-btn" type="button" data-edit="save-as">
+                save as…
               </button>
             </div>
           </fieldset>
@@ -1433,6 +1606,14 @@
         </svg>
         <span class="file-name"></span>
         <span class="file-size"></span>
+        <button
+          class="link-btn video-library-btn"
+          type="button"
+          data-action="save-video"
+          title="Save video to Recordings"
+        >
+          save video
+        </button>
         <button
           class="download-btn"
           data-action="download"

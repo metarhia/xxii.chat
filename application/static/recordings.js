@@ -1,4 +1,4 @@
-import { META_FILE, POSTER_FILE } from './recording-files.js';
+import { META_FILE, POSTER_FILE, TYPES, typeOf } from './recording-files.js';
 import { programFileOf, recordingUrlOf, routeOf } from './recording-files.js';
 import { dateText, titleOf, timeText, sizeText } from './recording-files.js';
 import { isFolderRecording, readMeta } from './recording-files.js';
@@ -6,6 +6,7 @@ import { recordingsOf } from './recording-files.js';
 import { isPendingEdit, recordingLockOf } from './recording-files.js';
 import { exportNameOf, downloadUrlOf, exportFile } from './recording-export.js';
 import { pickExportFile, exportToFolder } from './recording-export.js';
+import { mediaNameOf } from './recording-export.js';
 import { canPickFolder, folderHandle } from './recording-folder.js';
 import { folderRecord, folderPermission } from './recording-folder.js';
 import { cloneTemplate } from './view.js';
@@ -13,10 +14,13 @@ import { createIcon } from './icons.js';
 import { Menu, Press } from './overlays.js';
 import { RecordingWriter } from './recorder.js';
 import { RecordingEditor } from './recording-editor.js';
+import { importVideo, videoProperties } from './video-library.js';
 
 const CARD_ACTIONS = {
   play: (list, card) => list.playCard(card),
   edit: (list, card) => list.openEditor(card),
+  properties: (list, card) => list.showProperties(card.entry),
+  attach: (list, card) => list.attachToChat(card),
   download: (list, card) => {
     card.row.querySelector('.recording-download').click();
   },
@@ -225,9 +229,10 @@ const createCardMenu = (overlay) => {
 };
 
 class Recordings {
-  constructor(root, onRepair, overlay = {}, onList = null) {
+  constructor(root, onRepair, overlay = {}, onList = null, attach = null) {
     this.root = root;
     this.onList = onList;
+    this.attach = attach;
     this.linked = null;
     this.list = root.querySelector('.recordings-list');
     this.storage = root.querySelector('.recordings-storage');
@@ -248,6 +253,15 @@ class Recordings {
     this.editor = null;
     this.editorLayers = overlay.layers;
     this.menu = createCardMenu(overlay);
+    const picker = root.querySelector('#recordings-files');
+    const importer = root.querySelector('#recordings-import');
+    importer.hidden = !navigator.storage?.getDirectory;
+    importer.onclick = () => picker.click();
+    picker.onchange = () => {
+      const files = Array.from(picker.files);
+      picker.value = '';
+      if (files.length) this.importFiles(files, importer);
+    };
     this.press = new Press({
       hold: (row, x, y) => this.openMenu(row, { point: { x, y } }),
     });
@@ -354,6 +368,7 @@ class Recordings {
 
   close() {
     this.closeEditor();
+    this.closeProperties();
     this.revision++;
     this.linked = null;
     this.menu.close();
@@ -465,11 +480,16 @@ class Recordings {
     }
     const isFolder = isFolderRecording(entry);
     const isFinished = canChange(entry);
-    const hasVideo =
-      ['mp4', 'webm'].includes(entry.extension) &&
+    const hasMedia =
+      ['mp4', 'webm', 'mov', 'ogv', 'm4a'].includes(entry.extension) &&
       (!isFolder || entry.segments.length > 0);
     const canWrite = globalThis.FileSystemFileHandle?.prototype.createWritable;
-    card.canPlay = isFinished && hasVideo;
+    card.canPlay = isFinished && hasMedia;
+    card.canEdit =
+      card.canPlay &&
+      entry.size !== 0 &&
+      !typeOf(entry.mime).startsWith('audio/') &&
+      entry.extension !== 'm4a';
     card.canRename = Boolean(isFinished && canWrite);
     card.canDelete = Boolean(isFinished && this.recordings.removeEntry);
     if (card.canPlay) {
@@ -529,17 +549,69 @@ class Recordings {
     this.stopPlayback();
     this.editor = new RecordingEditor(entry, {
       name: textOf(entry.title) || labels.name,
-      source: (part, signal) => this.editSource(entry, part, signal),
-      withSource: (run) => this.withEditSource(entry, run),
+      library: () => this.editableSources(),
+      source: (part, signal, bytes) => this.editSource(part, signal, bytes),
+      withSource: (parts, run) => this.withEditSources(parts, run),
+      exportCopy: (id, extension, name, target) =>
+        this.exportCopy(id, extension, name, target),
       close: () => this.closeEditor(),
-      saved: (id) => {
+      saved: async (id, status) => {
         this.closeEditor();
         this.link([id]);
-        this.refresh();
+        await this.refresh();
+        if (status) this.setStatus(status);
       },
     });
     this.editorLayers?.push('recording-editor');
     this.editor.open();
+  }
+
+  editableSources() {
+    const cards = Array.from(this.list.children, (row) => this.cards.get(row));
+    return cards
+      .filter((card) => card?.canEdit)
+      .map(({ entry, labels }) => ({
+        id: entry.id,
+        name: textOf(entry.title) || labels.name,
+        entry,
+      }));
+  }
+
+  async importFiles(files, button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    const ids = [];
+    const errors = [];
+    const signal = new AbortController().signal;
+    try {
+      for (const file of files) {
+        this.setStatus(`Importing ${file.name}…`);
+        try {
+          ids.push(await importVideo(file, signal));
+        } catch (error) {
+          errors.push(`${file.name}. ${error.message}`);
+        }
+      }
+      if (this.root.closest('.app').dataset.view === 'recordings') {
+        if (ids.length) this.link(ids);
+        await this.refresh();
+        if (errors.length) this.setStatus(errors.join(' '));
+      }
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  withEditSources(parts, run) {
+    const entries = new Map(
+      parts.filter(({ entry }) => entry).map(({ entry }) => [entry.id, entry]),
+    );
+    const locks = [...entries.keys()].sort();
+    const next = (i) =>
+      i === locks.length
+        ? run()
+        : this.withEditSource(entries.get(locks[i]), () => next(i + 1));
+    return next(0);
   }
 
   async withEditSource(entry, run) {
@@ -557,8 +629,10 @@ class Recordings {
     });
   }
 
-  async editSource(entry, part, signal) {
+  async editSource(part, signal, bytes = false) {
     signal.throwIfAborted();
+    if (part.file) return part.file;
+    const { entry } = part;
     if (entry.segments) {
       try {
         const file = await partFileOf(entry, part, () => !signal.aborted);
@@ -566,14 +640,107 @@ class Recordings {
         return file;
       } catch (error) {
         signal.throwIfAborted();
-        const label = `Part ${part.index + 1} (${part.name})`;
+        const label = `Part ${(part.localIndex ?? 0) + 1} (${part.name})`;
         throw new Error(`${label}. ${error.message}`, { cause: error });
       }
     }
-    if (navigator.serviceWorker?.controller) {
+    if (!bytes && navigator.serviceWorker?.controller) {
       return recordingUrlOf(entry.id, programFileOf(entry.extension));
     }
     return this.sourceFile(entry);
+  }
+
+  async exportCopy(id, extension, name, target) {
+    if (target) {
+      const file = await this.sourceFile({ id, extension });
+      await exportFile(file, target, () => {});
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = downloadUrlOf(id, extension, name);
+    link.download = name;
+    link.click();
+  }
+
+  attachToChat({ entry, labels }) {
+    const part = this.partOf(entry);
+    this.attach?.(async () => {
+      const signal = new AbortController().signal;
+      const file = await this.editSource({ ...part, entry }, signal, true);
+      const name = part?.name ?? mediaNameOf(labels.name, entry.extension);
+      const type = typeOf(entry.mime) || TYPES[entry.extension];
+      return new File([file], name, { type });
+    });
+  }
+
+  async showProperties(entry) {
+    if (this.propertyDialog) return;
+    const dialog = document.createElement('dialog');
+    const heading = document.createElement('h2');
+    const body = document.createElement('dl');
+    const close = document.createElement('button');
+    const control = new AbortController();
+    const { signal } = control;
+    const part = this.partOf(entry);
+    dialog.className = 'confirm recording-properties';
+    dialog.setAttribute('aria-label', 'Media properties');
+    heading.textContent = 'Media properties';
+    body.textContent = 'Reading media…';
+    close.className = 'link-btn';
+    close.type = 'button';
+    close.textContent = 'close';
+    close.onclick = () => dialog.close();
+    dialog.append(heading, body, close);
+    dialog.addEventListener('keydown', (event) => event.stopPropagation());
+    dialog.addEventListener(
+      'close',
+      () => {
+        control.abort();
+        dialog.remove();
+        this.propertyDialog = null;
+        this.editorLayers?.pop('recording-properties');
+      },
+      { once: true },
+    );
+    this.propertyDialog = dialog;
+    document.body.append(dialog);
+    this.editorLayers?.push('recording-properties');
+    dialog.showModal();
+    const source = () => this.editSource({ ...part, entry }, signal);
+    try {
+      const media = await this.withEditSource(entry, () =>
+        videoProperties(source, signal),
+      );
+      const size = part?.size ?? entry.size;
+      const bitrate = Math.round((size * 8) / media.duration);
+      const rows = [
+        ['File', part?.name ?? labelsOf(entry).name],
+        ['Format', typeOf(entry.mime) || TYPES[entry.extension]],
+        ['Duration', timeText(media.duration)],
+        [
+          'Dimensions',
+          media.width ? `${media.width} × ${media.height}` : 'Audio only',
+        ],
+        ['Size', Number.isFinite(size) ? sizeText(size) : 'Unknown'],
+        ['Average bitrate', bitrate ? `${bitrate} kbps` : 'Unknown'],
+        ['Sound', media.audio ? 'Audio track' : 'Silent'],
+      ];
+      body.replaceChildren(
+        ...rows.flatMap(([key, value]) => {
+          const term = document.createElement('dt');
+          const detail = document.createElement('dd');
+          term.textContent = key;
+          detail.textContent = value;
+          return [term, detail];
+        }),
+      );
+    } catch (error) {
+      if (!signal.aborted) body.textContent = error.message;
+    }
+  }
+
+  closeProperties() {
+    this.propertyDialog?.close();
   }
 
   requestEditorClose() {
@@ -621,8 +788,14 @@ class Recordings {
     const { exports, entry } = card;
     const isSaving = card.row.dataset.saving !== undefined;
     const items = [{ action: 'play', label: 'Play', disabled: !card.canPlay }];
-    if (card.canPlay && entry.size !== 0) {
+    if (card.canEdit) {
       items.push({ action: 'edit', label: 'Edit' });
+    }
+    if (card.canPlay) {
+      items.push({ action: 'properties', label: 'Properties' });
+      if (this.attach) {
+        items.push({ action: 'attach', label: 'Attach to chat' });
+      }
     }
     if (exports.download) items.push({ action: 'download', label: 'Download' });
     if (exports.saveAs) {
@@ -720,7 +893,9 @@ class Recordings {
   fileExports(card, folder) {
     const { entry, labels } = card;
     const { id, started, extension } = entry;
-    const name = exportNameOf(labels.chat, started, extension);
+    const name = labels.isRenamed
+      ? mediaNameOf(labels.name, extension)
+      : exportNameOf(labels.chat, started, extension);
     const exports = {
       download: { href: downloadUrlOf(id, extension, name) },
     };
@@ -731,7 +906,7 @@ class Recordings {
       exports.saveAs = {
         run: () =>
           this.save(card, async (progress) => {
-            const target = await pickExportFile(name, extension);
+            const target = await pickExportFile(name, extension, entry.mime);
             if (target) await exportFile(await sourceFile(), target, progress);
           }),
       };
@@ -819,6 +994,15 @@ class Recordings {
       entry.title = title;
       card.labels = labelsOf(entry);
       paintLabels(card);
+      if (!isFolderRecording(entry)) {
+        card.exports = this.fileExports(card, card.folder);
+        const download = row.querySelector('.recording-download');
+        download.href = card.exports.download.href;
+        const target = card.exports.saveFolder ?? card.exports.saveAs;
+        if (target) {
+          row.querySelector('.recording-save').onclick = () => target.run();
+        }
+      }
       if (this.selected === entry.id) {
         this.player.setAttribute('aria-label', card.labels.name);
       }

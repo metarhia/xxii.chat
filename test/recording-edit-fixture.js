@@ -25,7 +25,7 @@ const open = async (t) => {
   return run;
 };
 
-const fixture = async (mime, silent = false) => {
+const fixture = async (mime, silent = false, pause = false) => {
   const colors = ['#f00000', '#00f000', '#0000f0', '#f0f000', '#f000f0'];
   const pitches = [375, 562.5, 750, 937.5, 1125];
   const times = [0, 1.26, 1.76, 2.61, 3.11];
@@ -38,10 +38,11 @@ const fixture = async (mime, silent = false) => {
     ? null
     : new globalThis.AudioContext({ sampleRate: 48000 });
   const oscillator = audio?.createOscillator();
+  const gain = audio?.createGain();
   if (audio) {
     await audio.resume();
     const output = audio.createMediaStreamDestination();
-    oscillator.connect(output);
+    oscillator.connect(gain).connect(output);
     stream.addTrack(output.stream.getAudioTracks()[0]);
   }
   const paint = (index) => {
@@ -67,6 +68,10 @@ const fixture = async (mime, silent = false) => {
     pitches.forEach((pitch, i) => {
       oscillator.frequency.setValueAtTime(pitch, at + times[i]);
     });
+    if (pause) {
+      gain.gain.setValueAtTime(0, at + 1);
+      gain.gain.setValueAtTime(1, at + 2.5);
+    }
     oscillator.start(at);
   }
   await new Promise((resolve) => {

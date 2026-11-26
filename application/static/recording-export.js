@@ -1,4 +1,4 @@
-import { TYPES, fileNameOf } from './recording-files.js';
+import { TYPES, fileNameOf, safeChar, typeOf } from './recording-files.js';
 import { programFileOf, recordingUrlOf } from './recording-files.js';
 import { folderPermission } from './recording-folder.js';
 
@@ -18,6 +18,14 @@ const downloadUrlOf = (id, extension, name) => {
   return `${url}?${query}`;
 };
 
+const mediaNameOf = (title, extension) => {
+  const base = Array.from(title, safeChar)
+    .join('')
+    .trim()
+    .replace(/[. ]+$/, '');
+  return base ? `${base}.${extension}` : programFileOf(extension);
+};
+
 const suffixNameOf = (name, number) => {
   const dot = name.lastIndexOf('.');
   const end = dot > 0 ? dot : name.length;
@@ -35,8 +43,8 @@ const segmentNameOf = ({ chatName, started, extension }, number) => {
   return `${name.slice(0, dot)} ${partLabel(number)}${name.slice(dot)}`;
 };
 
-const pickExportFile = async (name, extension) => {
-  const accept = { [TYPES[extension]]: [`.${extension}`] };
+const pickExportFile = async (name, extension, mime = '') => {
+  const accept = { [typeOf(mime) || TYPES[extension]]: [`.${extension}`] };
   try {
     return await globalThis.showSaveFilePicker({
       suggestedName: name,
@@ -110,5 +118,6 @@ const exportToFolder = async (folder, name, sourceFile, progress) => {
 };
 
 export { exportNameOf, downloadUrlOf, suffixNameOf };
+export { mediaNameOf };
 export { pickExportFile, exportToFolder, exportFile };
 export { partLabel, segmentNameOf, createAvailableFile, removeEmptyExport };

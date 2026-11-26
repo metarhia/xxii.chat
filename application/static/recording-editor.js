@@ -6,6 +6,7 @@ import {
   partsOf,
   segmentsOf,
   segmentTimeOf,
+  remapEdit,
 } from './recording-edit-logic.js';
 import {
   EditHistory,
@@ -15,6 +16,20 @@ import {
 import { PartPlayer, readPart, playUntil } from './recording-edit-media.js';
 import { editFormatOf } from './recording-edit-render.js';
 import { saveEdit } from './recording-edit-save.js';
+import {
+  editOptionsOf,
+  changedOptions,
+  optionsError,
+} from './video-edit-options.js';
+import {
+  outputFrameOf,
+  drawVideoFrame,
+  encodingOf,
+} from './video-edit-options.js';
+import { findSilentCuts } from './video-edit-silence.js';
+import { isVideoFile } from './video-library.js';
+import { pickExportFile, mediaNameOf } from './recording-export.js';
+import { sizeText } from './recording-files.js';
 
 const TIME_KEYS = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 };
 const HANDLES = ['start', 'end', 'cut-start', 'cut-end'];
@@ -36,8 +51,29 @@ const positioned = (node, start, end, duration) => {
 const descriptorsOf = (entry) =>
   (entry.segments ?? [{ name: entry.title }]).map(({ name }, index) => ({
     index,
+    localIndex: index,
+    entry,
+    key: crypto.randomUUID(),
     name,
   }));
+
+const fileDescriptor = (file) => ({
+  index: 0,
+  key: crypto.randomUUID(),
+  name: file.name,
+  file,
+});
+
+const optionValue = (input) => {
+  if (input.type === 'checkbox') return input.checked;
+  if (
+    input.type === 'number' ||
+    ['speed', 'rotation', 'resolution'].includes(input.dataset.option)
+  ) {
+    return Number(input.value);
+  }
+  return input.value;
+};
 
 class RecordingEditor {
   constructor(entry, hooks) {
@@ -48,6 +84,7 @@ class RecordingEditor {
     this.video = this.dialog.querySelector('video');
     this.player = new PartPlayer(this.video, hooks.source);
     this.fields = new Map();
+    this.optionInputs = this.dialog.querySelectorAll('[data-option]');
     this.invalid = new Set();
     this.nodes = Object.fromEntries(
       [...this.dialog.querySelectorAll('[data-edit]')].map((node) => [
@@ -82,16 +119,12 @@ class RecordingEditor {
     this.nodes.retry.hidden = true;
     this.setStatus('Loading recording…');
     try {
-      const parts = await this.hooks.withSource(async () => {
-        const descriptors = descriptorsOf(this.entry);
-        const measured = [];
-        for (const part of descriptors) {
-          measured.push(await readPart(this.player, part, signal));
-        }
-        return partsOf(measured);
-      });
+      const parts = partsOf(
+        await this.measure(descriptorsOf(this.entry), signal),
+      );
       signal.throwIfAborted();
       this.parts = parts;
+      this.original = parts;
       this.duration = parts.at(-1).end;
       this.history = new EditHistory(initialEdit(this.duration));
       this.nodes.body.hidden = false;
@@ -106,6 +139,24 @@ class RecordingEditor {
     }
   }
 
+  async measure(descriptors, signal) {
+    return this.hooks.withSource(descriptors, async () => {
+      const probe = new PartPlayer(
+        document.createElement('video'),
+        this.hooks.source,
+      );
+      const measured = [];
+      try {
+        for (const part of descriptors) {
+          measured.push(await readPart(probe, part, signal));
+        }
+        return measured;
+      } finally {
+        probe.clear();
+      }
+    });
+  }
+
   get draft() {
     return this.history.draft;
   }
@@ -116,7 +167,16 @@ class RecordingEditor {
     return (
       start !== 0 ||
       end !== this.duration ||
+      this.clipsChanged ||
+      changedOptions(editOptionsOf(this.draft)) ||
       Boolean(cuts.length || this.pendingCut)
+    );
+  }
+
+  get clipsChanged() {
+    return (
+      this.parts.length !== this.original.length ||
+      this.parts.some(({ key }, index) => key !== this.original[index]?.key)
     );
   }
 
@@ -135,13 +195,37 @@ class RecordingEditor {
       discard: () => this.discard(),
       preview: () => this.togglePreview(),
       save: () => this.save(),
-      'cancel-save': () => this.saving?.abort(),
+      'save-as': () => this.save(true),
+      'add-videos': () => nodes['video-files'].click(),
+      'add-recording': () => this.addRecording(),
+      silence: () => this.cutSilence(),
+      'cancel-save': () => (this.saving ?? this.tool)?.abort(),
     };
     for (const [name, action] of Object.entries(actions)) {
       nodes[name].onclick = action;
     }
     nodes.scrub.oninput = () => this.seek(Number(nodes.scrub.value));
     nodes['copy-title'].oninput = () => this.paintSave();
+    nodes['video-files'].onchange = () => {
+      const files = Array.from(nodes['video-files'].files);
+      nodes['video-files'].value = '';
+      if (files.length > 0) {
+        this.addParts(files.filter(isVideoFile).map(fileDescriptor));
+      }
+    };
+    for (const input of this.optionInputs) {
+      input.onchange = () => this.updateOption(input);
+    }
+    const sources = this.hooks.library();
+    nodes['library-source'].replaceChildren(
+      ...sources.map(({ id, name }) => {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = name;
+        return option;
+      }),
+    );
+    nodes['add-recording'].disabled = !sources.length;
     for (const name of HANDLES) this.bindHandle(name);
     dialog.addEventListener('keydown', (event) => event.stopPropagation());
     dialog.addEventListener('cancel', (event) => {
@@ -157,6 +241,107 @@ class RecordingEditor {
       },
       { signal: this.lifetime.signal },
     );
+  }
+
+  updateOption(input) {
+    const options = {
+      ...editOptionsOf(this.draft),
+      [input.dataset.option]: optionValue(input),
+    };
+    this.history.apply({ ...this.draft, options });
+    this.paint();
+    if (this.preview && !this.timeline.error) this.seek(this.time);
+  }
+
+  addRecording() {
+    const id = this.nodes['library-source'].value;
+    const recording = this.hooks.library().find((item) => item.id === id);
+    if (recording) this.addParts(descriptorsOf(recording.entry));
+  }
+
+  async runTool(title, run) {
+    if (this.tool || this.saving) return;
+    const control = new AbortController();
+    const signal = AbortSignal.any([control.signal, this.lifetime.signal]);
+    this.tool = control;
+    this.playback?.abort();
+    this.nodes.play.textContent = 'play';
+    this.nodes.body.disabled = true;
+    this.nodes['save-status'].hidden = false;
+    this.nodes['cancel-save'].disabled = false;
+    this.nodes['cancel-save'].textContent = 'cancel';
+    this.nodes.progress.removeAttribute('value');
+    this.setStatus(title);
+    try {
+      await run(signal);
+    } catch (error) {
+      if (!this.lifetime.signal.aborted) {
+        this.setStatus(signal.aborted ? 'Canceled.' : error.message);
+      }
+    } finally {
+      this.tool = null;
+      this.nodes.body.disabled = false;
+      this.nodes['save-status'].hidden = true;
+      this.paintSave();
+    }
+  }
+
+  addParts(descriptors) {
+    if (!descriptors.length) {
+      this.setStatus('Choose a video file.');
+      return;
+    }
+    this.runTool('Reading video clips…', async (signal) => {
+      const parts = await this.measure(descriptors, signal);
+      signal.throwIfAborted();
+      this.replaceParts([...this.parts, ...parts]);
+    });
+  }
+
+  replaceParts(items) {
+    this.playback?.abort();
+    const parts = partsOf(items);
+    const draft = remapEdit(this.draft, this.parts, parts);
+    this.history.apply({ ...draft, sourceParts: parts });
+    this.parts = parts;
+    this.duration = parts.at(-1).end;
+    this.preview = false;
+    this.invalid.clear();
+    this.selectCut(-1);
+    this.seek(0);
+  }
+
+  cutSilence() {
+    const minimum = Number(this.nodes['pause-minimum'].value);
+    this.runTool('Detecting silent pauses…', async (signal) => {
+      const cuts = await this.hooks.withSource(this.parts, () =>
+        findSilentCuts(
+          this.parts,
+          this.hooks.source,
+          minimum,
+          signal,
+          (time) => {
+            this.nodes.progress.max = this.duration;
+            this.nodes.progress.value = time;
+          },
+        ),
+      );
+      signal.throwIfAborted();
+      const combined = [...this.draft.cuts, ...cuts];
+      const draft = { ...this.draft, cuts: combined };
+      const next = timelineOf(this.duration, draft);
+      if (
+        !cuts.length ||
+        next.error ||
+        next.duration === timelineOf(this.duration, this.draft).duration
+      ) {
+        this.setStatus('No additional silent pauses to cut.');
+        return;
+      }
+      this.history.apply(draft);
+      this.selectCut(-1);
+      this.setStatus(`${cuts.length} silent sections marked for removal.`);
+    });
   }
 
   bindHandle(name) {
@@ -279,7 +464,10 @@ class RecordingEditor {
   restore(action) {
     this.invalid.clear();
     this.history[action]();
+    this.parts = this.draft.sourceParts ?? this.original;
+    this.duration = this.parts.at(-1).end;
     this.selectCut(-1);
+    this.seek(this.time);
   }
 
   async discard() {
@@ -288,6 +476,8 @@ class RecordingEditor {
     this.preview = false;
     this.time = 0;
     this.invalid.clear();
+    this.parts = this.original;
+    this.duration = this.parts.at(-1).end;
     this.history = new EditHistory(initialEdit(this.duration));
     this.selectCut(-1);
     this.seek(0);
@@ -304,7 +494,7 @@ class RecordingEditor {
     const kept = this.preview
       ? this.timeline.kept
       : [{ start: 0, end: this.duration, output: 0 }];
-    return segmentsOf(this.parts, kept);
+    return segmentsOf(this.parts, kept, this.preview ? this.options.speed : 1);
   }
 
   runPlayback(run) {
@@ -330,10 +520,11 @@ class RecordingEditor {
 
   seek(time) {
     this.paintTime(time);
-    const position = segmentTimeOf(this.segments, time);
-    this.runPlayback((signal) =>
-      this.player.seek(position.segment.part, position.time, signal),
-    );
+    const position = segmentTimeOf(this.segments, this.time);
+    this.runPlayback(async (signal) => {
+      await this.player.seek(position.segment.part, position.time, signal);
+      this.paintFrame();
+    });
     this.nodes.play.textContent = 'play';
   }
 
@@ -346,16 +537,25 @@ class RecordingEditor {
     const first = segmentTimeOf(segments, elapsed);
     this.runPlayback(async (signal) => {
       this.nodes.play.textContent = 'pause';
+      this.video.playbackRate = this.preview ? this.options.speed : 1;
+      this.video.muted = this.preview && this.options.output === 'mute';
+      let callback = null;
+      const frame = () => {
+        this.paintFrame();
+        callback = this.video.requestVideoFrameCallback(frame);
+      };
+      if (this.preview && this.video.requestVideoFrameCallback) frame();
       try {
         for (const segment of segments.slice(segments.indexOf(first.segment))) {
-          const { part, start, end, output } = segment;
+          const { part, start, end, output, speed = 1 } = segment;
           const from = segment === first.segment ? first.time : start;
           await this.player.seek(part, from, signal);
           await playUntil(this.video, end, signal, null, (time) => {
-            this.paintTime(output + Math.max(0, time - start));
+            this.paintTime(output + Math.max(0, time - start) / speed);
           });
         }
       } finally {
+        if (callback !== null) this.video.cancelVideoFrameCallback(callback);
         if (!signal.aborted) this.nodes.play.textContent = 'play';
       }
     });
@@ -399,7 +599,9 @@ class RecordingEditor {
     boundaries.replaceChildren(
       ...this.parts.slice(1).map(({ index, start }) => {
         const mark = document.createElement('span');
-        mark.textContent = `Part ${index + 1}`;
+        mark.textContent = this.clipsChanged
+          ? `Clip ${index + 1}`
+          : `Part ${index + 1}`;
         positioned(mark, start, null, this.duration);
         return mark;
       }),
@@ -424,7 +626,17 @@ class RecordingEditor {
 
   paint() {
     const { nodes, draft } = this;
+    this.options = editOptionsOf(draft);
     this.timeline = timelineOf(this.duration, draft);
+    if (!this.timeline.error) {
+      this.timeline.duration = Math.max(
+        1,
+        Math.round(this.timeline.duration / this.options.speed),
+      );
+      this.timeline.changed ||=
+        this.clipsChanged || changedOptions(this.options);
+    }
+    if (this.timeline.error) this.preview = false;
     this.paintRanges();
     nodes.scrub.max = this.preview ? this.timeline.duration : this.duration;
     this.paintTime(this.time);
@@ -436,6 +648,12 @@ class RecordingEditor {
     nodes.redo.disabled = !this.history.canRedo;
     nodes.discard.disabled = !this.dirty;
     nodes.preview.textContent = this.preview ? 'back to edit' : 'preview edit';
+    this.paintClips();
+    for (const input of this.optionInputs) {
+      const value = this.options[input.dataset.option];
+      if (input.type === 'checkbox') input.checked = value;
+      else if (input.value !== String(value)) input.value = value;
+    }
     nodes.scrub.setAttribute(
       'aria-label',
       this.preview ? 'Edited playhead' : 'Source playhead',
@@ -455,22 +673,102 @@ class RecordingEditor {
       }),
     );
     this.paintSave();
+    this.paintFrame();
+  }
+
+  paintClips() {
+    this.nodes.clips.replaceChildren(
+      ...this.parts.map((part, index) => {
+        const item = document.createElement('li');
+        const name = document.createElement('span');
+        name.textContent =
+          part.name || part.entry?.title || `Clip ${index + 1}`;
+        const button = (text, title, disabled, action) => {
+          const node = document.createElement('button');
+          node.type = 'button';
+          node.className = 'link-btn';
+          node.textContent = text;
+          node.setAttribute('aria-label', `${title} ${name.textContent}`);
+          node.disabled = disabled;
+          node.onclick = action;
+          return node;
+        };
+        const move = (step) => {
+          const parts = this.parts.toSpliced(index, 1);
+          parts.splice(index + step, 0, part);
+          this.replaceParts(parts);
+        };
+        item.append(
+          name,
+          button('↑', 'Move up', index === 0, () => move(-1)),
+          button('↓', 'Move down', index === this.parts.length - 1, () =>
+            move(1),
+          ),
+          button('×', 'Remove', this.parts.length === 1, () =>
+            this.replaceParts(this.parts.toSpliced(index, 1)),
+          ),
+        );
+        return item;
+      }),
+    );
+  }
+
+  paintFrame() {
+    const canvas = this.nodes.frame;
+    const audioOnly = this.preview && this.options.output === 'audio';
+    const visual = this.video.parentElement;
+    visual.hidden = audioOnly;
+    visual.dataset.edited = String(this.preview && !audioOnly);
+    canvas.hidden = !this.preview || audioOnly;
+    if (
+      canvas.hidden ||
+      !this.frame ||
+      !this.video.videoWidth ||
+      optionsError(this.options)
+    ) {
+      return;
+    }
+    const { width, height } = this.frame;
+    const scale = Math.min(1, 960 / Math.max(width, height));
+    const w = Math.max(2, Math.round(width * scale));
+    const h = Math.max(2, Math.round(height * scale));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const context = canvas.getContext('2d');
+    if (context) drawVideoFrame(context, this.video, this.options);
   }
 
   paintSave() {
     const timeline = this.timeline;
     const { nodes } = this;
     const segments = timeline.kept ? segmentsOf(this.parts, timeline.kept) : [];
-    const audio = segments.some(({ part }) => part.audio);
-    this.format = editFormatOf(audio);
-    const canRender = Boolean(
+    const { output } = this.options;
+    const audio = output !== 'mute' && segments.some(({ part }) => part.audio);
+    const audioOnly = output === 'audio';
+    this.format = editFormatOf(audio, undefined, output);
+    const validation = optionsError(this.options);
+    this.frame =
+      !validation && segments.length
+        ? outputFrameOf(segments[0].part, this.options)
+        : null;
+    const encoding =
+      this.frame &&
+      encodingOf(this.frame, timeline.duration, this.options, audio);
+    const picture =
       this.video.requestVideoFrameCallback &&
-      globalThis.HTMLCanvasElement?.prototype.captureStream &&
+      globalThis.HTMLCanvasElement?.prototype.captureStream;
+    const canRender = Boolean(
+      (audioOnly || picture) &&
       (!audio || globalThis.AudioContext) &&
       this.format,
     );
     const error =
       timeline.error ||
+      validation ||
+      encoding?.error ||
+      (audioOnly && !audio && 'There is no audio in the kept clips.') ||
       (!canRender && 'This browser cannot render an edited recording.');
     nodes.preview.disabled = Boolean(
       timeline.error || this.pendingCut || this.invalid.size,
@@ -479,23 +777,31 @@ class RecordingEditor {
       this.invalid.has('cut-start') || this.invalid.has('cut-end');
     nodes.validation.textContent = error || '';
     nodes.validation.hidden = !error;
-    nodes.format.textContent = canRender
-      ? this.format.extension.toUpperCase()
-      : 'Unavailable';
+    const properties = canRender ? [this.format.extension.toUpperCase()] : [];
+    if (this.frame && !audioOnly) {
+      properties.push(`${this.frame.width} × ${this.frame.height}`);
+    }
+    if (encoding && !encoding.error) {
+      properties.push(`about ${sizeText(encoding.bytes)}`);
+    }
+    nodes.format.textContent = properties.join(' · ');
     nodes.save.disabled = Boolean(
       error ||
       this.invalid.size ||
       !timeline.changed ||
       this.pendingCut ||
       !nodes['copy-title'].value.trim() ||
-      this.saving,
+      this.saving ||
+      this.tool,
     );
+    nodes['save-as'].disabled = nodes.save.disabled;
   }
 
-  async save() {
+  async save(toFile = false) {
     const { nodes, timeline, format } = this;
     if (this.saving || nodes.save.disabled) return;
     const title = nodes['copy-title'].value.trim();
+    const name = mediaNameOf(title, format.extension);
     this.playback?.abort();
     nodes.play.textContent = 'play';
     const control = new AbortController();
@@ -504,17 +810,28 @@ class RecordingEditor {
     nodes.retry.hidden = true;
     nodes['save-status'].hidden = false;
     nodes['cancel-save'].disabled = false;
+    nodes['cancel-save'].textContent = 'cancel save';
     nodes.progress.value = 0;
     nodes.progress.max = timeline.duration;
     this.setStatus('Saving edited copy…');
     try {
-      const id = await this.hooks.withSource(() =>
+      const pick =
+        toFile && typeof globalThis.showSaveFilePicker === 'function';
+      const target = pick
+        ? await pickExportFile(name, format.extension, format.mime)
+        : null;
+      if (pick && !target) {
+        this.setStatus('');
+        return;
+      }
+      const id = await this.hooks.withSource(this.parts, () =>
         saveEdit({
           signal: AbortSignal.any([control.signal, this.lifetime.signal]),
           title,
           entry: this.entry,
           parts: this.parts,
           timeline,
+          options: this.options,
           format,
           source: this.hooks.source,
           progress: (time) => {
@@ -526,7 +843,16 @@ class RecordingEditor {
           },
         }),
       );
-      this.hooks.saved(id);
+      let status = '';
+      if (toFile) {
+        try {
+          await this.hooks.exportCopy(id, format.extension, name, target);
+        } catch {
+          status =
+            'The copy is in Recordings. Save as could not write the file.';
+        }
+      }
+      this.hooks.saved(id, status);
     } catch (error) {
       if (this.lifetime.signal.aborted) return;
       this.setStatus(
