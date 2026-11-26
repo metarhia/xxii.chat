@@ -120,7 +120,8 @@ const toastText = (toast) => {
 
 const showsToast = (count) => count <= TOAST_LIMIT;
 
-export { SETTINGS_KEY, OPTIONS, DEFAULTS, TOAST_SHOW_MS };
+export { SETTINGS_KEY, LEGACY_AUTO_LOWER_KEY, OPTIONS, DEFAULTS };
+export { TOAST_SHOW_MS };
 export { validateSettings, readSettings, writeSettings };
 export { createToast, addToast, toastText, showsToast };
 export { targetLabel, segmentLabel };

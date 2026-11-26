@@ -118,11 +118,13 @@ sync. Terminal-like UI follows the
   and a dropped link is renegotiated through another linked peer
 - Offline-first: service worker caches the app and keeps all replicas in
   OPFS, messages written offline reach the server after reconnect
-- Automatic updates: the app version is shown in the sidebar and updates
-  install without user action, see [Releases](#releases)
+- Automatic updates: the version is shown in Settings > About, the settings
+  button gets a dot when an update is ready, and updates install without
+  user action, see [Releases](#releases)
 - One WebSocket connection for all tabs through `MetacomProxy`, one tab per
   browser (Web Locks) runs the WebRTC mesh for all of them
-- Keyboard: `Ctrl+K` jumps to a chat, feed, or contact, `Alt+↑`/`Alt+↓`
+- Keyboard: `Ctrl+K` jumps to a chat, feed, contact, or command (Settings,
+  Keyboard shortcuts, Recordings, New capture), `Ctrl+,` opens settings, `Alt+↑`/`Alt+↓`
   previous or next chat, `Ctrl+F` search, `Ctrl+P` pinned; `↑` in an empty
   composer selects the last message, `↑`/`↓` move, `Enter` or `Shift+F10`
   opens the menu, `R` replies, `E` edits your own message, and `F`
@@ -133,12 +135,57 @@ sync. Terminal-like UI follows the
 - Mobile: the back button closes the sidebar, panel, viewer, menu, thread
   selection, or post. The layout respects safe areas and the on-screen
   keyboard and offers bigger touch targets
-- Nick shared between tabs, install prompt, clear database, members list,
-  and activity log
+- Nick shared between tabs, members list, and activity log
+- Profile row at the bottom of the sidebar: your avatar, nick, and a
+  connection dot (hover for the connection, mesh role, and peers), a
+  recordings button (it turns red while a capture or call recording runs),
+  and a settings button
+- Settings screen in the main area (`?settings=<section>` opens a section,
+  `Esc` or `×` returns to the chat with its draft): Profile (nick, title for
+  lower thirds, peer id), Appearance, Notifications, Audio & video, Network,
+  Recordings defaults, Streaming destinations, Storage, Keyboard shortcuts,
+  and About (version, update, install, connection, diagnostics log). On a
+  phone the list comes first and Back closes the
+  section, then the screen
+- Appearance (Settings > Appearance, saved in `xxii:settings`): theme
+  `system`, `dark` (default), or `light`, message text size S, M, L, or XL
+  (12, 13, 15, 17 px for messages, posts, articles, Markdown, and the
+  composer), and compact density for message rows and sidebar items. A
+  sample message shows the size. Changes apply at once and in every open tab;
+  `system` follows the device theme live; `theme.js` sets the attributes
+  before the first paint. Browser zoom still scales the whole interface
+- Notifications (Settings > Notifications, saved in `xxii:settings`): the
+  browser permission with an `allow` button (a blocked site shows how to
+  unblock it), the ringtone on or off with a volume from 0 to 100 (50 is the
+  old loudness) and `test`, the system notification for calls while the tab
+  is hidden, notifications for new direct messages and replies to your
+  messages (off by default) with or without the message text, and the join
+  and leave toasts of calls. Rows that need the permission say so and ask
+  for it when turned on. A message notification appears only while no
+  xxii.chat tab is visible, only for messages that arrive while the app is
+  open, once per message even with several tabs; a click focuses a tab and
+  opens the message
+- Storage (Settings > Storage): browser storage used and available, split
+  into messages, files, recordings, and the app (counted while the section
+  is open), and a switch that asks the browser to keep this site's data when
+  space is low. The danger zone has three actions, each behind a dialog that
+  says what is lost and what stays: `clear` empties the local messages and
+  files (they come back from the server and online peers), `delete` removes
+  every recording from browser storage (copies saved in a folder stay; not
+  available while a recording runs), and `reset` returns the settings of
+  this browser to their defaults in every open tab while keeping the nick,
+  peer id, drafts, read marks, folders, and streaming destinations
+- Recordings screen in the main area (profile row button, the `Recordings`
+  command, the call's record menu, or Settings > Recordings): a grid of cards
+  with poster, title, chat, duration, size, and actions, a full-width player,
+  and `new capture`. `Esc` or Back closes it. In Settings > Audio & video the
+  microphone shows a live level meter and the camera a small mirrored preview
+  while the section is open outside a call; without permission the lists ask
+  you to allow camera and microphone
 
 ## Calls
 
-Calls in the session block stores network settings in the browser: public
+Settings > Network stores network settings in the browser: public
 STUN off by default, user STUN and TURN servers, and force relay.
 If two participants cannot connect, a third can forward their mic and video
 while the direct link retries. The tiles show who is relaying.
@@ -174,7 +221,7 @@ call state: the People panel lists them first, ordered by raise time, and
 tiles show the order number. Anyone lowers their own hand; admins lower any
 hand from the tile menu or the People panel, or all hands at once. A hand
 also lowers itself after three seconds of speaking unless auto-lower is off
-in Calls settings. The reactions 👍 ❤️ 😂 😮 👏 🎉 float up from the sender's tile for three
+in Settings > Audio & video. The reactions 👍 ❤️ 😂 😮 👏 🎉 float up from the sender's tile for three
 seconds. They travel as `reaction` messages on the call data channel, at most
 three per second per sender.
 
@@ -192,14 +239,15 @@ reactions, and leave, and closing it returns to the mini call; elsewhere the
 menu says that it is not available. Every control is reachable with `Tab` and
 operated with `Enter` or `Space`.
 
-The sidebar’s session block and the call’s more menu open Calls settings.
+The sidebar’s settings button and the call’s more menu open Settings;
+opening it from a call collapses the call to the mini window.
 This browser remembers device choices, join defaults, camera mirroring,
 noise suppression, push-to-talk, auto-lower, and network settings. The mic
 chevron offers a device picker, noise suppression, and push-to-talk. Recording
 defaults include layout, audio mode, quality, and a folder in browsers with
 directory access. A speaker test plays a short tone on the selected output.
 
-Mirror camera is on by default, in the camera menu and Calls settings. The
+Mirror camera is on by default, in the camera menu and Settings > Audio & video. The
 camera is flipped once at capture, so the self view, the preview, the mini
 call, and what other people receive all show the same picture; with it off
 nothing is mirrored. Toggling it in a call swaps the camera track without
@@ -216,7 +264,7 @@ screen, others quieter, or a volume per person). The record panel, opened from
 the record control menu, has these options with a live preview of the program,
 and every change applies on the next frame; quality (720p30, 1080p30,
 1080p60) is fixed while recording. The panel starts from the layout, audio,
-and quality defaults of Calls settings. The browser picks the first format it
+and quality defaults of Settings > Recordings. The browser picks the first format it
 can encode: MP4 with H.264 and AAC, MP4 with H.264 and Opus (Chrome on Linux),
 WebM with VP9 and Opus, then VP8. Chunks of one second go to a dedicated worker
 that writes the file into the browser storage (OPFS, `recordings/<id>/` with
@@ -257,7 +305,7 @@ storage target while Studio is enabled.
 
 Choose which overlays each scene shows. Save banners and a scrolling ticker
 in Studio, and show one banner and one participant lower third at a time.
-Participants can set **Title for lower thirds** in Calls settings. In the
+Participants can set **Title for lower thirds** in Settings > Profile. In the
 active call chat, use **Show on screen** from a text message's menu to put
 that message and its author's nick on the program. Studio plays one local
 video clip at a time, full frame or as a share tile. Clip sound goes to the
@@ -283,15 +331,16 @@ the server has no CORS for this app, the signaling goes through the app's
 server relay instead, `stream/whip`, which only members of the call may use
 (30 requests a minute), and the media still flows straight to the media server.
 
-Open **Recordings** from the sidebar session block or the record control menu
-to see local recordings and browser storage usage. Play and seek in the library
+Open **Recordings** from the profile row or the record control menu (the
+call shrinks to its mini tile) to see local recordings and browser storage
+usage. Play and seek in the library
 using the service worker's `/recordings/<id>/<file>` route with `Range` support.
 Finished recordings can be renamed, deleted, or downloaded. In browsers that
 offer file and folder pickers, **Save as** lets you pick a file and **Save to
-folder** copies to the folder remembered in Calls settings. Both show progress,
+folder** copies to the folder remembered in Settings > Recordings. Both show progress,
 and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate names.
 
-In Chromium with a folder picker, **Save recordings to** in Calls settings or
+In Chromium with a folder picker, **Save recordings to** in Settings > Recordings or
 the Record panel can send recordings straight to a chosen folder. Choose
 5-, 10-, 15-, or 30-minute parts, with 10 minutes by default. Paused time
 doesn't count toward the part length. Each part is a playable file. In the
@@ -299,7 +348,9 @@ library, select a part to play, download, or save a copy. Browser storage
 holds the library entry and its poster. Deleting that entry leaves the
 files in the folder.
 
-Use **capture** in the session block or a direct chat to record without a call.
+Use **new capture** on the Recordings screen, the **New capture** command of
+`Ctrl+K`, or a direct chat to record without a call; it opens in the right
+panel.
 Select a camera, microphone, screen or window, and screen audio, and preview
 camera only, screen only, or a screen with a camera bubble. Save to browser
 storage or a chosen folder. Closing Capture while recording asks whether to
@@ -362,7 +413,7 @@ A failed listen exits 1.
 Open the ICE port for UDP and TCP and the relay range for UDP. The default
 relay range is `49160-49359`. Open the TLS port only when TLS is configured.
 
-Calls settings still hold public STUN, user servers, and force relay.
+Settings > Network still holds public STUN, user servers, and force relay.
 
 ## Releases
 
@@ -443,6 +494,7 @@ server) with `files/have`, `get`, and `put`.
 | `chat/username`                  | worker      | Pass nick to other tabs                                            |
 | `chat/clear`                     | worker      | Clear worker replicas, tabs follow                                 |
 | `xxii:client`, `xxii:ring`       | worker      | Notification source identity and incoming ring fallback            |
+| `xxii:notify`                    | worker      | Message notification; the click answers a tab with `xxii:open`     |
 | `cache/check`                    | worker      | Check and install a new version                                    |
 | `chat`, `direct` units           | answer peer | Offer peer syncs over WebRTC                                       |
 | `mesh/relay`, `mesh/state`       | answer peer | Relay signaling, server state                                      |
@@ -514,7 +566,17 @@ server) with `files/have`, `get`, and `put`.
   `test/call-hands.js` covers hand order, reactions, membership toasts and
   screen reader announcements. `test/call-keys.js` covers shortcuts,
   keyboard menus and picture-in-picture. `test/call-settings.js` checks
-  settings validation, migration and toast timing. `test/call-phone.js`
+  settings validation, migration and toast timing. `test/settings.js`
+  checks the settings screen, profile row, deep links, Back, devices,
+  appearance, storage and About. `test/app-settings-logic.js` checks the appearance
+  settings, `theme.js`, and the contrast of both themes.
+  `test/storage-usage-logic.js` checks the usage breakdown, the cancellable
+  OPFS walk, and which keys a settings reset removes.
+  `test/notifications-logic.js` checks the ring volume mapping, the message
+  notification text, live-message filtering, and the worker handler and
+  click route; `test/notifications-settings.js` checks the permission row,
+  toggles, ring volume, call gates, and message notifications with hidden
+  and visible tabs. `test/call-phone.js`
   checks saved defaults, push-to-talk, auto-lower, mobile controls and Back;
   `test/call-mirror.js` checks the mirrored self view and remote tile, the
   toggle without renegotiation, the stats path, and camera off (scenario 23);

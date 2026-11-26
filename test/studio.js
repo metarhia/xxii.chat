@@ -934,7 +934,7 @@ test(
     await click(host, action('switch-scene', 'live'));
     await host.wait('return window.studioCards().banner?.letters > 5;');
 
-    await guest.run('app.showPanel("calls");');
+    await guest.run(`app.openSettings('profile');`);
     assert.equal(
       await guest.run(`return document.querySelector(
     '[data-setting=title]').maxLength;`),

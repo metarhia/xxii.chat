@@ -758,7 +758,10 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
   await t.test('new version installs by itself and applies', async () => {
     await focus(first);
     const { version } = JSON.parse(await fs.readFile(MANIFEST, 'utf8'));
-    const shown = await run(first, 'return app.versionBtn.textContent;');
+    const shown = await run(
+      first,
+      'return document.getElementById("version-text").textContent;',
+    );
     assert.equal(shown, `v${version}`);
     const { targetInfos } = await browser.request('Target.getTargets');
     const page = targetInfos.find(
@@ -787,14 +790,17 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     await browser.request('Fetch.enable', { patterns }, sessionId);
     const ready = await run(first, 'return app.checkUpdate(true);');
     assert.equal(ready, next);
-    const label = await run(first, 'return app.versionBtn.textContent;');
-    assert.equal(label, `v${version} → v${next}`);
+    const label = await run(
+      first,
+      'return document.getElementById("version-state").textContent;',
+    );
+    assert.equal(label, `Version ${next} is ready`);
     const keys = await run(first, 'return caches.keys();');
     assert.deepEqual(keys.toSorted(), [`xxii-${next}`, 'xxii-meta']);
     await run(first, 'setTimeout(() => app.restart(), 0); return true;');
     const restarted = (value) => `return app.version === '${value}'
       && app.uplink?.link.source !== ''
-      && app.versionBtn.textContent === 'v${value}';`;
+      && document.getElementById('version-text').textContent === 'v${value}';`;
     await wait(first, restarted(next), 30000);
     await wait(second, restarted(next), 30000);
     await browser.request('Fetch.disable', {}, sessionId);

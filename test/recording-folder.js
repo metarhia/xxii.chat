@@ -302,7 +302,7 @@ test(
         );
 
         const playing = await run('return app.recordings.player.src;');
-        await click('#panel-close-btn');
+        await click('#recordings-close');
         assert.equal(await canFetch(playing), false);
         assert.ok(await run(`return !document.querySelector('${ROW}');`));
         await click('#recordings-btn');
@@ -368,7 +368,7 @@ test(
       return row?.querySelector('.recording-note').textContent
         .includes('The last part was lost.');
     `);
-      await click('#panel-close-btn');
+      await click('#recordings-close');
     });
 
     await t.test(
@@ -403,7 +403,7 @@ test(
     `);
         await click('#prejoin [data-action=join]');
         await wait(`return app.callSession?.phase === 'joined';`);
-        await click('#calls-btn');
+        await run(`app.openSettings('recordings'); return true;`);
         const choose = `
       const select = document.querySelector('[data-setting=recordingTarget]');
       select.value = 'folder';
@@ -422,7 +422,9 @@ test(
       return app.preferences.settings.recordingTarget === 'folder' &&
         segment.value === '10';
     `);
-        await click('#panel-close-btn');
+        await run('app.closeSettings(); return true;');
+        await click('#mini-call');
+        await wait(`return app.callStage.mode === 'call';`);
         await click('.call-record-control [data-action=record-panel]');
         const panel = await run(`
       const target = document.querySelector('[data-record=recordingTarget]');

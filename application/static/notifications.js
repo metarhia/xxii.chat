@@ -1,4 +1,7 @@
+const NOTICE_MS = 60000;
+
 let requested = false;
+const shown = new Map();
 
 const requestCallNotifications = () => {
   const Notify = globalThis.Notification;
@@ -52,13 +55,57 @@ const showRingNotification = async (scope, event) => {
   }
 };
 
+const isText = (value) => typeof value === 'string' && value !== '';
+
+const hasVisibleWindow = async (scope) => {
+  const windows = await scope.clients.matchAll({
+    type: 'window',
+    includeUncontrolled: true,
+  });
+  return windows.some((client) => client.visibilityState === 'visible');
+};
+
+const claimMessage = (message, now) => {
+  for (const [id, at] of shown) {
+    if (now - at >= NOTICE_MS) shown.delete(id);
+  }
+  if (shown.has(message)) return false;
+  shown.set(message, now);
+  return true;
+};
+
+const showMessageNotification = async (scope, event) => {
+  const { title, body, tag, chat, message } = event.data;
+  const fields = [title, body, tag, chat, message];
+  if (!fields.every(isText)) return;
+  const registration = scope.registration;
+  const isGranted = scope.Notification?.permission === 'granted';
+  if (!isGranted || typeof registration.showNotification !== 'function') return;
+  if (!claimMessage(message, Date.now())) return;
+  try {
+    if (await hasVisibleWindow(scope)) return void shown.delete(message);
+    const clientId = event.source?.id ?? '';
+    const data = { chat, message, clientId };
+    await registration.showNotification(title, { body, tag, data });
+  } catch {
+    shown.delete(message);
+  }
+};
+
 const onNotificationMessage = (scope, event) => {
   const type = event.data?.type;
   if (type === 'xxii:client') {
     event.ports?.[0]?.postMessage(event.source?.id ?? '');
   } else if (type === 'xxii:ring') {
     event.waitUntil(showRingNotification(scope, event));
+  } else if (type === 'xxii:notify') {
+    event.waitUntil(showMessageNotification(scope, event));
   }
+};
+
+const messageRoute = ({ chat, message }) => {
+  const params = new URLSearchParams({ chat, message });
+  return `/?${params}`;
 };
 
 const focusNotificationClient = async (scope, notification) => {
@@ -75,11 +122,17 @@ const focusNotificationClient = async (scope, notification) => {
       return false;
     }
   });
-  const clientId = notification.data?.clientId;
+  const { clientId, chat, message } = notification.data ?? {};
+  const target = isText(chat) && isText(message) ? { chat, message } : null;
   const source = matches.find((client) => client.id === clientId);
   const client = source ?? matches[0];
-  if (client) await client.focus();
-  else await scope.clients.openWindow('/');
+  const route = target ? messageRoute(target) : '/';
+  if (!client) {
+    await scope.clients.openWindow(route);
+    return;
+  }
+  await client.focus();
+  if (target) client.postMessage({ type: 'xxii:open', ...target });
 };
 
 const onNotificationClick = (scope, event) => {

@@ -117,7 +117,8 @@ test('network settings for ICE servers', { timeout: 120000 }, async (t) => {
   const session = await openApp();
   const rejected = await run(
     session,
-    `document.getElementById('calls-btn').click();
+    `document.getElementById('settings-btn').click();
+    document.querySelector('[data-section="network"]').click();
     document.getElementById('ice-url').value = 'http://example.com';
     document.getElementById('ice-add').click();
     const note = document.getElementById('notification');
@@ -125,14 +126,16 @@ test('network settings for ICE servers', { timeout: 120000 }, async (t) => {
     const stored = localStorage.getItem('xxii:ice') ?? '';
     const listed = document.getElementById('ice-servers').textContent;
     return {
-      panel: document.querySelector('.app').dataset.panel,
+      view: document.querySelector('.app').dataset.view,
+      section: document.querySelector('[aria-current=page]').dataset.section,
       visible,
       text: note.textContent,
       stored,
       listed,
     };`,
   );
-  assert.equal(rejected.panel, 'calls');
+  assert.equal(rejected.view, 'settings');
+  assert.equal(rejected.section, 'network');
   assert.equal(rejected.visible, true);
   assert.equal(rejected.text.length > 0, true);
   assert.equal(rejected.stored.includes('http://example.com'), false);

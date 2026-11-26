@@ -56,12 +56,12 @@ test(
 
     await click('#recordings-btn');
     await wait(`
-      const panel = document.querySelector('section[data-panel=recordings]');
+      const panel = document.getElementById('recordings-view');
       const note = panel.querySelector('.recordings-status');
       return panel.getClientRects().length > 0 &&
         note.textContent === 'No recordings yet.';
     `);
-    await click('#panel-close-btn');
+    await click('#recordings-close');
     await run(`await app.startCall('general');`);
     await click('#prejoin [data-action=join]');
     await wait(`return app.callStage?.mode === 'call' &&
@@ -81,7 +81,7 @@ test(
     await click(`${CONTROL} [data-action=recordings]`);
     await wait(`
       const row = document.querySelector('${LIBRARY}');
-      const panel = row?.closest('.panel-body');
+      const panel = row?.closest('.recordings-view');
       const details = row?.querySelector('.recording-details').textContent;
       const isVisible = panel?.getClientRects().length > 0;
       return isVisible && details.includes('Recording');
@@ -107,8 +107,15 @@ test(
       download: true,
     });
 
+    assert.equal(
+      await run(`return app.callStage.mode === 'mini' &&
+        app.recordingsView.isOpen &&
+        document.getElementById('recordings-btn')
+          .classList.contains('recording');`),
+      true,
+    );
     await wait(`return app.callStage.recording.recorder.activeMs >= 3500;`);
-    await click(`${CONTROL} [data-action=record]`);
+    await run(`app.callStage.recording.toggle(); return true;`);
     await wait(`
       const row = document.querySelector('${LIBRARY}');
       const details = row?.querySelector('.recording-details').textContent;

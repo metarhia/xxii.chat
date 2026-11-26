@@ -26,6 +26,9 @@ import { syncFields, settingField, deviceField } from './call-preferences.js';
 import { fillDevice } from './call-preferences.js';
 import { DEFAULTS, createToast, addToast } from './call-settings.js';
 import { showsToast, toastText, TOAST_SHOW_MS } from './call-settings.js';
+import { read, ringGainOf } from './app-settings.js';
+import { TONE_HZ, audioContext, closeContext } from './ringtone.js';
+import { shapeBeat } from './ringtone.js';
 import { titleOf } from './call-settings.js';
 
 const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
@@ -48,7 +51,6 @@ const ADMISSION = {
   link: { token: 'join', other: 'lobby' },
   approval: { token: 'lobby', other: 'lobby' },
 };
-const TONE_HZ = 440;
 const RING_MS = 1600;
 const RING_PATTERN = [280, 120, 280, 920];
 const PIP_SIZE = { width: 360, height: 300 };
@@ -578,8 +580,10 @@ const createPip = () => {
 };
 
 const copyStyles = (target) => {
-  const theme = document.documentElement.dataset.theme;
-  if (theme) target.documentElement.dataset.theme = theme;
+  const { dataset } = document.documentElement;
+  for (const name of ['theme', 'text', 'density']) {
+    if (dataset[name]) target.documentElement.dataset[name] = dataset[name];
+  }
   for (const sheet of document.styleSheets) {
     try {
       const rules = Array.from(sheet.cssRules, (rule) => rule.cssText);
@@ -618,14 +622,6 @@ const createTile = (endpoint) => {
   tile.append(createVideo(true), createAvatar(), name, bars, menu, stats, poor);
   tile.append(hand);
   return tile;
-};
-
-const audioContext = () =>
-  globalThis.AudioContext ?? globalThis.webkitAudioContext;
-
-const closeContext = (context) => {
-  if (!context || context.state === 'closed') return;
-  context.close().catch(() => undefined);
 };
 
 const notify = async (registration, title, options) => {
@@ -684,6 +680,7 @@ class RingAlert {
     this.oscillator = null;
     this.gain = null;
     this.pulse = 0;
+    this.peak = 0;
     this.vibe = 0;
     this.root = null;
   }
@@ -701,7 +698,9 @@ class RingAlert {
     this.root = createIncoming(this);
     document.body.append(this.root);
     const generation = this.generation;
-    this.play(generation).catch(() => undefined);
+    const settings = read(globalThis.localStorage);
+    this.peak = settings.ring ? ringGainOf(settings.ringVolume) : 0;
+    if (this.peak > 0) this.play(generation).catch(() => undefined);
     this.buzz();
     this.alert();
   }
@@ -814,11 +813,7 @@ class RingAlert {
     const context = this.context;
     const live = gain && context && context.state === 'running';
     if (!live) return;
-    const now = context.currentTime;
-    gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.05, now + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+    shapeBeat(gain, context.currentTime, this.peak);
   }
 
   silence() {
@@ -859,6 +854,7 @@ class RingAlert {
     const nick = this.nick;
     const run = async () => {
       if (call === '' || this.call !== call || !document.hidden) return;
+      if (!read(globalThis.localStorage).notifyCalls) return;
       const Notify = globalThis.Notification;
       const worker = globalThis.navigator?.serviceWorker;
       const ready = typeof Notify === 'function' && worker?.ready;
@@ -1165,6 +1161,7 @@ class CallStage {
     this.stopLayout();
     this.host.replaceChildren(view);
     this.root.dataset.call = mode;
+    this.hooks.mounted?.(mode);
     this.closePip(false);
     this.mini?.remove();
     this.mini = null;
@@ -1388,13 +1385,6 @@ class CallStage {
 
   onKey(event) {
     if (event.isComposing) return;
-    const { panel } = this.root.dataset;
-    if (event.key === 'Escape' && ['calls', 'recordings'].includes(panel)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.hooks.closeSidePanel();
-      return;
-    }
     if (event.target.closest?.('.recordings-player')) return;
     if (event.key === 'Escape' && this.tileMenu?.menu.isOpen) {
       event.preventDefault();
@@ -1743,7 +1733,9 @@ class CallStage {
       }
       lines.unshift(toastText(recent));
       const toast = document.getElementById('call-toast');
-      toast.hidden = !showsToast(Math.max(this.people.length, people.length));
+      const count = Math.max(this.people.length, people.length);
+      const isAllowed = read(globalThis.localStorage).callToasts;
+      toast.hidden = !isAllowed || !showsToast(count);
       toast.textContent = toastText(this.toast);
       clearTimeout(this.toastTimer);
       this.toastTimer = setTimeout(() => {

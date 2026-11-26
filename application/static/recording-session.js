@@ -195,6 +195,7 @@ class RecordingSession {
         this.#starting = null;
         if (this.#isDisposed) this.#dropCompositor();
         this.paint();
+        this.#hooks.state?.();
       });
     this.paint();
     return this.#starting;
@@ -404,6 +405,7 @@ class RecordingSession {
   #onState(state) {
     if (state === 'stopped') this.#settle();
     this.paint();
+    this.#hooks.state?.();
   }
 
   #onFailure(error) {

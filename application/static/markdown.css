@@ -250,8 +250,8 @@
   margin: 0;
   padding: 6px 10px;
   overflow-x: auto;
-  font-size: 12px;
-  line-height: 17px;
+  font-size: calc(var(--message-size) - 1px);
+  line-height: calc(var(--message-line) - 1px);
   tab-size: 2;
   white-space: pre;
   word-break: normal;

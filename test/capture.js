@@ -79,7 +79,7 @@ test('solo capture', { timeout: 180000 }, async (t) => {
   await t.test(
     'session capture previews three layouts and saves locally',
     async () => {
-      await click('#capture-btn');
+      await run(`app.openCapture(''); return true;`);
       await set('quality', '720p30');
       assert.equal(
         await run(`return app.capture.media.cameraTrack === null &&
@@ -144,12 +144,13 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       await wait(
         `return !!document.querySelector('.recording-item[data-id="${id}"]');`,
       );
+      await click('#panel-close-btn');
       assert.equal(
         await run(`return captureTracks.every(
       (track) => track.readyState === 'ended');`),
         true,
       );
-      await click('#panel-close-btn');
+      await click('#recordings-close');
     },
   );
 
@@ -229,7 +230,7 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       window.showDirectoryPicker = () => Promise.resolve(captureFolder);
       return true;
     `);
-    await click('#capture-btn');
+    await run(`app.openCapture(''); return true;`);
     await set('quality', '720p30');
     await set('recordingTarget', 'folder');
     await wait(`return app.capture.options.recordingTarget === 'folder';`);
@@ -275,31 +276,23 @@ test('solo capture', { timeout: 180000 }, async (t) => {
     await click('#panel-close-btn');
   });
 
-  await t.test(
-    'both capture buttons are disabled while in a call',
-    async () => {
-      await click('#call-btn');
-      await wait(`return app.callStage.mode === 'prejoin';`);
-      await click('#prejoin [data-action=join]');
-      await wait(`return app.callStage.mode === 'call';`);
-      assert.deepEqual(
-        await run(`
-      return [app.captureBtn, app.directCaptureBtn].map(({ disabled, title }) =>
+  await t.test('capture is unavailable while in a call', async () => {
+    await click('#call-btn');
+    await wait(`return app.callStage.mode === 'prejoin';`);
+    await click('#prejoin [data-action=join]');
+    await wait(`return app.callStage.mode === 'call';`);
+    assert.deepEqual(
+      await run(`
+      return [app.directCaptureBtn].map(({ disabled, title }) =>
         [disabled, title]);
     `),
-        [
-          [true, 'Use the record control in your call'],
-          [true, 'Use the record control in your call'],
-        ],
-      );
-      await click('#direct-capture-btn');
-      assert.equal(await run(closed), true);
-      await run(`await app.closeCall(); return true;`);
-      await wait(
-        `return !app.captureBtn.disabled && !app.directCaptureBtn.disabled;`,
-      );
-    },
-  );
+      [[true, 'Use the record control in your call']],
+    );
+    await run(`app.openCapture(''); return true;`);
+    assert.equal(await run(closed), true);
+    await run(`await app.closeCall(); return true;`);
+    await wait(`return !app.directCaptureBtn.disabled;`);
+  });
 
   await t.test('closing releases a pending microphone', async () => {
     await run(`
@@ -314,7 +307,7 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       };
       window.restoreMic = () => { delete devices.getUserMedia; };
     `);
-    await click('#capture-btn');
+    await run(`app.openCapture(''); return true;`);
     await click(source('mic'));
     await wait(`return window.pendingTrack?.readyState === 'live';`);
     await click('#panel-close-btn');

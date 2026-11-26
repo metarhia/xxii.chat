@@ -113,14 +113,47 @@ const entriesOf = async (recordings) => {
   return sortRecordings(entries.filter(Boolean));
 };
 
+const removableOf = async (storage) => {
+  const recordings = await recordingsOf(storage);
+  const entries = await entriesOf(recordings);
+  return { recordings, entries: entries.filter(canChange) };
+};
+
+const countRecordings = async (storage) => {
+  if (typeof storage?.getDirectory !== 'function') return 0;
+  const { entries } = await removableOf(storage);
+  return entries.length;
+};
+
+const removeRecording = async (recordings, entry) => {
+  try {
+    await recordings.removeEntry(entry.id, { recursive: true });
+    if (isFolderRecording(entry)) {
+      await folderHandle(null, entry.id).catch(() => {});
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const removeRecordings = async (storage) => {
+  const { recordings, entries } = await removableOf(storage);
+  let removed = 0;
+  for (const entry of entries) {
+    if (await removeRecording(recordings, entry)) removed++;
+  }
+  return { removed, failed: entries.length - removed };
+};
+
 class Recordings {
-  constructor(panel, onRepair) {
-    this.panel = panel;
-    this.list = panel.querySelector('.recordings-list');
-    this.storage = panel.querySelector('.recordings-storage');
-    this.status = panel.querySelector('.recordings-status');
-    this.repairStatus = panel.querySelector('.recordings-repair');
-    this.player = panel.querySelector('video');
+  constructor(root, onRepair) {
+    this.root = root;
+    this.list = root.querySelector('.recordings-list');
+    this.storage = root.querySelector('.recordings-storage');
+    this.status = root.querySelector('.recordings-status');
+    this.repairStatus = root.querySelector('.recordings-repair');
+    this.player = root.querySelector('video');
     this.template = document.getElementById('recording-item-template');
     this.recordings = null;
     this.selected = '';
@@ -214,6 +247,17 @@ class Recordings {
     this.stopPlayback();
     this.list.replaceChildren();
     this.setStatus('');
+  }
+
+  dismiss() {
+    if (this.selected) {
+      this.stopPlayback();
+      return true;
+    }
+    const form = this.list.querySelector('form:not(.hidden)');
+    if (!form) return false;
+    form.querySelector('.recording-cancel').click();
+    return true;
   }
 
   stopPlayback() {
@@ -506,6 +550,17 @@ class Recordings {
     }
   }
 
+  async removeAll(storage) {
+    if (this.isChanging) return { removed: 0, failed: 0 };
+    this.isChanging = true;
+    try {
+      this.stopPlayback();
+      return await removeRecordings(storage);
+    } finally {
+      this.isChanging = false;
+    }
+  }
+
   async deleteEntry(entry) {
     if (this.isChanging) return;
     const { title } = labelsOf(entry);
@@ -525,3 +580,4 @@ class Recordings {
 }
 
 export { Recordings, sortRecordings, labelsOf, storageText };
+export { countRecordings, removeRecordings };
