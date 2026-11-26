@@ -222,7 +222,7 @@ const createProgramControls = () => {
   const note = document.createElement('p');
   note.className = 'call-note record-note hidden';
   note.setAttribute('role', 'status');
-  return [preview, state, actions, note];
+  return [state, preview, actions, note];
 };
 
 const createRecordPanel = () => {
@@ -239,54 +239,45 @@ const createRecordPanel = () => {
   fields.append(createBackground());
   const follows = document.createElement('p');
   follows.className = 'call-note record-follows hidden';
-  aside.append(head, ...createProgramControls(), follows, fields);
+  const capture = createButton('capture-local', 'Add a screen to my recording');
+  aside.append(head, ...createProgramControls(), follows, capture, fields);
   aside.append(createList('pinned', 'Chosen people'));
   aside.append(createList('volumes', 'Volume per person'));
   return aside;
 };
 
-const createRecordControl = () => {
-  const wrap = document.createElement('div');
-  wrap.className = 'call-record-control';
-  wrap.append(createButton('record', 'record'));
-  const menu = document.createElement('details');
-  const summary = document.createElement('summary');
-  summary.textContent = '▾';
-  summary.setAttribute('aria-label', 'recording options');
-  const choices = document.createElement('div');
-  choices.className = 'share-menu';
-  choices.append(
-    createButton('record-pause', 'pause'),
-    createButton('record-panel', 'program options'),
-    createButton('recordings', 'recordings'),
-  );
-  menu.append(summary, choices);
-  wrap.append(menu);
-  return wrap;
+const CONTROL_LABELS = { idle: 'record', recording: 'stop', paused: 'paused' };
+
+const paintControlLabel = (button, view) => {
+  const label = button.querySelector('.call-label');
+  label.textContent = CONTROL_LABELS[view.state] ?? 'stop';
+  button.title = view.state === 'idle' ? 'Record' : 'Stop recording';
+};
+
+const paintIndicator = (root, view) => {
+  const indicator = root.querySelector('.call-recording');
+  if (!indicator) return;
+  if (view.state === 'idle') {
+    if (indicator.dataset.own === undefined) return;
+    delete indicator.dataset.own;
+    indicator.textContent = '';
+    indicator.classList.add('hidden');
+    return;
+  }
+  const sign = view.state === 'paused' ? 'paused ' : '';
+  indicator.dataset.own = '';
+  indicator.textContent = `● ${sign}${view.text}`;
+  indicator.classList.remove('hidden');
 };
 
 const paintRecordButton = (button, view) => {
-  const isControl = Boolean(button.closest('.call-record-control'));
+  const isControl = button.classList.contains('call-control');
   const isActive = view.state !== 'idle';
   button.setAttribute('aria-pressed', `${isActive}`);
   button.disabled = view.isBusy;
   button.classList.toggle('recording', isActive);
-  if (!isActive) {
-    button.textContent = isControl ? 'record' : 'start recording';
-    return;
-  }
-  if (!isControl) {
-    button.textContent = 'stop recording';
-    return;
-  }
-  const dot = document.createElement('span');
-  dot.className = 'rec-dot';
-  dot.textContent = '●';
-  dot.setAttribute('aria-hidden', 'true');
-  const sign = view.state === 'paused' ? 'paused ' : '';
-  const text = document.createTextNode(` ${sign}${view.text}`);
-  button.replaceChildren(dot, text);
-  button.setAttribute('aria-label', `stop recording, ${sign}${view.text}`);
+  if (isControl) return void paintControlLabel(button, view);
+  button.textContent = isActive ? 'stop recording' : 'start recording';
 };
 
 const paintPause = (button, view) => {
@@ -420,10 +411,11 @@ const paintRecordControl = (root, view) => {
     paintPause(button, view);
   }
   paintRecordPanel(root, view);
+  paintIndicator(root, view);
 };
 
 export { FIELDS, PROGRAM_FIELDS, defaultsOf, labelOf, valueOf };
 export { createSceneFields, paintSceneFields };
-export { createRecordPanel, createRecordControl, paintRecordControl };
+export { createRecordPanel, paintRecordControl };
 export { createProgramControls, createRecordFields, createField };
 export { createButton };

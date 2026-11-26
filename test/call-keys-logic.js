@@ -17,6 +17,12 @@ test('shortcuts map to call actions', async () => {
   const layout = { key: 'L', code: 'KeyL', ctrlKey: true, altKey: true };
   assert.equal(of(layout), 'layout');
   assert.equal(of({ key: 'f', code: 'KeyF' }), 'fullscreen');
+  const record = { key: 'r', code: 'KeyR', ctrlKey: true, altKey: true };
+  assert.equal(of(record), 'record');
+  assert.equal(of({ key: 'r', code: 'KeyR', ctrlKey: true }), '');
+  const help = { key: '/', code: 'Slash', ctrlKey: true };
+  assert.equal(of(help), 'shortcuts');
+  assert.equal(of({ key: '/', code: 'Slash' }), '');
 });
 
 test('shortcuts need the exact modifiers', async () => {
@@ -87,6 +93,8 @@ test('help lists every shortcut and push to talk', async () => {
   const keys = await load();
   const text = keys.helpOf().map((row) => row.keys);
   assert.equal(text.includes('Ctrl D'), true);
+  assert.equal(text.includes('Ctrl Alt R'), true);
+  assert.equal(text.includes('Ctrl /'), true);
   assert.equal(text.includes('hold Space'), true);
   assert.equal(text.includes('Esc'), true);
 });

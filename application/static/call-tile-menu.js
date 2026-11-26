@@ -33,15 +33,86 @@ const adminItems = (stage, endpoint) => {
   return items;
 };
 
+const audioItem = (stage, endpoint) => {
+  const session = stage.session;
+  const enabled = session?.isAudioOnly(endpoint);
+  const requested = session?.requestedAudioOnly(endpoint);
+  const poor = stage.quality.get(endpoint)?.poor;
+  const label = enabled ? 'Audio only on' : 'Audio only';
+  const offer = poor && !enabled ? 'Poor connection · try audio only' : label;
+  const item = { action: 'audio-only', label: offer };
+  if (!enabled || requested) return item;
+  return { ...item, disabled: true, reason: 'Peer chose audio only' };
+};
+
+const personItems = (stage, endpoint, slot) => {
+  const local = endpoint === stage.session?.endpoint;
+  const pinned = stage.pin === tileId(endpoint, slot);
+  const items = [
+    { action: 'pin', label: pinned ? 'Unpin' : 'Pin' },
+    { action: 'tile-fullscreen', label: 'Full screen tile' },
+  ];
+  if (!local) {
+    const shown = stage.statsVisible(endpoint);
+    const label = shown ? 'Hide stats' : 'Show stats';
+    items.push({ action: 'tile-stats', label });
+    items.push(audioItem(stage, endpoint));
+  }
+  return items.concat(adminItems(stage, endpoint));
+};
+
+const createVolume = (stage, endpoint) => {
+  const peer = stage.peerOf(endpoint);
+  const box = document.createElement('div');
+  const field = document.createElement('label');
+  field.className = 'tile-volume';
+  const caption = document.createElement('span');
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = '200';
+  input.step = '1';
+  input.value = `${stage.volume.get(peer)}`;
+  input.setAttribute('aria-label', 'Local participant volume');
+  const paint = () => {
+    caption.textContent = `Local volume ${input.value}%`;
+  };
+  input.addEventListener('input', () => {
+    stage.volume.set(peer, Number(input.value));
+    paint();
+  });
+  paint();
+  field.append(caption, input);
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'menu-item';
+  reset.textContent = 'Reset volume to 100%';
+  reset.addEventListener('click', () => {
+    input.value = '100';
+    stage.volume.set(peer, 100);
+    paint();
+  });
+  box.append(field, reset);
+  return box;
+};
+
 class TileMenu {
   constructor(stage) {
     this.stage = stage;
     this.tile = null;
+    this.endpoint = '';
+    this.slot = 'camera';
     this.trigger = null;
     this.element = document.createElement('div');
     this.element.className = 'menu call-tile-menu hidden';
     this.element.setAttribute('aria-label', 'Participant options');
-    this.menu = new Menu(this.element, () => []);
+    const hooks = stage.hooks;
+    const layers = {
+      push: (name) => hooks.pushLayer?.(name),
+      pop: (name) => hooks.popLayer?.(name),
+    };
+    const backdrop = document.getElementById('backdrop');
+    this.menu = new Menu(this.element, { backdrop, layers });
     this.press = new Press({
       hold: (tile, x, y) => {
         this.open(tile, { x, y });
@@ -51,150 +122,89 @@ class TileMenu {
     this.onMove = (event) => this.press.move(event);
     this.onUp = () => this.press.end();
     this.onCancel = () => this.press.abort();
-    this.onClick = (event) => this.click(event);
-    this.onFocus = (event) => {
-      const inside = this.element.contains(event.target);
-      if (this.menu.isOpen && !inside && event.target !== this.trigger) {
-        this.close(false);
-      }
-    };
-    this.element.addEventListener('click', this.onClick);
     document.addEventListener('pointerdown', this.onDown, true);
     document.addEventListener('pointermove', this.onMove);
     document.addEventListener('pointerup', this.onUp);
     document.addEventListener('pointercancel', this.onCancel);
-    document.addEventListener('focusin', this.onFocus);
     document.body.append(this.element);
   }
 
   pointerDown(event) {
-    const inside = this.element.contains(event.target);
-    const button = event.target.closest?.('[data-action="tile-menu"]');
-    if (this.menu.isOpen && !inside && !button) this.close(false);
     const tile = event.target.closest?.('.call-tile');
     if (!tile || !this.stage.host?.contains(tile)) return;
     if (event.target.closest('button, input, select, summary')) return;
     this.press.start(event, tile, false);
   }
 
+  tileOf(endpoint, slot) {
+    const tiles = this.stage.host?.querySelectorAll('.call-tile') ?? [];
+    const isTile = (tile) =>
+      tile.dataset.endpoint === endpoint && tile.dataset.slot === slot;
+    return Array.from(tiles).find(isTile) ?? null;
+  }
+
   toggle(tile, trigger) {
-    if (this.tile === tile && this.menu.isOpen) return void this.close();
-    const rect = trigger.getBoundingClientRect();
-    this.open(tile, { x: rect.left, y: rect.bottom });
+    if (this.menu.isOpen && this.trigger === trigger) return void this.close();
+    const { endpoint, slot } = tile.dataset;
+    this.show(endpoint, slot ?? 'camera', { tile, anchor: trigger });
+  }
+
+  toggleRoster(endpoint, trigger) {
+    if (this.menu.isOpen && this.trigger === trigger) return void this.close();
+    const tile = this.tileOf(endpoint, 'camera');
+    this.show(endpoint, 'camera', { tile, anchor: trigger });
   }
 
   open(tile, point) {
-    this.close(false);
-    this.tile = tile;
-    this.trigger = tile.querySelector('[data-action="tile-menu"]');
-    const endpoint = tile.dataset.endpoint;
-    const slot = tile.dataset.slot;
+    const { endpoint, slot } = tile.dataset;
+    this.show(endpoint, slot ?? 'camera', { tile, point });
+  }
+
+  show(endpoint, slot, place) {
+    this.release();
+    const { tile, anchor, point } = place;
     const stage = this.stage;
-    const local = endpoint === stage.session?.endpoint;
-    const pinned = stage.pin === tileId(endpoint, slot);
-    const items = [
-      { action: 'pin', label: pinned ? 'Unpin' : 'Pin' },
-      { action: 'tile-fullscreen', label: 'Full screen tile' },
-    ];
-    if (!local) {
-      const shown = stage.statsVisible(endpoint);
-      items.push({
-        action: 'tile-stats',
-        label: shown ? 'Hide stats' : 'Show stats',
-      });
-      const enabled = stage.session?.isAudioOnly(endpoint);
-      const poor = stage.quality.get(endpoint)?.poor;
-      const label =
-        poor && !enabled ? 'Poor connection · try audio only' : 'Audio only';
-      items.push({
-        action: 'audio-only',
-        label: enabled ? 'Audio only on' : label,
-      });
+    const items = personItems(stage, endpoint, slot);
+    if (endpoint !== stage.session?.endpoint) {
+      const element = createVolume(stage, endpoint);
+      items.push({ kind: 'custom', element });
     }
-    const menuItems = items.concat(adminItems(stage, endpoint));
+    const target = tile?.querySelector('[data-action="tile-menu"]');
+    this.tile = tile;
+    this.endpoint = endpoint;
+    this.slot = slot;
+    this.trigger = anchor ?? target ?? null;
     const parent = document.fullscreenElement ?? document.body;
     parent.append(this.element);
     this.menu.open({
       id: tileId(endpoint, slot),
-      mine: new Set(),
-      items: menuItems,
-      point,
-      item: null,
+      items,
+      anchor: anchor ?? null,
+      point: point ?? null,
+      trigger: this.trigger,
+      select: (item, button, event) => this.choose(item, event),
+      close: () => this.release(),
     });
-    const audio = this.element.querySelector('[data-action="audio-only"]');
-    if (audio) {
-      const enabled = stage.session?.isAudioOnly(endpoint);
-      const requested = stage.session?.requestedAudioOnly(endpoint);
-      audio.disabled = enabled && !requested;
-      if (audio.disabled) audio.textContent = 'Peer chose audio only';
-    }
-    if (!local) this.addVolume(endpoint);
-    const bottom =
-      parseFloat(this.element.style.top) + this.element.offsetHeight;
-    if (bottom > window.innerHeight - 8) {
-      const top = Math.max(
-        8,
-        window.innerHeight - this.element.offsetHeight - 8,
-      );
-      this.element.style.top = `${top}px`;
-    }
-    tile.classList.add('targeted');
-    this.trigger?.setAttribute('aria-expanded', 'true');
-    this.menu.focus();
+    tile?.classList.add('targeted');
   }
 
-  addVolume(endpoint) {
-    const peer = this.stage.peerOf(endpoint);
-    const field = document.createElement('label');
-    field.className = 'tile-volume';
-    const caption = document.createElement('span');
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.min = '0';
-    input.max = '200';
-    input.step = '1';
-    input.value = `${this.stage.volume.get(peer)}`;
-    input.setAttribute('aria-label', 'Local participant volume');
-    const paint = () => {
-      caption.textContent = `Local volume ${input.value}%`;
-    };
-    input.addEventListener('input', () => {
-      this.stage.volume.set(peer, Number(input.value));
-      paint();
-    });
-    input.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape') event.stopPropagation();
-    });
-    paint();
-    field.append(caption, input);
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'menu-item';
-    reset.textContent = 'Reset volume to 100%';
-    reset.addEventListener('click', () => {
-      input.value = '100';
-      this.stage.volume.set(peer, 100);
-      paint();
-    });
-    this.element.append(field, reset);
-  }
-
-  click(event) {
+  choose(item, event) {
     event.stopPropagation();
-    const action = event.target.closest('[data-action]')?.dataset.action;
-    if (!action || !this.tile) return;
-    const { endpoint, slot } = this.tile.dataset;
+    const { endpoint, slot } = this;
     this.close();
-    this.stage.onAction(action, endpoint, slot);
+    this.stage.onAction(item.action, endpoint, slot);
+  }
+
+  release() {
+    this.tile?.classList.remove('targeted');
+    this.tile = null;
+    this.trigger = null;
   }
 
   close(restore = true) {
     const trigger = this.trigger;
-    this.tile?.classList.remove('targeted');
-    trigger?.setAttribute('aria-expanded', 'false');
     this.menu.close();
-    this.tile = null;
-    this.trigger = null;
+    this.release();
     if (restore && trigger?.isConnected) trigger.focus();
   }
 
@@ -205,7 +215,6 @@ class TileMenu {
     document.removeEventListener('pointermove', this.onMove);
     document.removeEventListener('pointerup', this.onUp);
     document.removeEventListener('pointercancel', this.onCancel);
-    document.removeEventListener('focusin', this.onFocus);
     this.element.remove();
   }
 }

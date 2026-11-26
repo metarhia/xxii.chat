@@ -241,7 +241,8 @@ test(
       true,
     );
     await run(
-      `document.querySelector('.call-record-control [data-action=record-panel]')
+      `document.querySelector('.call-controls [data-action=more]').click();
+      document.querySelector('.call-bar-menu [data-action=record-panel]')
         .click(); return true;`,
     );
     const names = await run(
@@ -274,7 +275,7 @@ test(
     assert.equal(stateText, 'not recording');
 
     await run(
-      `document.querySelector('.call-record-control [data-action=record]')
+      `document.querySelector('.call-controls [data-action=record]')
         .click(); return true;`,
     );
     await harness.wait(
@@ -285,7 +286,10 @@ test(
     const noticed = `const note = document.querySelector('.call-recording');
       return !note.classList.contains('hidden') &&
         note.textContent === '● alex recording';`;
-    await waitFor(browser, left, noticed);
+    const own = `const note = document.querySelector('.call-recording');
+      return !note.classList.contains('hidden') &&
+        /^● \\d\\d:\\d\\d · [\\d.]+ (B|KB|MB)$/.test(note.textContent);`;
+    await waitFor(browser, left, own);
     await waitFor(browser, right, noticed);
     const announced = await harness.run(
       browser,
@@ -297,22 +301,23 @@ test(
     await delay(RECORD_MS);
     const control = await run(
       `const button = document.querySelector(
-        '.call-record-control [data-action=record]');
+        '.call-controls [data-action=record]');
       return {
         text: button.textContent,
-        dot: button.querySelector('.rec-dot')?.textContent,
+        indicator: document.querySelector('.call-recording').textContent,
         pressed: button.getAttribute('aria-pressed'),
         state: document.querySelector('.record-state').textContent,
         active: app.callStage.recording.recorder.activeMs,
       };`,
     );
-    assert.equal(control.dot, '●');
-    assert.match(control.text, /^ ?● \d\d:\d\d · [\d.]+ (B|KB|MB)$/);
+    assert.equal(control.text, 'stop');
+    assert.match(control.indicator, /^● \d\d:\d\d · [\d.]+ (B|KB|MB)$/);
     assert.equal(control.pressed, 'true');
     assert.match(control.state, /^recording · \d\d:\d\d · /);
     assert.ok(control.active >= RECORD_MS, `active ${control.active}`);
     await run(
-      `document.querySelector('.call-record-control [data-action=record]')
+      `window.confirm = () => true;
+      document.querySelector('.call-controls [data-action=record]')
         .click(); return true;`,
     );
     await harness.wait(
@@ -561,12 +566,13 @@ test(
     await browser.request('Page.bringToFront', {}, left);
     await run(
       left,
-      `document.querySelector('.call-record-control [data-action=record-panel]')
+      `document.querySelector('.call-controls [data-action=more]').click();
+      document.querySelector('.call-bar-menu [data-action=record-panel]')
         .click();
       const people = document.querySelector('[data-record=people]');
       people.value = 'grid';
       people.dispatchEvent(new Event('change', { bubbles: true }));
-      document.querySelector('.call-record-control [data-action=record]')
+      document.querySelector('.call-controls [data-action=record]')
         .click();
       return true;`,
     );
@@ -627,7 +633,8 @@ test(
 
     await run(
       left,
-      `document.querySelector('.call-record-control [data-action=record]')
+      `window.confirm = () => true;
+      document.querySelector('.call-controls [data-action=record]')
         .click(); return true;`,
     );
     await harness.wait(

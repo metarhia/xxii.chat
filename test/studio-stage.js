@@ -8,9 +8,10 @@ const harness = require('./harness.js');
 const FLAGS = harness.MEDIA_FLAGS.concat([
   '--disable-features=WebRtcHideLocalIpsWithMdns',
 ]);
-const PROGRAM = '.call-record-control [data-action=record-panel]';
-const RECORD = '.call-record-control [data-action=record]';
-const STUDIO = '.call-more [data-action=studio]';
+const PROGRAM = '.call-bar-menu [data-action=record-panel]';
+const MORE = '.call-controls [data-action=more]';
+const RECORD = '.call-controls [data-action=record]';
+const STUDIO = '.call-bar-menu [data-action=studio]';
 const JOIN = 'You are backstage, not in the recording or stream';
 const STAGE = 'You are on stage';
 
@@ -56,7 +57,8 @@ const openPerson = async (t, browser, nick, options = {}) => {
   await front();
   await wait('return app.connected && app.mesh.peers.has(app.peerId);');
   const click = (selector) =>
-    run(`document.querySelector(${quote(selector)}).click();`);
+    run(`${selector === RECORD ? 'window.confirm = () => true;' : ''}
+      document.querySelector(${quote(selector)}).click();`);
   return { run, wait, front, click };
 };
 
@@ -110,7 +112,7 @@ const waitForStage = async (page, backstage) => {
 };
 
 const openStudio = async (page) => {
-  await page.click('.call-more summary');
+  await page.click(MORE);
   await page.click(STUDIO);
   await page.wait(`return document.querySelector('.call-studio[data-open]')
     ?.checkVisibility();`);
@@ -129,6 +131,7 @@ test('scenario 20: stage and backstage', { timeout: 240000 }, async (t) => {
   const tile = cameraTile(endpoint);
 
   await host.front();
+  await host.click(MORE);
   await host.click(PROGRAM);
   await host.run(`const people = document.querySelector('[data-record=people]');
     people.value = 'grid';
@@ -173,6 +176,7 @@ test('scenario 20: stage and backstage', { timeout: 240000 }, async (t) => {
   await guest.run(
     `window.preview = document.querySelector('.studio-preview canvas');`,
   );
+  await guest.click(MORE);
   await guest.click(PROGRAM);
   assert.equal(
     await guest.run(`return app.callStage.sheet === 'record' &&
@@ -197,8 +201,8 @@ test('scenario 20: stage and backstage', { timeout: 240000 }, async (t) => {
   await host.click(`${tile} [data-action=tile-menu]`);
   await host.click('.call-tile-menu [data-action=move-to-backstage]');
   await host.wait(programHas(endpoint, false));
-  await host.click(`${roster} summary`);
-  await host.click(`${roster} [data-action=move-to-stage]`);
+  await host.click(`${roster} [data-action=roster-menu]`);
+  await host.click('.call-tile-menu [data-action=move-to-stage]');
   await host.wait(programHas(endpoint, true));
   await host.click('[data-studio=join-backstage]');
   await host.wait(`return app.callStage.joinBackstage &&

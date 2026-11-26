@@ -169,7 +169,10 @@ test(
 
     await run(
       left,
-      `document.querySelector('[data-action="stats-overlay"]').click();
+      `document.querySelector('#call-view [data-action="more"]').click();
+      document.querySelector(
+        '.call-bar-menu [data-action="stats-overlay"]').click();
+      app.callStage.controls.menu.close();
       return true;`,
     );
     await waitFor(
@@ -194,7 +197,10 @@ test(
     assert.equal(before, 0);
     await run(
       left,
-      `document.querySelector('#call-view [data-setting="mirror"]').click();
+      `document.querySelector('#call-view [data-action="camera-menu"]').click();
+      document.querySelector(
+        '.call-bar-menu [data-action="setting-mirror"]').click();
+      app.callStage.controls.menu.close();
       return true;`,
     );
     await waitFor(browser, left, sampled(self, 'red/blue'));
@@ -233,7 +239,10 @@ test(
 
     await run(
       left,
-      `document.querySelector('#call-view [data-setting="mirror"]').click();
+      `document.querySelector('#call-view [data-action="camera-menu"]').click();
+      document.querySelector(
+        '.call-bar-menu [data-action="setting-mirror"]').click();
+      app.callStage.controls.menu.close();
       return true;`,
     );
     await waitFor(browser, right, sampled(remote, 'blue/red'));

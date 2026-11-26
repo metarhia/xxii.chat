@@ -139,7 +139,8 @@ test(
       type: 'keyUp',
     });
     const enter = (selector) => press('Enter', 'Enter', 13, selector);
-    await enter('[data-action=hand]');
+    await enter('.call-controls [data-action=reactions]');
+    await enter('.call-bar-menu [data-action=hand]');
     await wait('return app.callStage.isHandRaised();');
     await run(`const stage = app.callStage;
     const me = stage.levels.state.participants.get(stage.session.endpoint);
@@ -155,11 +156,12 @@ test(
     return [stage.left, stage.top, stage.width, controls.bottom,
       document.querySelector('.call-share').offsetWidth];`);
     assert.deepEqual(bounds, [0, 0, 390, 844, 0]);
-    await enter('summary[aria-label="camera options"]');
-    await enter('[data-action="switch-camera"]');
+    await enter('.call-controls [data-action=camera-menu]');
+    await enter('.call-bar-menu [data-action="switch-camera"]');
     await wait(`return app.callStage.media.facing === 'environment' &&
     app.callStage.media.cameraTrack?.readyState === 'live';`);
     await press('Escape', 'Escape', 27);
+    await wait('return !app.callStage.controls.menu.isOpen;');
 
     const other = await browser.request('Target.createTarget', {
       url: 'about:blank',
@@ -175,17 +177,19 @@ test(
       return !m.cameraPaused && !!m.cameraTrack &&
     window.screenLocks.length >= 2 && window.screenLocks[0].released;`);
 
-    await enter('.call-topbar [data-action=people]');
+    await enter('.call-controls [data-action=more]');
+    await enter('.call-bar-menu [data-action=people]');
     await wait(`return app.callStage.sheet === 'people' &&
     document.activeElement.dataset.action === 'close-sheet';`);
     await run('history.back();');
     await wait(`return !app.callStage.sheet && app.callStage.mode === 'call';`);
-    await enter('.call-topbar [data-action=chat]');
+    await enter('.call-controls [data-action=more]');
+    await enter('.call-bar-menu [data-action=chat]');
     await wait(`return document.activeElement.id === 'close-call-chat';`);
     await enter('#close-call-chat');
     await wait('return !app.callStage.sheet && app.pops === 0;');
-    await enter('summary[aria-label="more options"]');
-    await enter('[data-action=settings]');
+    await enter('.call-controls [data-action=more]');
+    await enter('.call-bar-menu [data-action=settings]');
     await wait(
       `return app.settings.isOpen && app.settings.section === 'media'
         && app.settings.root.dataset.pane === 'section'

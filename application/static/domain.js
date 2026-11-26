@@ -29,6 +29,7 @@ import { renderMarkdown, renderBlock, formatKey } from './markdown-view.js';
 import { CallPreferences } from './call-preferences.js';
 import { ICE_KEY, isIceUrl, readIce, writeIce, buildIce } from './ice.js';
 import { Press, Menu, Lightbox, Switcher } from './overlays.js';
+import { dismissMenu } from './overlays.js';
 import { Replica, Uplink } from './globalstorage.js';
 import { generateUUID } from './metautil.js';
 import { Mesh } from './mesh.js';
@@ -203,13 +204,17 @@ const THREAD_KEYS = {
 };
 
 const LAYERS = {
-  menu: (app) => app.hideMenu(),
+  menu: (app) => {
+    app.hideMenu();
+    dismissMenu('back');
+  },
   lightbox: (app) => app.lightbox.close(),
   switcher: (app) => app.hideSwitcher(),
   sidebar: (app) => app.app.classList.remove('menu-open'),
   panel: (app) => app.hidePanel(),
   call: (app) => app.callStage?.collapse(),
   callSheet: (app) => app.callStage?.hideSheet(),
+  callDialog: (app) => app.callStage?.controls?.closeDialog(),
   selection: (app) => app.leaveThread(),
   picking: (app) => app.leavePicking(),
   article: (app) => app.leaveArticle(),
@@ -770,7 +775,13 @@ class ChatApplication extends Application {
     this.notification = byId('notification');
     this.backdrop = byId('backdrop');
     this.menuElement = byId('menu');
-    this.menu = new Menu(this.menuElement, createReactionButtons);
+    this.menu = new Menu(this.menuElement, {
+      backdrop: this.backdrop,
+      layers: {
+        push: (name) => this.afterPop(() => this.pushLayer(name)),
+        pop: (name) => this.popLayer(name),
+      },
+    });
     this.press = new Press({
       hold: (item, x, y) => this.openMenu(item, { x, y }, true),
       swipe: (item) => {
@@ -940,9 +951,6 @@ class ChatApplication extends Application {
     });
     this.messageList.addEventListener('contextmenu', (event) => {
       this.handleContextMenu(event);
-    });
-    this.menuElement.addEventListener('click', (event) => {
-      this.handleMenuClick(event);
     });
     this.chatMessages.addEventListener('scroll', () => this.handleScroll());
     this.pinList.addEventListener('click', (event) => this.handlePin(event));
@@ -1227,6 +1235,7 @@ class ChatApplication extends Application {
     this.renderPanel();
     this.renderComposer();
     this.updateTitle();
+    this.callStage?.paintCounts();
   }
 
   updateTitle() {
@@ -1955,10 +1964,6 @@ class ChatApplication extends Application {
 
   handlePointerDown(event) {
     this.pointerType = event.pointerType;
-    const isInside = this.menu.contains(event.target);
-    const isHandle = event.target.closest?.('.more') !== null;
-    const isOutside = !isInside && !isHandle;
-    if (this.menu.isOpen && !this.menu.isLifted && isOutside) this.closeMenu();
   }
 
   startPress(event) {
@@ -1994,9 +1999,10 @@ class ChatApplication extends Application {
     if (this.menu.target === id) return void this.closeMenu();
     const item = button.closest(ITEMS);
     const isShown = button.offsetParent !== null;
-    const rect = (isShown ? button : item).getBoundingClientRect();
-    const x = isShown ? rect.left : rect.left + MENU_INDENT_PX;
-    this.openMenu(item, { x, y: rect.bottom }, false);
+    if (isShown) return void this.openMenu(item, { anchor: button }, false);
+    const rect = item.getBoundingClientRect();
+    const point = { x: rect.left + MENU_INDENT_PX, y: rect.bottom };
+    this.openMenu(item, point, false);
   }
 
   openMenuFor(item) {
@@ -2006,7 +2012,7 @@ class ChatApplication extends Application {
     this.menu.focus();
   }
 
-  openMenu(item, point, isLifted, fragment = fragmentOf(item.dataset.id)) {
+  openMenu(item, place, isLifted, fragment = fragmentOf(item.dataset.id)) {
     if (item.classList.contains('deleted')) return;
     const { id } = item.dataset;
     this.menuFragment = fragment;
@@ -2015,10 +2021,16 @@ class ChatApplication extends Application {
     this.menuItem?.classList.remove('targeted');
     this.menuItem = item;
     item.classList.add('targeted');
+    const anchor = place.anchor ?? null;
+    const point = anchor ? null : place;
+    const reactions = createReactionButtons;
+    const select = (entry, button) => this.chooseMenuItem(button);
+    const close = (reason) => this.menuDismissed(reason);
     const lifted = isLifted ? item : null;
-    this.menu.open({ id, mine, items, point, item: lifted });
+    const label = 'Message actions';
+    const options = { id, mine, items, anchor, point, item: lifted, label };
+    this.menu.open({ ...options, reactions, select, close });
     this.updateBackdrop();
-    if (isLifted) this.pushLayer('menu');
   }
 
   menuItems(item) {
@@ -2096,9 +2108,7 @@ class ChatApplication extends Application {
     return tools.filter((tool) => isOwn || !tool.isOwn);
   }
 
-  handleMenuClick(event) {
-    const button = event.target.closest('button[data-action]');
-    if (!button) return;
+  chooseMenuItem(button) {
     const id = this.menu.target;
     const { action } = button.dataset;
     const selectAfterPop = LAYER_ACTIONS.includes(action) && this.menu.isLifted;
@@ -2113,11 +2123,15 @@ class ChatApplication extends Application {
 
   closeMenu() {
     if (!this.menu.isOpen) return;
-    const hasFocus = this.menu.contains(document.activeElement);
+    const hasFocus = this.menu.hasFocusedItem;
     const id = this.menu.target;
-    if (this.menu.isLifted) this.closeLayer('menu');
-    else this.hideMenu();
+    this.hideMenu();
     if (hasFocus) this.selectById(id);
+  }
+
+  menuDismissed(reason) {
+    if (reason === 'escape' || reason === 'tab') return void this.closeMenu();
+    this.hideMenu();
   }
 
   hideMenu() {
@@ -2128,8 +2142,7 @@ class ChatApplication extends Application {
   }
 
   updateBackdrop() {
-    const isLifted = this.menu.isOpen && this.menu.isLifted;
-    const isShown = isLifted || this.switcher.isOpen;
+    const isShown = this.menu.isModal || this.switcher.isOpen;
     this.backdrop.classList.toggle('hidden', !isShown);
   }
 
@@ -3054,6 +3067,7 @@ class ChatApplication extends Application {
 
   closeTop() {
     if (this.menu.isOpen) return void this.closeMenu();
+    if (dismissMenu('backdrop')) return;
     if (this.lightbox.isOpen) return void this.closeLayer('lightbox');
     if (this.switcher.isOpen) return void this.closeLayer('switcher');
     if (this.settings.isOpen) return void this.closeSettings();
@@ -3118,7 +3132,6 @@ class ChatApplication extends Application {
   }
 
   handleScroll() {
-    if (this.menu.isOpen && !this.menu.isLifted) this.closeMenu();
     this.updateJump();
     const isRead = this.unreadOf(this.chat) === 0;
     if (this.isAtBottom() && !isRead) this.scheduleRender();
@@ -4010,6 +4023,7 @@ class ChatApplication extends Application {
     const hooks = {
       preferences: this.preferences,
       settings: () => this.openSettings('media'),
+      shortcuts: () => this.openSettings('shortcuts'),
       recordings: () => this.openLibrary(),
       state: () => this.renderRecordingsState(),
       pushLayer: (name) => {
@@ -4018,6 +4032,7 @@ class ChatApplication extends Application {
         });
       },
       popLayer: (name) => this.popLayer(name),
+      afterPop: (run) => this.afterPop(run),
       mounted: (mode) => {
         if (mode === 'mini') return;
         this.closeSettings();
@@ -4037,6 +4052,7 @@ class ChatApplication extends Application {
       recordStop: (record) => this.recordRecordingStop(record),
       confirm: (text) => window.confirm(text),
       focusChat: (id) => this.focusCallChat(id),
+      unread: (chat) => this.unreadOf(chat),
       changed: () => this.scheduleRender(),
       fail: (error) => this.report(error),
       notice: (text, region) => this.showNotification(text, 'warning', region),

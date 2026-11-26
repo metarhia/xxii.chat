@@ -35,6 +35,14 @@ const CODES = {
   f: { code: 'KeyF', vk: 70 },
   ' ': { code: 'Space', vk: 32 },
 };
+const ARROWS = {
+  ArrowUp: { code: 'ArrowUp', vk: 38 },
+  ArrowDown: { code: 'ArrowDown', vk: 40 },
+  ArrowRight: { code: 'ArrowRight', vk: 39 },
+  End: { code: 'End', vk: 35 },
+  Home: { code: 'Home', vk: 36 },
+};
+Object.assign(CODES, ARROWS);
 
 const waitLoaded = async (browser, sessionId) => {
   const deadline = Date.now() + 15000;
@@ -136,9 +144,8 @@ const tab = (browser, session, shift = false) =>
 const FOCUSED = `const element = document.activeElement;
   if (!element) return '';
   const action = element.dataset ? element.dataset.action : '';
-  if (action) return action + (element.dataset.emoji || '');
-  return element.tagName === 'SUMMARY' ?
-    'summary:' + element.getAttribute('aria-label') : element.tagName;`;
+  const emoji = element.dataset.emoji || element.dataset.reaction || '';
+  return action ? action + emoji : element.tagName;`;
 
 const state = (browser, session) =>
   harness.run(
@@ -243,104 +250,112 @@ test(
     await key('d', { modifiers: CTRL });
     await check('return app.callStage.media.micOn === true;');
 
-    await run(`document.querySelector(
-      '#call-view .call-controls [data-action="mic"]').focus(); return true;`);
-    const seen = new Array(12).fill('');
-    for (let index = 0; index < seen.length; index++) {
-      seen[index] = await run(FOCUSED);
-      await tab(browser, session);
-    }
-    const expected = [
-      'mic',
-      'summary:mic options',
-      'camera',
-      'summary:camera options',
-      'share',
-      'summary:screen sharing options',
-      'hand',
-      'summary:reactions',
-      'summary:more options',
-      'leave',
-    ];
-    let from = 0;
-    for (const name of expected) {
-      const next = seen.indexOf(name, from);
-      assert.notEqual(next, -1, `${name} not reached in ${seen.join(', ')}`);
-      from = next;
-    }
-
     const focus = (selector) =>
       run(`document.querySelector(${JSON.stringify(selector)}).focus();
         return true;`);
-    await focus('#call-view .call-controls [data-action="mic"]');
+    const bar = '#call-view .call-controls';
+    await focus(`${bar} [data-action="mic"]`);
+    const expected = [
+      'mic',
+      'mic-menu',
+      'camera',
+      'camera-menu',
+      'share',
+      'reactions',
+      'record',
+      'more',
+      'people',
+      'chat',
+      'leave',
+    ];
+    const seen = [];
+    for (let index = 0; index < expected.length; index++) {
+      seen.push(await run(FOCUSED));
+      await key('ArrowRight');
+    }
+    assert.deepEqual(seen, expected);
+    assert.equal(await run(FOCUSED), 'mic');
+    await key('End');
+    assert.equal(await run(FOCUSED), 'leave');
+    await key('Home');
+    assert.equal(await run(FOCUSED), 'mic');
+    const stops = await run(`return document.querySelectorAll(
+      '${bar} button[tabindex="0"]').length;`);
+    assert.equal(stops, 1);
+    await tab(browser, session);
+    assert.equal(
+      await run(`return document.activeElement.closest('.call-controls');`),
+      null,
+    );
+
+    await focus(`${bar} [data-action="mic"]`);
     await key('Enter', { code: 'Enter', vk: 13, text: '\r' });
     await check('return app.callStage.media.micOn === false;');
     await key(' ', { text: ' ' });
     await check('return app.callStage.media.micOn === true;');
-    await focus('#call-view .call-controls [data-action="camera"]');
+    await focus(`${bar} [data-action="camera"]`);
     await key('Enter', { code: 'Enter', vk: 13, text: '\r' });
     await check('return app.callStage.media.cameraOn === false;');
     await key(' ', { text: ' ' });
     await check('return app.callStage.media.cameraOn === true;');
-    await focus('#call-view .call-controls [data-action="hand"]');
-    await key('Enter', { code: 'Enter', vk: 13, text: '\r' });
-    await check('return app.callStage.isHandRaised() === true;');
-    await key(' ', { text: ' ' });
-    await check('return app.callStage.isHandRaised() === false;');
 
-    const micMenu = '#call-view summary[aria-label="mic options"]';
-    await focus(micMenu);
-    await key('Enter', { code: 'Enter', vk: 13, text: '\r' });
-    await tab(browser, session);
-    assert.equal(
-      await run('return document.activeElement.dataset.device;'),
-      'mic',
-    );
-    await tab(browser, session);
-    assert.equal(
-      await run('return document.activeElement.dataset.setting;'),
-      'noise',
-    );
-    await tab(browser, session);
-    assert.equal(
-      await run('return document.activeElement.dataset.setting;'),
-      'pushToTalk',
-    );
+    await focus(`${bar} [data-action="mic"]`);
+    await key('ArrowUp');
+    await check(`return app.callStage.controls.menu.isOpen &&
+      document.activeElement.getAttribute('role') === 'menuitemradio';`);
+    for (let step = 0; step < 20; step++) {
+      const current = await run(FOCUSED);
+      if (current === 'setting-pushToTalk') break;
+      await key('ArrowDown');
+    }
+    assert.equal(await run(FOCUSED), 'setting-pushToTalk');
     await key(' ', { text: ' ' });
     await check('return app.callStage.preferences.pushToTalk === false;');
+    assert.equal(await run('return app.callStage.controls.menu.isOpen;'), true);
     await key('Escape', { code: 'Escape', vk: 27 });
-    assert.equal(await run(FOCUSED), 'summary:mic options');
+    assert.equal(await run(FOCUSED), 'mic-menu');
     assert.equal(await run('return app.callStage.mode;'), 'call');
 
-    await focus('#call-view .call-react summary');
+    await focus(`${bar} [data-action="reactions"]`);
     await key('Enter', { code: 'Enter', vk: 13, text: '\r' });
-    await tab(browser, session);
-    assert.equal(await run(FOCUSED), 'react👍');
+    await check(`return app.callStage.controls.menu.isOpen;`);
+    await key('ArrowUp');
+    assert.equal(await run(FOCUSED), 'react\u{1F44D}');
     await key('Enter', { code: 'Enter', vk: 13, text: '\r' });
     await check(`const tile = document.querySelector(
       '#call-view .call-tile[data-endpoint="' +
       app.callSession.endpoint + '"]');
       return tile.querySelectorAll('.call-reaction').length === 1 &&
-        !document.querySelector('#call-view .call-react details').open;`);
+        !app.callStage.controls.menu.isOpen;`);
 
-    await focus('#call-view .call-more summary');
+    await focus(`${bar} [data-action="more"]`);
     await key('Enter', { code: 'Enter', vk: 13, text: '\r' });
-    const help = await run(`return document.querySelector(
-      '#call-view .call-keys').textContent;`);
-    assert.match(help, /Ctrl D/);
-    assert.match(help, /hold Space/);
-    await key('Escape', { code: 'Escape', vk: 27 });
-    await check(`return !document.querySelector(
-      '#call-view .call-more details').open;`);
-
+    const groups = await run(`return [...document.querySelectorAll(
+      '.call-bar-menu [role=group] > .menu-heading')].map(
+      (node) => node.textContent);`);
+    assert.deepEqual(groups, [
+      'View',
+      'Layout',
+      'Recording and studio',
+      'Call',
+    ]);
+    const actions = await run(`return [...document.querySelectorAll(
+      '.call-bar-menu [data-action]')].map((node) => node.dataset.action);`);
+    assert.ok(actions.includes('shortcuts'));
+    assert.ok(actions.includes('settings'));
     const pip = await run(
-      `return {
+      `const item = document.querySelector(
+        '.call-bar-menu [data-action="pip"]');
+      return {
         api: typeof globalThis.documentPictureInPicture,
-        disabled: document.querySelector(
-          '#call-view [data-action="pip"]').disabled,
-        note: document.querySelector('#call-view .call-pip-note').textContent,
+        disabled: item.getAttribute('aria-disabled') === 'true',
+        note: item.textContent,
       };`,
     );
+    await key('Escape', { code: 'Escape', vk: 27 });
+    await check(`return !app.callStage.controls.menu.isOpen;`);
+    assert.equal(await run(FOCUSED), 'more');
+
     if (pip.api === 'undefined') {
       assert.equal(pip.disabled, true);
       assert.match(pip.note, /not available/);
@@ -374,8 +389,8 @@ test(
       `return Array.from(root.querySelectorAll('[data-action]'),
         (item) => item.dataset.action).join(',');`,
     );
-    assert.match(labels, /mic,camera,hand/);
-    assert.match(labels, /leave/);
+    assert.match(labels, /pip-back,mic,camera,reactions,leave/);
+    assert.doesNotMatch(labels, /hand|react,/);
     await inPip(`root.querySelector('[data-action="mic"]').click();
       return true;`);
     await check('return app.callStage.media.micOn === false;');
@@ -383,10 +398,32 @@ test(
       key: 'd', code: 'KeyD', ctrlKey: true, bubbles: true }));
       return true;`);
     await check('return app.callStage.media.micOn === true;');
-    await inPip(`root.querySelector('[data-action="hand"]').click();
+    await inPip(`root.querySelector('[data-action="reactions"]').click();
       return true;`);
-    await check('return app.callStage.isHandRaised() === true;');
-    await inPip(`root.querySelector('[data-action="react"]').click();
+    const menu = await inPip(`const menu = doc.querySelector('.pip-menu');
+      return {
+        shown: !menu.classList.contains('hidden'),
+        inside: menu.ownerDocument === doc && doc !== document,
+        reactions: menu.querySelectorAll('[data-action="react"]').length,
+        expanded: root.querySelector('[data-action="reactions"]')
+          .getAttribute('aria-expanded'),
+      };`);
+    assert.deepEqual(menu, {
+      shown: true,
+      inside: true,
+      reactions: 6,
+      expanded: 'true',
+    });
+    await inPip(`doc.querySelector('.pip-menu [data-action="hand"]').click();
+      return true;`);
+    await check(`return app.callStage.isHandRaised() === true &&
+      app.callStage.pip.root.querySelector('[data-action="reactions"]')
+        .getAttribute('aria-label') === 'Reactions, hand raised' &&
+      app.callStage.pip.root.ownerDocument.querySelector('.pip-menu')
+        .classList.contains('hidden');`);
+    await delay(1500);
+    await inPip(`root.querySelector('[data-action="reactions"]').click();
+      doc.querySelector('.pip-menu [data-action="react"]').click();
       return true;`);
     await check(`const root = app.callStage.pip.root;
       return root.querySelectorAll('.call-reaction').length === 1;`);

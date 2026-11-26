@@ -74,6 +74,16 @@ sync. Terminal-like UI follows the
   On touch screens a long press lifts the message with
   reactions above and actions below, and a swipe to the right replies, a
   double tap replies too
+- Every menu of the app is one component with menu roles. `↓`/`↑` move
+  through the items and wrap around, `Home` and `End` jump, `Enter` and
+  `Space` choose, a letter jumps to the next item that starts with it, and
+  `←`/`→` move inside a row of choices. Disabled items are skipped and say
+  why in a muted line. `Esc` closes the menu and returns focus to its
+  button, `Tab` closes it and moves on, and only one menu is open at a time.
+  A menu next to a button opens above or below it, whichever has room,
+  and closes on a click outside, a scroll of the list behind it, or a
+  resize. On a phone every menu is a bottom sheet over a dimmed screen: a
+  swipe down or the back button closes it
 - Share puts `/?chat=<id>&message=<id>` on the clipboard. Opening it switches
   to the chat and scrolls to the message once it is loaded
 - Forward picks a chat or contact in the jump dialog and posts a copy with
@@ -176,7 +186,7 @@ sync. Terminal-like UI follows the
   this browser to their defaults in every open tab while keeping the nick,
   peer id, drafts, read marks, folders, and streaming destinations
 - Recordings screen in the main area (profile row button, the `Recordings`
-  command, the call's record menu, or Settings > Recordings): a grid of cards
+  command, the call's `more` menu, or Settings > Recordings): a grid of cards
   with poster, title, chat, duration, size, and actions, a full-width player,
   and `new capture`. `Esc` or Back closes it. In Settings > Audio & video the
   microphone shows a live level meter and the camera a small mirrored preview
@@ -198,9 +208,11 @@ The prompt does not hold up the call. A notification click focuses the tab
 that rang, a recent app window, or opens the app; answer in the call toast.
 
 The share control sends a screen or window and its available audio to everyone
-in the call, including later arrivals. Its menu can capture without sharing,
-keeping the source local, and switch between detail and 30 fps video mode.
-Stopping capture in the browser or leaving the call releases the source.
+in the call, including later arrivals; while sharing it reads `stop`, and a
+`● sharing screen` pill in the call topbar has a menu with `Optimize for video`
+(detail or 30 fps video mode) and `Stop sharing`. The Record panel has `Add a
+screen to my recording`, which captures without sharing and keeps the source
+local. Stopping capture in the browser or leaving the call releases the source.
 
 Call senders budget bandwidth per participant count and receiver tile size.
 Hidden tiles pause their camera encoding on that link and resume when shown.
@@ -209,16 +221,27 @@ a suggestion after sustained poor quality. Five poor seconds lower camera
 quality one row; twenty clean seconds restore one row. Screen sharing keeps
 its own budget. Browsers without the required controls show a notice.
 
-The call view offers Auto, Grid, Spotlight and Sidebar layouts, self and
-camera visibility options, and strip placement. Double-click a tile to pin
-or unpin it. Auto features a shared screen; Spotlight follows the active
+The `more` menu of the call offers Auto, Grid, Spotlight and Sidebar layouts,
+self and camera visibility options, stats, and strip placement (for Spotlight
+and Sidebar). Double-click a tile to pin or unpin it. Auto features a shared screen; Spotlight follows the active
 speaker. Speaking tiles show a green bar and an avatar ring that follows the
 microphone level. The mini call follows the active speaker. Press `F` outside
 text fields for full screen, or `Ctrl+Alt+L` to cycle layouts.
 
-The call controls have a hand button and a reactions menu. Raised hands are
+The call controls are a toolbar at the bottom of the call: an icon over a short
+label for mic, camera (each with a caret for its device menu), share, react,
+record, more, people, chat, and a red leave at the end. `←`/`→`, `Home` and
+`End` move between them and `Tab` enters and leaves the bar; `↑` on mic or
+camera opens its menu. Muted mic and camera show a red slashed icon. People
+and chat are toggles with counts (`People, 1 waiting` for a knock, unread
+messages on chat) that hide and show those panels, or open them as sheets on a
+phone. As an admin, `leave` asks whether to leave or end the call for everyone.
+`Record` asks `Stop the recording?` before it stops, from the control, the
+Record panel, and `Ctrl+Alt+R`.
+The reactions menu has the reactions and `Raise hand`. Raised hands are
 call state: the People panel lists them first, ordered by raise time, and
-tiles show the order number. Anyone lowers their own hand; admins lower any
+tiles show the order number. Anyone lowers their own hand from the `Lower hand`
+badge on their tile; admins lower any
 hand from the tile menu or the People panel, or all hands at once. A hand
 also lowers itself after three seconds of speaking unless auto-lower is off
 in Settings > Audio & video. The reactions 👍 ❤️ 😂 😮 👏 🎉 float up from the sender's tile for three
@@ -227,23 +250,32 @@ three per second per sender.
 
 Shortcuts in a call: `Ctrl+D` mutes and unmutes, `Ctrl+E` turns the camera
 on and off, `Ctrl+Alt+H` raises and lowers the hand, `Ctrl+Alt+S` starts and
-stops screen sharing, `Ctrl+Alt+L` cycles layouts, `F` toggles full screen,
-and `Esc` closes open menus without leaving the call. The combinations with
+stops screen sharing, `Ctrl+Alt+R` starts recording and asks before it stops,
+`Ctrl+Alt+L` cycles layouts, `F` toggles full screen, `Ctrl+/` lists the call
+keys in a dialog (with a link to Settings > Keyboard shortcuts), and `Esc`
+closes open menus without leaving the call. The combinations with
 `Ctrl` also work in the composer; `F` and `Space` do not fire in text fields.
 Hold `Space` outside text fields while muted to talk: the microphone opens
 while the key is down and closes on release, when the window loses focus, or
-when the tab is hidden. The `more` menu lists the keys and offers
-picture-in-picture: in browsers with Document Picture-in-Picture the call
-moves into a small window with the active speaker, mic, camera, hand,
-reactions, and leave, and closing it returns to the mini call; elsewhere the
-menu says that it is not available. Every control is reachable with `Tab` and
-operated with `Enter` or `Space`.
+when the tab is hidden. The `more` menu has groups: View (layout and strip
+rows, hide self view, hide tiles without video, stats overlay, full screen,
+picture-in-picture), Recording and studio (the Record panel, the recordings
+library, Studio, Stop live), and Call (copy the call link as an admin, the
+keyboard shortcuts, Settings). Picture-in-picture, in browsers with Document
+Picture-in-Picture, moves the call into a small window with the active speaker
+and icon buttons for back, mic, camera, reactions, and leave; the reactions
+menu opens inside that window, and closing it returns to the mini call;
+elsewhere the menu says that it is not available. The mini call has icon
+buttons for mic, camera, leave, and expand. Every control is operated with
+`Enter` or `Space`.
 
 The sidebar’s settings button and the call’s more menu open Settings;
 opening it from a call collapses the call to the mini window.
 This browser remembers device choices, join defaults, camera mirroring,
 noise suppression, push-to-talk, auto-lower, and network settings. The mic
-chevron offers a device picker, noise suppression, and push-to-talk. Recording
+caret offers microphone and speaker pickers, a speaker test, strong noise
+suppression, and push-to-talk; the camera caret offers the camera picker,
+mirroring, and on a phone switching cameras. Recording
 defaults include layout, audio mode, quality, and a folder in browsers with
 directory access. A speaker test plays a short tone on the selected output.
 
@@ -261,7 +293,8 @@ program, from the call (active speakers, a grid, or chosen people, with the
 shared screen, an others panel, name chips, and an avatar or nothing for
 people without video) and mixes its own sound (everyone, only people on
 screen, others quieter, or a volume per person). The record panel, opened from
-the record control menu, has these options with a live preview of the program,
+`more` or from the recording indicator in the call topbar, shows the time and
+size at its top and has these options with a live preview of the program,
 and every change applies on the next frame; quality (720p30, 1080p30,
 1080p60) is fixed while recording. The panel starts from the layout, audio,
 and quality defaults of Settings > Recordings. The browser picks the first format it
@@ -274,8 +307,10 @@ and saves the metadata every 10, so a crash loses only the last seconds. WebM
 gets its duration written into the header, MP4 needs no fix. Pause leaves no
 gap in the file. The recorder asks the browser for persistent storage once,
 warns below 2 GB of free space, and stops below 500 MB. While recording the
-topbar shows `● nick recording` to everyone in the call, the record control
-shows a red dot with time and size, and the chat gets a `● nick recorded 12
+topbar shows `● nick recording` to everyone in the call, the recorder's own
+indicator reads `● 12:31 · 84 MB` (`● paused 12:31 · 84 MB`) and opens the record
+panel, the record control reads `stop` on red (`paused` while paused) without
+time or size, and the chat gets a `● nick recorded 12
 min` note. The recorder keeps rendering when its tab is hidden: it asks other
 people for video sized to their tiles of the program, so they keep sending
 even though the hidden call view asks for nothing. Leaving the call asks
@@ -331,7 +366,7 @@ the server has no CORS for this app, the signaling goes through the app's
 server relay instead, `stream/whip`, which only members of the call may use
 (30 requests a minute), and the media still flows straight to the media server.
 
-Open **Recordings** from the profile row or the record control menu (the
+Open **Recordings** from the profile row or the call's `more` menu (the
 call shrinks to its mini tile) to see local recordings and browser storage
 usage. Play and seek in the library
 using the service worker's `/recordings/<id>/<file>` route with `Range` support.
@@ -368,19 +403,23 @@ deleted, and exported. Recording and startup repair require browser Web Locks
 and synchronous OPFS access in a worker.
 
 Phones show the active tile above a horizontally scrollable strip with the
-controls above the safe area. Chat and People open as bottom sheets. Back
-closes the sheet, then returns to the mini call. The camera menu switches
+controls above the safe area. The bar is one row with mic, camera, react, more,
+and leave, without labels; share, record, people, and chat are the first group
+of the `more` menu with their state (`Stop sharing`, `● Recording 12:31`,
+`People · 3`, `Chat · 2 unread`). Menus, Chat, and People open as bottom
+sheets. Back closes the sheet, then returns to the mini call. The camera menu switches
 between front and back cameras. On Android and iOS the camera pauses while
 the tab is hidden and resumes on return. The call requests a screen wake lock
 when available. Nearby joins and leaves share a toast for calls of up to eight.
 Screen readers also announce raised hands and host requests.
 
 Tile options open with the ellipsis, keyboard focus, or touch long press.
-The menu offers pin, full screen, audio only, stats, and local volume from
+The ellipsis on a People row, shown to everyone, opens the same menu for that
+person. The menu offers pin, full screen, audio only, stats, and local volume from
 0–200%. Volume is remembered per peer for all their microphone and screen
 audio tracks. Boost uses Web Audio; a visible notice explains a 100% limit
 when unavailable. Recording will have an independent audio mix. Escape closes
-the menu and returns focus. The view menu toggles stats for all remote tiles;
+the menu and returns focus. The `more` menu toggles stats for all remote tiles;
 each tile can also show or hide its own stats. Connection bars use RTT and
 loss. Stats include bitrate, codecs, video size and frame rate, and candidate
 types where the browser supplies them, reusing the bandwidth policy sample.
@@ -551,6 +590,15 @@ server) with `files/have`, `get`, and `put`.
   missing fields, connection bars, peer volume storage, gain and cleanup;
   `test/call-tiles.js` checks menus, volume, restoration, real Chrome stats,
   screen audio and teardown;
+  `test/call-controls.js` checks the call control bar: toolbar and arrow keys,
+  the device menus, share and its pill, react and raise hand, record and its
+  topbar indicator and the stop confirm, the `more` menu groups, layout and
+  strip rows, the keyboard shortcuts dialog and `Ctrl /`, `Settings…`, the mini
+  tile icons, picture-in-picture, the phone bar and its sheets, people and chat
+  toggles, the People row menu, and the leave dialog;
+  `test/menu.js` checks anchored menus: placement, flipping and clamping,
+  keys and type-ahead, focus, one open menu, closing, the phone sheet with
+  Back and swipe, and the People row menu;
   `test/call-turn.js` forces relay through the `rtc` group and checks
   that both sides select a relay pair while audio and video flow
   (scenario 9), and again through TURN over TLS on a port that also
