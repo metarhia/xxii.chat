@@ -201,8 +201,6 @@ const FOREGROUNDS = [
   ['--link', 4.5],
   ['--placeholder', 3],
 ];
-const KNOWN = ['dark --placeholder on --panel'];
-
 const blockOf = (css, selector) => {
   const start = css.indexOf(`${selector} {`);
   assert.notEqual(start, -1, selector);
@@ -281,7 +279,7 @@ const failuresOf = (theme) => {
     for (const [name, minimum] of FOREGROUNDS) {
       const ratio = contrastOf(themes[theme][name], themes[theme][base]);
       const label = `${theme} ${name} on ${base}`;
-      if (ratio < minimum && !KNOWN.includes(label)) {
+      if (ratio < minimum) {
         failures.push(`${label}: ${ratio.toFixed(2)}`);
       }
     }
@@ -294,12 +292,6 @@ for (const theme of ['dark', 'light']) {
     assert.deepEqual(failuresOf(theme), []);
   });
 }
-
-test('the known low contrast pair of the dark theme stays listed', () => {
-  const { dark } = themes;
-  const ratio = contrastOf(dark['--placeholder'], dark['--panel']);
-  assert.ok(ratio < 3 && ratio > 2.5, ratio.toFixed(2));
-});
 
 test('index.html loads theme.js before the stylesheets', () => {
   const html = readStatic('index.html');
