@@ -5,6 +5,7 @@ import {
   needsRelay,
   relayCandidates,
   relayDenial,
+  canSilence,
   readRelayMessage,
   relayVideoSource,
   relaySlot,
@@ -25,7 +26,11 @@ const liveTrack = (link, slot) => {
 
 const canPlay = () => {
   const audio = globalThis.HTMLMediaElement?.prototype;
-  return typeof audio?.play === 'function' && typeof MediaStream === 'function';
+  return (
+    typeof audio?.play === 'function' &&
+    typeof MediaStream === 'function' &&
+    canSilence(document.createElement('audio'))
+  );
 };
 
 const stopPlayback = (element) => {
@@ -86,11 +91,10 @@ class RelaySource {
 
   async startMic(track) {
     const audio = document.createElement('audio');
-    audio.volume = 0;
+    if (!canSilence(audio)) return void this.soundFailed(this, false);
     audio.hidden = true;
     this.audio = audio;
     try {
-      if (audio.volume !== 0) throw new Error('Silent playback is unavailable');
       audio.srcObject = new MediaStream([track]);
       document.body.append(audio);
       await playMic(audio);
@@ -380,18 +384,13 @@ class PeerRelay {
       joined: this.#joined(message),
       linked,
       busy: this.#served !== null,
-      blocked: this.#soundBlocked || !canPlay(),
+      blocked: !canPlay() || this.#soundBlocked,
     });
-    if (reason) {
-      if (reason === 'no-sound' && !this.#soundBlocked) {
-        this.#session.emit('notice', 'This browser cannot play relay audio.');
-      }
-      return void this.#send(from, 'deny', message, { reason });
-    }
-    const failed = (source) => {
+    if (reason) return void this.#send(from, 'deny', message, { reason });
+    const failed = (source, blocked = true) => {
       const pair = this.#served;
       if (pair?.left === source || pair?.right === source) {
-        this.#onSoundFailed(pair);
+        this.#onSoundFailed(pair, blocked);
       }
     };
     const pair = {
@@ -427,9 +426,9 @@ class PeerRelay {
     this.#session.emit('relay');
   }
 
-  #onSoundFailed(pair) {
+  #onSoundFailed(pair, blocked = true) {
     if (this.#served !== pair) return;
-    this.#soundBlocked = true;
+    if (blocked) this.#soundBlocked = true;
     this.#release(pair, 'no-sound');
   }
 

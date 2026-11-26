@@ -825,6 +825,154 @@
       </dialog>
     </template>
 
+    <template id="recording-editor-template">
+      <dialog class="recording-editor" aria-label="Edit recording">
+        <header class="settings-header">
+          <h2 class="settings-title" data-edit="title"></h2>
+          <button
+            class="link-btn"
+            type="button"
+            data-edit="close"
+            aria-label="Close recording editor"
+          >
+            ×
+          </button>
+        </header>
+        <div class="recording-edit-content">
+          <p data-edit="status" role="status"></p>
+          <button class="link-btn" type="button" data-edit="retry" hidden>
+            retry
+          </button>
+          <fieldset class="recording-edit-body" data-edit="body" hidden>
+            <legend class="visually-hidden">Recording edit</legend>
+            <video
+              playsinline
+              preload="auto"
+              aria-label="Recording preview"
+            ></video>
+            <div class="recording-edit-row">
+              <button class="link-btn" type="button" data-edit="play">
+                play
+              </button>
+              <span data-edit="time"></span>
+            </div>
+            <input
+              class="recording-edit-scrub"
+              type="range"
+              min="0"
+              step="1"
+              value="0"
+              aria-label="Source playhead"
+              data-edit="scrub"
+            />
+            <div data-edit="source-controls">
+              <div class="recording-edit-track" data-edit="track">
+                <div
+                  class="recording-edit-removals"
+                  data-edit="removals"
+                  aria-hidden="true"
+                ></div>
+                <div
+                  class="recording-edit-boundaries"
+                  data-edit="boundaries"
+                ></div>
+                <button
+                  class="recording-edit-handle"
+                  type="button"
+                  data-handle="start"
+                  aria-label="Trim start handle"
+                ></button>
+                <button
+                  class="recording-edit-handle"
+                  type="button"
+                  data-handle="end"
+                  aria-label="Trim end handle"
+                ></button>
+                <button
+                  class="recording-edit-handle"
+                  type="button"
+                  data-handle="cut-start"
+                  aria-label="Cut start handle"
+                  hidden
+                ></button>
+                <button
+                  class="recording-edit-handle"
+                  type="button"
+                  data-handle="cut-end"
+                  aria-label="Cut end handle"
+                  hidden
+                ></button>
+              </div>
+              <div class="recording-edit-row">
+                <label
+                  >Trim start <input type="text" data-time="start"
+                /></label>
+                <label>Trim end <input type="text" data-time="end" /></label>
+                <button class="link-btn" type="button" data-edit="new-cut">
+                  new cut
+                </button>
+                <button class="link-btn" type="button" data-edit="undo">
+                  undo
+                </button>
+                <button class="link-btn" type="button" data-edit="redo">
+                  redo
+                </button>
+              </div>
+              <ul class="recording-edit-cuts" data-edit="cuts"></ul>
+              <div data-edit="cut-fields" hidden>
+                <div class="recording-edit-row">
+                  <label
+                    >Cut start <input type="text" data-time="cut-start"
+                  /></label>
+                  <label
+                    >Cut end <input type="text" data-time="cut-end"
+                  /></label>
+                  <button class="link-btn" type="button" data-edit="apply-cut">
+                    apply cut
+                  </button>
+                  <button class="link-btn" type="button" data-edit="cancel-cut">
+                    cancel
+                  </button>
+                  <button class="link-btn" type="button" data-edit="remove-cut">
+                    remove cut
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p data-edit="validation" role="status" hidden></p>
+            <div class="recording-edit-row">
+              <button class="link-btn" type="button" data-edit="preview">
+                preview edit
+              </button>
+              <button class="link-btn" type="button" data-edit="discard">
+                discard changes
+              </button>
+            </div>
+            <div class="recording-edit-row recording-edit-save">
+              <label
+                >Copy title <input type="text" data-edit="copy-title"
+              /></label>
+              <span data-edit="format"></span>
+              <button class="link-btn" type="button" data-edit="save">
+                save edited copy
+              </button>
+            </div>
+          </fieldset>
+          <div data-edit="save-status" hidden>
+            <div class="recording-edit-row">
+              <progress
+                data-edit="progress"
+                aria-label="Saving edited copy"
+              ></progress>
+              <button class="link-btn" type="button" data-edit="cancel-save">
+                cancel save
+              </button>
+            </div>
+          </div>
+        </div>
+      </dialog>
+    </template>
+
     <template id="recording-item-template">
       <li class="recording-item">
         <div class="recording-poster">

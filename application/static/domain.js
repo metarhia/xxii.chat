@@ -247,6 +247,7 @@ const LAYERS = {
   article: (app) => app.leaveArticle(),
   settings: (app) => app.leaveSettings(),
   recordings: (app) => app.leaveRecordings(),
+  'recording-editor': (app) => app.recordings.requestEditorClose(),
   'settings-section': (app) => app.settings.showList(),
 };
 
@@ -2473,6 +2474,7 @@ class ChatApplication extends Application {
   }
 
   closeRecordings() {
+    if (!this.recordings.requestEditorClose()) return;
     if (this.recordingsView?.isOpen) this.closeLayer('recordings');
   }
 

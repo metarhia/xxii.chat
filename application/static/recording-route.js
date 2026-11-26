@@ -1,6 +1,7 @@
 import { RECORDINGS, META_FILE, TYPES } from './recording-files.js';
 import { routeOf, rangeOf, typeOf } from './recording-files.js';
 import { dispositionOf, extensionOf } from './recording-files.js';
+import { EDIT_PREFIX, isPendingEdit } from './recording-files.js';
 
 const NOT_FOUND = { status: 404, headers: { 'Content-Type': 'text/plain' } };
 
@@ -60,6 +61,10 @@ const serveRecording = async (request, url) => {
   if (!route) return notFound();
   try {
     const directory = await directoryOf(route.id);
+    if (route.id.startsWith(EDIT_PREFIX)) {
+      const meta = await metaOf(directory);
+      if (isPendingEdit(route.id, meta)) return notFound();
+    }
     const handle = await directory.getFileHandle(route.file);
     const file = await handle.getFile();
     const type = await mimeOf(directory, route.file);

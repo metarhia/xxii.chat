@@ -237,6 +237,8 @@ Settings > Network stores network settings in the browser: public
 STUN off by default, user STUN and TURN servers, and force relay.
 If two participants cannot connect, a third can forward their mic and video
 while the direct link retries. The tiles show who is relaying.
+Devices that cannot set playback volume to zero decline relay requests
+silently. If autoplay is blocked, **enable sound** lets the device try again.
 The chat topbar starts a call. A direct call rings in every tab of the
 other person: video, audio, and decline, a generated tone, and a system
 notification while the page is hidden. Decline or a miss leaves a
@@ -436,13 +438,20 @@ folder. The duration sits on the poster at the bottom right, and a recording
 that is open or ended unexpectedly shows a badge at the top left. Click the
 poster, press `Enter` on it, or use the play button to play. Icon buttons play,
 download, save (to the remembered folder, else **Save as**), and delete; the
-`⋯` button, a right click, or a long press on a card opens a menu with Play,
+`⋯` button, a right click, or a long press on a card opens a menu with Play, Edit,
 Download, Save as, Save to folder, Rename, Delete, and the parts of a
 multi-part recording. Rename edits the title in place. In browsers that offer
 file and folder pickers, **Save as** lets you pick a file and **Save to
 folder** copies to the folder remembered in Settings > Recordings. Both show
 progress, and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate
 names.
+
+Open **Edit** on a saved recording to trim the ends, apply cuts, and preview
+the parts you kept. Folder recordings show their playable parts on one
+timeline. Use the handles or enter times down to milliseconds. **Save edited
+copy** renders a separate file in this browser's library and keeps the original
+intact. The copy plays, downloads, and exports through the usual card actions.
+Keep the tab visible during the render, which takes about the edited duration.
 
 In Chromium with a folder picker, **Save recordings to** in Settings > Recordings
 (and in the call's Record tab) can send recordings straight to a chosen folder. Choose
@@ -709,6 +718,8 @@ server) with `files/have`, `get`, and `put`.
   `test/recording-export.js` checks picker and folder export (scenario 18),
   and `test/recording-folder.js` checks direct-to-folder parts, permissions,
   and repair (scenario 19).
+  `test/recording-editor.js` checks trim, cuts, edited playback, folder parts,
+  cancel, repair, and independent playback of the saved copy (scenario 24).
   `test/capture-logic.js` checks the solo layouts, and `test/capture.js` checks
   solo capture, storage targets, the direct-chat card, and source cleanup.
   `test/recording-duration.js` covers timing in WebM and fragmented MP4.

@@ -64,6 +64,20 @@ test('validates relay actions, pair, roles and fields', async () => {
   assert.equal(readRelayMessage(unknown, 'bob', 'cara'), null);
 });
 
+test('silent playback requires a working volume setter', async () => {
+  const { canSilence } = await load();
+  const adjustable = { volume: 1 };
+  const fixed = {};
+  Object.defineProperty(fixed, 'volume', {
+    get: () => 1,
+    set: () => {},
+  });
+  assert.equal(canSilence(adjustable), true);
+  assert.equal(adjustable.volume, 0);
+  assert.equal(canSilence(fixed), false);
+  assert.equal(canSilence(Object.freeze({ volume: 1 })), false);
+});
+
 test('maps screen in preference to camera and omits screen audio', async () => {
   const { relayVideoSource, relaySlot } = await load();
   const person = { camera: true, screen: true };

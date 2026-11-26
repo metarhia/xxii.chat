@@ -3,6 +3,11 @@ import { programFileOf, nextMeta } from './recording-files.js';
 import { scheduleOf, markedOf } from './recording-files.js';
 import { isOpen, readMeta, recordingsOf } from './recording-files.js';
 import { isFolderRecording } from './recording-files.js';
+import {
+  EDIT_PREFIX,
+  isPendingEdit,
+  recordingLockOf,
+} from './recording-files.js';
 import { durationSlotOf, durationBytesOf } from './recording-webm.js';
 import { storedDurationOf } from './recording-duration.js';
 import { folderHandle } from './recording-folder.js';
@@ -15,8 +20,6 @@ let queue = Promise.resolve();
 
 const IF_AVAILABLE = { ifAvailable: true };
 const SESSION_WRITES = ['write', 'pause', 'resume'];
-
-const lockNameOf = (recording) => `xxii-recording-${recording}`;
 
 const requireStorage = () => {
   const storage = navigator.storage;
@@ -34,7 +37,7 @@ const requireStorage = () => {
 const holdLock = (recording) =>
   new Promise((resolve, reject) => {
     const done = navigator.locks.request(
-      lockNameOf(recording),
+      recordingLockOf(recording),
       IF_AVAILABLE,
       (lock) => {
         if (!lock) throw new Error('The recording is already open');
@@ -81,7 +84,7 @@ const writeFile = async (directory, name, bytes) => {
 const saveMeta = async (session) => {
   const { directory, meta } = session;
   const text = JSON.stringify(meta, null, 2);
-  if (!isFolderRecording(meta)) {
+  if (!isFolderRecording(meta) && !directory.name.startsWith(EDIT_PREFIX)) {
     await writeFile(directory, META_FILE, encoder.encode(text));
     return;
   }
@@ -242,9 +245,25 @@ const finish = (session, duration) => {
   }
 };
 
+const finishEdit = ({ recording, duration }) => {
+  const session = sessionOf(recording);
+  if (!recording.startsWith(EDIT_PREFIX) || !session.handle) {
+    throw new Error('The edited copy is not open.');
+  }
+  try {
+    session.finishedSize = finish(session, duration);
+    if (!session.finishedSize) {
+      throw new Error('The encoder produced no video.');
+    }
+    return {};
+  } finally {
+    session.handle = null;
+  }
+};
+
 const endRecording =
   (type) =>
-  async ({ recording, duration, people }) => {
+  async ({ recording, duration, people, mime }) => {
     const session = sessionOf(recording);
     sessions.delete(recording);
     try {
@@ -257,11 +276,12 @@ const endRecording =
           await discardFolderPart(session);
         }
       } else {
-        size = finish(session, duration);
+        size = session.finishedSize ?? finish(session, duration);
       }
       const time = Date.now();
       const event = { type, size, duration, time, people };
       session.meta = nextMeta(session.meta, event);
+      if (mime) session.meta.mime = mime;
       await saveMeta(session);
       return { meta: session.meta };
     } catch (error) {
@@ -291,6 +311,36 @@ const readRecording = async (directory) => {
   } catch (error) {
     if (error.name === 'NotFoundError') return null;
     throw error;
+  }
+};
+
+const removePendingEdit = async (recordings, recording) => {
+  try {
+    const directory = await recordings.getDirectoryHandle(recording);
+    const meta = await readRecording(directory).catch(() => null);
+    if (!isPendingEdit(recording, meta)) return false;
+    await recordings.removeEntry(recording, { recursive: true });
+    return true;
+  } catch (error) {
+    if (error.name === 'NotFoundError') return false;
+    throw error;
+  }
+};
+
+const discardEdit = async ({ recording }) => {
+  if (!recording.startsWith(EDIT_PREFIX)) return {};
+  const session = sessions.get(recording);
+  const release = session ? session.release : await holdLock(recording);
+  try {
+    if (session) {
+      sessions.delete(recording);
+      session.handle?.close();
+    }
+    const recordings = await recordingsOf(navigator.storage);
+    if (recordings) await removePendingEdit(recordings, recording);
+    return {};
+  } finally {
+    await release();
   }
 };
 
@@ -328,8 +378,11 @@ const interruptedEvent = async (directory, meta) => {
   }
 };
 
-const repairRecording = async (directory, lock) => {
+const repairRecording = async (recordings, directory, lock) => {
   if (!lock) return false;
+  if (directory.name.startsWith(EDIT_PREFIX)) {
+    return removePendingEdit(recordings, directory.name);
+  }
   const current = await readRecording(directory);
   if (!isOpen(current)) return false;
   const event = await interruptedEvent(directory, current);
@@ -347,10 +400,10 @@ const repair = async () => {
   for await (const directory of recordings.values()) {
     if (directory.kind !== 'directory') continue;
     const meta = await readRecording(directory).catch(() => null);
-    if (meta && !isOpen(meta)) continue;
-    const name = lockNameOf(directory.name);
+    if (meta && !isOpen(meta) && !isPendingEdit(directory.name, meta)) continue;
+    const name = recordingLockOf(directory.name);
     try {
-      const fix = (lock) => repairRecording(directory, lock);
+      const fix = (lock) => repairRecording(recordings, directory, lock);
       if (await navigator.locks.request(name, IF_AVAILABLE, fix)) repaired++;
     } catch {
       failed++;
@@ -367,6 +420,8 @@ const HANDLERS = {
   resume: change('resume'),
   close: endRecording('close'),
   abort: abortRecording,
+  'discard-edit': discardEdit,
+  'finish-edit': finishEdit,
   poster: savePoster,
   repair,
 };
@@ -379,7 +434,10 @@ const dispatch = async (message) => {
   } catch (error) {
     const session = sessions.get(message.recording);
     if (SESSION_WRITES.includes(type) && session && !session.folder) {
-      await abortRecording(message).catch(() => {});
+      const discard = message.recording.startsWith(EDIT_PREFIX)
+        ? discardEdit
+        : abortRecording;
+      await discard(message).catch(() => {});
     }
     const text = error?.message ?? 'The recording failed';
     self.postMessage({ request, ok: false, error: text, name: error?.name });

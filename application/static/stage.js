@@ -396,7 +396,7 @@ const createMini = () => {
     createIconButton('camera', 'camera', 'Camera', CAMERA_HINT),
     createIconButton('leave', 'leave', 'Leave call', 'Leave'),
     createIconButton('expand', 'expand', 'Expand the call', 'Expand'),
-    createButton('enable-sound', 'Enable sound'),
+    createButton('enable-sound', 'enable sound'),
   );
   tile.append(createVideo(true), createAvatar(), controls);
   return tile;
@@ -419,7 +419,7 @@ const createPip = () => {
     createIconButton('camera', 'camera', 'Camera', CAMERA_HINT),
     react,
     createIconButton('leave', 'leave', 'Leave call', 'Leave'),
-    createButton('enable-sound', 'Enable sound'),
+    createButton('enable-sound', 'enable sound'),
   );
   root.append(createVideo(true), createAvatar(), name, controls);
   return root;

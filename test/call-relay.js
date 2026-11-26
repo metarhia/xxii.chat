@@ -411,3 +411,51 @@ test(
     );
   },
 );
+
+test(
+  'scenario 22: fixed-volume devices deny silently and can retry',
+  { timeout: 90000 },
+  async (t) => {
+    await harness.startCallServer(t);
+    const browser = await harness.launch(t, FLAGS);
+    const c = await openPerson(t, browser, 'Casey');
+    const first = await openPerson(t, browser, 'Ada');
+    const second = await openPerson(t, browser, 'Bea');
+    const { a, b } = await openBlockedPair(c, first, second, true);
+    await watchRelay(c, false);
+    await c.run(`
+      const prototype = HTMLMediaElement.prototype;
+      const original = Object.getOwnPropertyDescriptor(prototype, 'volume');
+      window.nativeVolume = original;
+      Object.defineProperty(prototype, 'volume', {
+        configurable: true, get: () => 1, set: () => {},
+      });
+      window.relayNotices = [];
+      app.callSession.on('notice', (notice) => relayNotices.push(notice));
+    `);
+    await join(b);
+    await c.wait(`
+      return window.relayMessages.some(({ action, reason }) =>
+        action === 'deny' && reason === 'no-sound');
+    `);
+    assert.equal(
+      await c.run(`
+        const { forwarding, relaySoundBlocked } = app.callSession;
+        return !forwarding && !relaySoundBlocked &&
+        !document.querySelector(${quote(SOUND)}).checkVisibility() &&
+        !window.relayNotices.length && !window.relayElements.size;
+    `),
+      true,
+    );
+    await noChip(a, b);
+    await noChip(b, a);
+    await c.run(`
+      Object.defineProperty(HTMLMediaElement.prototype, 'volume', nativeVolume);
+    `);
+    await a.wait(chip(b, c));
+    await b.wait(chip(a, c));
+    await c.wait(
+      `return app.callSession.forwarding?.from === ${quote(a.endpoint)};`,
+    );
+  },
+);
