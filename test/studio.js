@@ -742,7 +742,7 @@ const overlayProbe = `
   window.studioPixel = (canvas, x, y) => {
     copy.width = copy.height = 1;
     pixel.drawImage(canvas, x, y, 1, 1, 0, 0, 1, 1);
-    return pixel.getImageData(0, 0, 1, 1).data.slice(0, 3);
+    return Array.from(pixel.getImageData(0, 0, 1, 1).data.slice(0, 3));
   };
   window.studioCards = () => {
     const { compositor } = app.callStage.recording;
