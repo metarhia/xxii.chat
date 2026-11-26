@@ -7,6 +7,7 @@ const MIN_ROOM = 120;
 const PULL_CLOSE_PX = 64;
 const SWIPE_PX = 50;
 const SWITCHER_LIMIT = 12;
+const HIDDEN_RANK = 2;
 const LONG_PRESS_MS = 450;
 const CLICK_MS = 400;
 const MOVE_PX = 10;
@@ -145,6 +146,22 @@ const toggleChecked = (button, entry) => {
 
 const rowOf = (node) => node?.closest?.(ROW) ?? null;
 
+const columnsOf = (count) => Math.ceil(count / 2);
+
+const lineOf = (nodes, node, columns) => {
+  if (!columns) return nodes;
+  const start = Math.floor(nodes.indexOf(node) / columns) * columns;
+  return nodes.slice(start, start + columns);
+};
+
+const gridTarget = (nodes, node, columns, step) => {
+  const index = nodes.indexOf(node);
+  const line = Math.floor(index / columns) + step;
+  const lastLine = Math.floor((nodes.length - 1) / columns);
+  if (line < 0 || line > lastLine) return null;
+  return nodes[Math.min(line * columns + (index % columns), nodes.length - 1)];
+};
+
 const labelOf = (node) => {
   const label = node.querySelector('.menu-label');
   return label ? label.textContent.trim().toLowerCase() : '';
@@ -157,6 +174,13 @@ const sideOf = (placement, height, above, below) => {
   if (height <= room[first]) return first;
   if (height <= room[second]) return second;
   return room[first] >= room[second] ? first : second;
+};
+
+const createMark = () => {
+  const mark = document.createElement('span');
+  mark.className = 'hidden-mark';
+  mark.textContent = 'hidden';
+  return mark;
 };
 
 const liftOf = (item) => {
@@ -276,6 +300,7 @@ class Menu {
   #reason = '';
   #pull = null;
   #lastInRow = new WeakMap();
+  #columns = new WeakMap();
   #isOpen = false;
   #isSheet = false;
   #hasLayer = false;
@@ -514,6 +539,9 @@ class Menu {
     row.setAttribute('role', 'group');
     row.setAttribute('aria-label', 'Reactions');
     const buttons = reactions();
+    const columns = columnsOf(buttons.length);
+    row.style.setProperty('--columns', `${columns}`);
+    this.#columns.set(row, columns);
     for (const button of buttons) {
       button.tabIndex = -1;
       button.setAttribute('role', 'menuitem');
@@ -674,6 +702,9 @@ class Menu {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const step = KEY_STEPS[key];
     const rowStep = rowOf(target) ? ROW_STEPS[key] : 0;
+    if (step && this.#moveInGrid(target, step)) {
+      return void event.preventDefault();
+    }
     if (step || rowStep) {
       event.preventDefault();
       return void (step ? this.#move(step) : this.#moveInRow(rowStep));
@@ -719,11 +750,23 @@ class Menu {
 
   #moveInRow(step) {
     const active = this.#doc.activeElement;
-    const nodes = Array.from(rowOf(active).querySelectorAll(FOCUSABLE));
+    const row = rowOf(active);
+    const all = Array.from(row.querySelectorAll(FOCUSABLE));
+    const nodes = lineOf(all, active, this.#columns.get(row));
     const count = nodes.length;
     const index = nodes.indexOf(active);
     const next = nodes[(index + step + count) % count];
     next.focus({ preventScroll: true });
+  }
+
+  #moveInGrid(target, step) {
+    const row = rowOf(target);
+    const columns = this.#columns.get(row);
+    if (!columns) return false;
+    const nodes = Array.from(row.querySelectorAll(FOCUSABLE));
+    const next = gridTarget(nodes, target, columns, step);
+    next?.focus({ preventScroll: true });
+    return next !== null;
   }
 
   #jump(index) {
@@ -915,7 +958,8 @@ class Switcher {
       const label = entry.label.toLowerCase();
       if (!label.includes(query)) continue;
       const isPrefix = label.slice(1).startsWith(query);
-      const rank = query && !isPrefix ? 1 : 0;
+      const base = query && !isPrefix ? 1 : 0;
+      const rank = entry.hidden ? base + HIDDEN_RANK : base;
       matches.push({ ...entry, rank });
     }
     this.#matches = matches.toSorted(byRelevance).slice(0, SWITCHER_LIMIT);
@@ -932,7 +976,9 @@ class Switcher {
       const kind = document.createElement('span');
       kind.className = 'kind';
       kind.textContent = entry.unread > 0 ? `${entry.unread} new` : entry.kind;
-      item.append(icon, label, kind);
+      item.append(icon, label);
+      if (entry.hidden) item.append(createMark());
+      item.append(kind);
       return item;
     });
     if (items.length === 0) {

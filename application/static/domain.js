@@ -4,14 +4,13 @@ import { validate, seed } from './chat.js';
 import { pairOf, isPair, directUnit } from './chat.js';
 import { isFeed, isPost, labelOf, parseTitle } from './chat.js';
 import { saveAuthor, createChannel, describe } from './chat.js';
-import { createFolder, setVisibility, placeItem } from './chat.js';
 import { createMessage, createPost, setReaction, pin } from './chat.js';
 import { editMessage, deleteMessage, isDeleted } from './chat.js';
 import { startCall as saveCall, endCall as saveCallEnd } from './chat.js';
 import { startRecording as saveRecording } from './chat.js';
 import { stopRecording as saveRecordingStop } from './chat.js';
 import { MAX_FILE_SIZE, attachFile, attachmentsOf } from './chat.js';
-import { listChannels, listAuthors, folderTree } from './chat.js';
+import { listChannels, listAuthors } from './chat.js';
 import { threadsOf, activityOf, reactionsOf, unreadOf } from './chat.js';
 import { lineageOf } from './chat.js';
 import { rootOf, threadOf, threadRootOf } from './replies.js';
@@ -38,6 +37,8 @@ import { CallSession } from './call.js';
 import { requestCallNotifications } from './notifications.js';
 import { CallStage, RingAlert } from './stage.js';
 import { Recordings, countRecordings } from './recordings.js';
+import { localIdsOf, sameIds } from './recording-links.js';
+import { linksOf, callLinkText } from './recording-links.js';
 import { resetSettings } from './settings-reset.js';
 import { SoloCapture } from './capture.js';
 import { SettingsView } from './settings.js';
@@ -45,6 +46,9 @@ import { MessageNotices } from './message-notice.js';
 import { RecordingsScreen } from './recordings-screen.js';
 import { ProfileRow } from './profile-row.js';
 import { linkOf, summaryOf } from './settings-about.js';
+import { Folders, FOLDERS_KEY } from './folders.js';
+import { Hidden, HIDDEN_KEY, isReturning } from './hidden.js';
+import { askConfirm } from './confirm-dialog.js';
 
 const PANELS = {
   pins: 'Pinned',
@@ -84,13 +88,34 @@ const COMMANDS = {
   },
 };
 
-const STATUS_OF = { server: 'online', p2p: 'away', offline: 'offline' };
-
 const NAV_ACTIONS = {
   add: (app, { folder }) => app.addToFolder(folder),
-  visibility: (app, { folder }) => app.toggleVisibility(folder),
   remove: (app, { folder, item }) => app.removeFromFolder(folder, item),
   mine: (app, { chat }) => app.jumpToReply(chat),
+  more: (app, dataset, button) => app.toggleNavMenu(button),
+};
+
+const HIDING = {
+  chat: { kind: 'chats', text: (name) => `Left ${name}` },
+  feed: { kind: 'feeds', text: (name) => `Unsubscribed from ${name}` },
+  contact: { kind: 'contacts', text: (name) => `Removed ${name}` },
+};
+
+const LEAVE_LABELS = {
+  chat: 'Leave chat',
+  feed: 'Unsubscribe',
+  contact: 'Remove contact',
+};
+
+const NAV_MENU_ACTIONS = {
+  leave: (app, entry, target) => app.hideTarget(target),
+  'toggle-folder': (app, entry, target) => {
+    app.placeTarget(entry.folder, target, entry.checked);
+  },
+  'folder-add': (app, entry, target) => app.addToFolder(target.id),
+  'folder-new': (app, entry, target) => app.startNaming('', target.id),
+  'folder-rename': (app, entry, target) => app.startNaming(target.id, ''),
+  'folder-delete': (app, entry, target) => app.deleteFolder(target.id),
 };
 
 const beginCall = (app) => {
@@ -178,6 +203,8 @@ const MESSAGE_ACTIONS = {
   heading: (app, id, { dataset }) => app.scrollToHeading(dataset.heading),
   'join-call': beginCall,
   'call-back': beginCall,
+  'watch-recording': (app, id, { dataset }) =>
+    app.watchRecordings(dataset.ids.split(',')),
 };
 
 const ITEM_KEYS = {
@@ -225,7 +252,6 @@ const LAYERS = {
 
 const LIGHTBOX_KEYS = { ArrowLeft: -1, ArrowRight: 1 };
 const CHAT_KEYS = { ArrowUp: -1, ArrowDown: 1 };
-const NEXT_VISIBILITY = { unlisted: 'public', public: 'unlisted' };
 
 const STATES = {
   linked: 'webrtc',
@@ -260,6 +286,7 @@ const PAGE_SIZE = 50;
 const GROUP_MS = 5 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 const REVOKE_MS = 10000;
+const UNDO_MS = 5000;
 const RETRY_MS = 2000;
 const MAX_RETRY_MS = 30000;
 const FLASH_MS = 1600;
@@ -278,6 +305,24 @@ const DRAFTS_KEY = 'xxii:drafts';
 const COLLAPSED_KEY = 'xxii:collapsed';
 const SIDEBAR_KEY = 'xxii:sidebar';
 const TAB_KEY = 'xxii:tab';
+
+const markRemovable = (item, folder, id) => {
+  const remove = item.querySelector('.remove-btn');
+  remove.classList.toggle('hidden', !folder);
+  if (!folder) return;
+  remove.dataset.folder = folder.id;
+  remove.dataset.item = id;
+};
+
+const keyOf = (target) => `${target.kind}:${target.id}`;
+
+const storageOf = () => {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+};
 
 const tabId = () => {
   const storage = globalThis.sessionStorage;
@@ -375,6 +420,7 @@ const createHeadingLink = (index, text) => {
 };
 
 const CONTROLS = 'button, a, input, .message-editor';
+const SEARCH_KEEP = '#search-bar, #search-btn, .message-list';
 
 const replyTargetOf = (event) => {
   const item = event.target.closest('.message');
@@ -413,6 +459,11 @@ const fillQuote = (button, quote) => {
   button.dataset.target = quote.id;
   button.querySelector('.quote-author').textContent = quote.nick;
   button.querySelector('.quote-text').textContent = quote.text;
+};
+
+const pointBelow = (item) => {
+  const rect = item.getBoundingClientRect();
+  return { x: rect.left + MENU_INDENT_PX, y: rect.bottom };
 };
 
 const selectItem = (item, scroll = true) => {
@@ -507,6 +558,15 @@ const callAction = (record, live) => {
   return { action: 'call-back', label: 'call back' };
 };
 
+const actionButton = (action, label) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'link-btn';
+  button.dataset.action = action;
+  button.textContent = label;
+  return button;
+};
+
 const imagesOf = (checksum) => {
   const selector = `.image[data-checksum="${checksum}"]`;
   return document.querySelectorAll(selector);
@@ -573,6 +633,7 @@ class ChatApplication extends Application {
     this.chat = readSetting(CHAT_KEY, GENERAL);
     this.limit = PAGE_SIZE;
     this.filter = '';
+    this.searchPointer = false;
     this.panel = '';
     this.article = '';
     this.selection = null;
@@ -596,6 +657,13 @@ class ChatApplication extends Application {
     this.lastMine = '';
     this.divider = { chat: this.chat, at: this.readAtOf(this.chat) };
     this.collapsed = readCollapsed();
+    this.folders = new Folders(storageOf());
+    this.hidden = new Hidden(storageOf());
+    this.shownContacts = new Map();
+    this.naming = null;
+    this.navTarget = null;
+    this.undo = null;
+    this.undoTimer = null;
     this.cache = new Map();
     this.days = new Map();
     this.iceCache = null;
@@ -611,6 +679,8 @@ class ChatApplication extends Application {
     this.started = new Promise((resolve) => this.on('ready', resolve));
     this.settings = null;
     this.recordingsView = null;
+    this.localRecordings = new Set();
+    this.localRevision = 0;
     this.viewScroll = 0;
     this.notified = '';
     this.callStage = null;
@@ -642,6 +712,7 @@ class ChatApplication extends Application {
         nick: (peer) => this.nickMap().get(peer) ?? shortId(peer),
         chat: (chat) => this.chatName(chat),
       },
+      isHidden: (chat, record) => this.isHiddenFor(chat, record),
     });
     this.notices.watch(this.replica);
     this.uplink = null;
@@ -688,6 +759,7 @@ class ChatApplication extends Application {
       library,
       () => this.refreshRecordings(),
       overlay,
+      (ids) => this.setLocalRecordings(new Set(ids)),
     );
     this.recordings.repair().then(() => this.refreshRecordings());
     this.renderIce();
@@ -713,7 +785,6 @@ class ChatApplication extends Application {
     this.recordingsBtn = byId('recordings-btn');
     this.directCaptureBtn = byId('direct-capture-btn');
     this.capturePanel = document.querySelector('.capture-panel');
-    this.peerCount = byId('peer-count');
     this.usernameInput = byId('username-input');
     this.contactList = byId('contact-list');
     this.contactsEmpty = byId('contacts-empty');
@@ -736,6 +807,10 @@ class ChatApplication extends Application {
     this.searchBtn = byId('search-btn');
     this.pinsBtn = byId('pins-btn');
     this.membersBtn = byId('members-btn');
+    this.chatMenuBtn = byId('chat-menu-btn');
+    this.undoToast = byId('undo-toast');
+    this.undoText = byId('undo-text');
+    this.undoBtn = byId('undo-btn');
     this.searchBar = byId('search-bar');
     this.searchInput = byId('search-input');
     this.chatView = byId('chat-view');
@@ -791,6 +866,17 @@ class ChatApplication extends Application {
         push: (name) => this.afterPop(() => this.pushLayer(name)),
         pop: (name) => this.popLayer(name),
       },
+    });
+    this.navMenu = new Menu(byId('nav-menu'), {
+      backdrop: this.backdrop,
+      layers: {
+        push: (name) => this.afterPop(() => this.pushLayer(name)),
+        pop: (name) => this.popLayer(name),
+      },
+    });
+    this.navPress = new Press({
+      hold: (item, x, y) => this.openNavMenu(item, { point: { x, y } }),
+      swipe: () => undefined,
     });
     this.press = new Press({
       hold: (item, x, y) => this.openMenu(item, { x, y }, true),
@@ -852,6 +938,8 @@ class ChatApplication extends Application {
     this.searchBtn.onclick = () => this.toggleSearch();
     this.pinsBtn.onclick = () => this.togglePanel('pins');
     this.membersBtn.onclick = () => this.togglePanel('members');
+    this.chatMenuBtn.onclick = () => this.toggleNavMenu(this.chatMenuBtn);
+    this.undoBtn.onclick = () => this.runUndo();
     this.recordingsBtn.onclick = () => this.openLibrary();
     this.directCaptureBtn.onclick = () => this.openCapture(this.chat);
     this.icePublicStun.addEventListener('change', () => this.saveIceFlags());
@@ -918,6 +1006,13 @@ class ChatApplication extends Application {
       this.filter = this.searchInput.value.trim().toLowerCase();
       this.renderMessages();
     });
+    this.searchBar.addEventListener('focusout', (event) => {
+      this.handleSearchFocus(event);
+    });
+    this.messageInput.addEventListener('focus', () => this.closeSearch());
+    window.addEventListener('blur', () => {
+      if (this.filter === '') this.closeSearch();
+    });
     onSubmit(this.feedForm, () => this.addChannel('feed', this.feedNameInput));
     onSubmit(this.chatForm, () => this.addChannel('chat', this.chatNameInput));
     onSubmit(this.folderForm, () => this.addFolders());
@@ -935,6 +1030,12 @@ class ChatApplication extends Application {
 
     this.sidebar.addEventListener('click', (event) => {
       this.handleNavClick(event);
+    });
+    this.sidebar.addEventListener('contextmenu', (event) => {
+      this.handleNavContext(event);
+    });
+    this.sidebar.addEventListener('pointerdown', (event) => {
+      this.startNavPress(event);
     });
     this.memberList.addEventListener('click', (event) => {
       const item = event.target.closest('.member[data-peer]');
@@ -976,12 +1077,26 @@ class ChatApplication extends Application {
       (event) => this.handlePointerDown(event),
       true,
     );
-    document.addEventListener('pointermove', (event) => this.press.move(event));
-    document.addEventListener('pointerup', () => this.press.end());
-    document.addEventListener('pointercancel', () => this.press.abort());
-    document.addEventListener('click', (event) => this.press.suppress(event), {
-      capture: true,
+    document.addEventListener('pointermove', (event) => {
+      this.press.move(event);
+      this.navPress.move(event);
     });
+    document.addEventListener('pointerup', () => {
+      this.press.end();
+      this.navPress.end();
+    });
+    document.addEventListener('pointercancel', () => {
+      this.press.abort();
+      this.navPress.abort();
+    });
+    document.addEventListener(
+      'click',
+      (event) => {
+        this.press.suppress(event);
+        this.navPress.suppress(event);
+      },
+      { capture: true },
+    );
     document.addEventListener('click', (event) => {
       const isPalette = event.target.closest('#palette, #emoji-btn');
       if (!isPalette) this.closePalette();
@@ -1047,6 +1162,7 @@ class ChatApplication extends Application {
     try {
       await this.uplink.sync();
       this.synced = true;
+      this.migrateFolders();
       this.saveAuthor();
       const pairs = await this.api.chat.directs();
       for (const pair of pairs) this.restoreDirect(pair);
@@ -1146,7 +1262,52 @@ class ChatApplication extends Application {
       const count = counts.get(direct.pair) ?? 0;
       if (count > 0) unread.set(direct.pair, count);
     }
+    for (const chat of Array.from(unread.keys())) {
+      if (this.isHiddenChat(chat)) unread.delete(chat);
+    }
     return unread;
+  }
+
+  migrateFolders() {
+    if (this.folders.migrate(this.replica, this.peerId)) this.scheduleRender();
+  }
+
+  isHiddenChat(chat) {
+    if (isPair(chat)) return this.hidden.has('contacts', this.peerOf(chat));
+    return this.hidden.has('chats', chat) || this.hidden.has('feeds', chat);
+  }
+
+  isHiddenFor(chat, record) {
+    const peer = this.peerOf(chat);
+    const at = this.hidden.hiddenAt('contacts', peer);
+    const isHiddenContact = isPair(chat) && this.hidden.has('contacts', peer);
+    const isTheirs = record.author !== this.peerId && !isDeleted(record);
+    if (isHiddenContact && isTheirs && record.timestamp > at) {
+      this.hidden.restore('contacts', peer);
+      this.scheduleRender();
+    }
+    return this.isHiddenChat(chat);
+  }
+
+  revealChat(chat) {
+    const peer = this.peerOf(chat);
+    const isShown = isPair(chat)
+      ? this.hidden.restore('contacts', peer)
+      : this.hidden.restore('chats', chat) ||
+        this.hidden.restore('feeds', chat);
+    if (isShown) this.hideUndo();
+    return isShown;
+  }
+
+  reviveContacts() {
+    for (const peer of this.hidden.ids('contacts')) {
+      const pair = pairOf(this.peerId, peer);
+      const replica = this.directs.get(pair)?.replica;
+      if (!replica) continue;
+      const at = this.hidden.hiddenAt('contacts', peer);
+      const isBack = isReturning(replica, pair, this.peerId, at);
+      if (isBack) this.hidden.restore('contacts', peer);
+    }
   }
 
   countMine() {
@@ -1200,6 +1361,14 @@ class ChatApplication extends Application {
       this.iceCache = null;
       this.renderIce();
     }
+    if (key === null || key === FOLDERS_KEY) {
+      this.folders.reload();
+      this.scheduleRender();
+    }
+    if (key === null || key === HIDDEN_KEY) {
+      this.hidden.reload();
+      this.scheduleRender();
+    }
     if (key !== READ_KEY) return;
     this.readAt = readMap(READ_KEY);
     this.scheduleRender();
@@ -1233,6 +1402,7 @@ class ChatApplication extends Application {
 
   render() {
     const isAtBottom = this.isAtBottom();
+    this.reviveContacts();
     this.unread = this.countUnread();
     this.mine = this.countMine();
     this.markRead(isAtBottom);
@@ -1303,13 +1473,18 @@ class ChatApplication extends Application {
     const contacts = this.listContacts();
     const online = contacts.filter((contact) => contact.status !== 'offline');
     const reachable = online.filter((contact) => contact.status !== 'unknown');
-    this.peerCount.textContent = reachable.length;
-    const items = contacts.map((contact) => this.createContactItem(contact));
+    this.profileRow.countPeers(reachable.length);
+    const isShown = (contact) => !this.hidden.has('contacts', contact.peer);
+    const shown = contacts.filter(isShown);
+    this.shownContacts = new Map(
+      shown.map((contact) => [contact.peer, contact]),
+    );
+    const items = shown.map((contact) => this.createContactItem(contact));
     this.contactList.replaceChildren(...items);
     this.contactsEmpty.classList.toggle('hidden', items.length > 0);
   }
 
-  createContactItem(contact) {
+  createContactItem(contact, folder = null) {
     const item = cloneTemplate(this.contactTemplate, '.contact-item');
     const pair = pairOf(this.peerId, contact.peer);
     item.dataset.peer = contact.peer;
@@ -1321,31 +1496,30 @@ class ChatApplication extends Application {
     setBadge(item.querySelector('.badge'), this.unreadOf(pair));
     this.setMine(item.querySelector('.mine'), pair);
     this.setCallMark(item, pair);
+    markRemovable(item, folder, contact.peer);
     return item;
   }
 
   renderChannels() {
     const activity = activityOf(this.replica);
-    const tree = folderTree(this.replica, this.peerId);
+    const tree = this.folders.tree();
     const channels = new Map();
-    const placed = new Set();
-    for (const items of tree.items.values()) {
-      for (const item of items) placed.add(item);
-    }
     const lists = { feed: [], chat: [] };
     for (const entity of CHANNELS) {
       for (const channel of listChannels(this.replica, entity)) {
+        if (this.isHiddenChat(channel.id)) continue;
         channels.set(channel.id, channel);
-        if (placed.has(channel.id)) continue;
         lists[entity].push(this.createChannelItem(channel, activity, null));
       }
     }
     this.feedList.replaceChildren(...lists.feed);
     this.chatList.replaceChildren(...lists.chat);
-    const nav = { activity, tree, channels };
+    const contacts = this.shownContacts;
+    const nav = { activity, tree, channels, contacts };
     const roots = tree.children.get('') ?? [];
     const folders = roots.map((folder) => this.createFolderItem(folder, nav));
     this.folderList.replaceChildren(...folders);
+    this.focusNaming();
   }
 
   createChannelItem(channel, activity, folder) {
@@ -1360,39 +1534,40 @@ class ChatApplication extends Application {
     this.setMine(item.querySelector('.mine'), channel.id);
     const chatId = channel.entity === 'chat' ? channel.id : '';
     this.setCallMark(item, chatId);
-    const isRemovable = folder?.owner === this.peerId;
-    const remove = item.querySelector('.remove-btn');
-    remove.classList.toggle('hidden', !isRemovable);
-    if (!isRemovable) return item;
-    remove.dataset.folder = folder.id;
-    remove.dataset.item = channel.id;
+    markRemovable(item, folder, channel.id);
     return item;
   }
 
   createFolderItem(folder, nav) {
     const element = cloneTemplate(this.folderTemplate, '.folder');
     const row = element.querySelector('.folder-row');
-    const visibility = folder.visibility ?? 'unlisted';
-    const isOwn = folder.owner === this.peerId;
     row.dataset.folder = folder.id;
     element.classList.toggle('open', !this.collapsed.has(folder.id));
-    row.querySelector('.icon').textContent = folder.icon ?? ICONS.folder;
+    row.querySelector('.icon').textContent = folder.icon || ICONS.folder;
     row.querySelector('.name').textContent = folder.name;
-    row.querySelector('.folder-actions').classList.toggle('hidden', !isOwn);
     for (const button of row.querySelectorAll('[data-action]')) {
       button.dataset.folder = folder.id;
     }
-    const toggle = row.querySelector('[data-action="visibility"]');
-    toggle.textContent = visibility;
+    if (this.naming?.id === folder.id) {
+      this.showNaming(row.querySelector('.name'));
+    }
     setBadge(row.querySelector('.badge'), this.unreadIn(folder.id, nav));
     const subfolders = nav.tree.children.get(folder.id) ?? [];
     const placed = nav.tree.items.get(folder.id) ?? new Set();
-    const children = subfolders.map((child) =>
-      this.createFolderItem(child, nav),
-    );
+    const children = [];
+    if (this.naming?.id === '' && this.naming.parent === folder.id) {
+      children.push(this.createNamingItem());
+    }
+    for (const child of subfolders) {
+      children.push(this.createFolderItem(child, nav));
+    }
     for (const channel of nav.channels.values()) {
       if (!placed.has(channel.id)) continue;
       children.push(this.createChannelItem(channel, nav.activity, folder));
+    }
+    for (const contact of nav.contacts.values()) {
+      if (!placed.has(contact.peer)) continue;
+      children.push(this.createContactItem(contact, folder));
     }
     element.querySelector('.folder-items').replaceChildren(...children);
     return element;
@@ -1401,7 +1576,9 @@ class ChatApplication extends Application {
   unreadIn(folder, nav) {
     let count = 0;
     for (const item of nav.tree.items.get(folder) ?? []) {
-      count += this.unreadOf(item);
+      const isContact = nav.contacts.has(item);
+      const chat = isContact ? pairOf(this.peerId, item) : item;
+      count += this.unreadOf(chat);
     }
     for (const child of nav.tree.children.get(folder) ?? []) {
       count += this.unreadIn(child.id, nav);
@@ -1469,6 +1646,7 @@ class ChatApplication extends Application {
     const focused = isItem(active) ? active.dataset.id : '';
     const editorFocused = this.editForm.contains(active);
     const cache = new Map();
+    const links = linksOf(view.items, this.localRecordings);
     const parts = [];
     let nodes = null;
     let previous = null;
@@ -1491,7 +1669,7 @@ class ChatApplication extends Application {
         previous = null;
       }
       if (message.kind === 'call') {
-        nodes.push(this.createCallCard(message));
+        nodes.push(this.createCallCard(message, links.get(message.id)));
         previous = null;
         continue;
       }
@@ -1673,7 +1851,7 @@ class ChatApplication extends Application {
     mark.textContent = live === null ? '' : `📞 ${live.count}`;
   }
 
-  createCallCard(record) {
+  createCallCard(record, recorded = []) {
     const live = this.liveCalls.get(record.id) ?? null;
     const element = document.createElement('div');
     element.className = 'call-card';
@@ -1682,13 +1860,11 @@ class ChatApplication extends Application {
     text.textContent = callLabel(record, live);
     element.append(text);
     const choice = callAction(record, live);
-    if (!choice) return element;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'link-btn';
-    button.dataset.action = choice.action;
-    button.textContent = choice.label;
-    element.append(button);
+    if (choice) element.append(actionButton(choice.action, choice.label));
+    if (recorded.length === 0) return element;
+    const link = actionButton('watch-recording', callLinkText(recorded.length));
+    link.dataset.ids = recorded.join(',');
+    element.append(link);
     return element;
   }
 
@@ -1697,7 +1873,13 @@ class ChatApplication extends Application {
     const element = document.createElement('div');
     element.className = 'call-card recording-card';
     element.dataset.id = record.id;
-    element.textContent = recordingLabel(record, isLive);
+    const text = document.createElement('span');
+    text.textContent = recordingLabel(record, isLive);
+    element.append(text);
+    if (!this.localRecordings.has(record.id)) return element;
+    const link = actionButton('watch-recording', '▶ watch');
+    link.dataset.ids = record.id;
+    element.append(link);
     return element;
   }
 
@@ -1956,6 +2138,7 @@ class ChatApplication extends Application {
     if (item?.classList.contains('post')) return void this.openArticle(id);
     const isMessage = item?.classList.contains('message');
     if (isMessage && event.detail > 1) return;
+    if (isMessage && this.isSearching()) return void this.openFound(id);
     this.clickThread(isMessage ? id : '');
   }
 
@@ -1971,6 +2154,20 @@ class ChatApplication extends Application {
 
   handlePointerDown(event) {
     this.pointerType = event.pointerType;
+    this.searchPointer = event.target.closest(SEARCH_KEEP) !== null;
+  }
+
+  handleSearchFocus({ relatedTarget }) {
+    const isPointer = this.searchPointer;
+    this.searchPointer = false;
+    if (relatedTarget) {
+      if (!relatedTarget.closest(SEARCH_KEEP)) this.closeSearch();
+      return;
+    }
+    if (isPointer) return;
+    queueMicrotask(() => {
+      if (document.activeElement !== this.searchInput) this.closeSearch();
+    });
   }
 
   startPress(event) {
@@ -2007,29 +2204,26 @@ class ChatApplication extends Application {
     const item = button.closest(ITEMS);
     const isShown = button.offsetParent !== null;
     if (isShown) return void this.openMenu(item, { anchor: button }, false);
-    const rect = item.getBoundingClientRect();
-    const point = { x: rect.left + MENU_INDENT_PX, y: rect.bottom };
-    this.openMenu(item, point, false);
+    this.openMenu(item, pointBelow(item), false);
   }
 
   openMenuFor(item) {
-    const rect = item.getBoundingClientRect();
-    const point = { x: rect.left + MENU_INDENT_PX, y: rect.bottom };
-    this.openMenu(item, point, false);
+    this.openMenu(item, pointBelow(item), false);
     this.menu.focus();
   }
 
   openMenu(item, place, isLifted, fragment = fragmentOf(item.dataset.id)) {
     if (item.classList.contains('deleted')) return;
     const { id } = item.dataset;
+    const spot = this.settleFound(item, place);
     this.menuFragment = fragment;
     const items = this.menuItems(item);
     const mine = this.mineOf(id);
     this.menuItem?.classList.remove('targeted');
     this.menuItem = item;
     item.classList.add('targeted');
-    const anchor = place.anchor ?? null;
-    const point = anchor ? null : place;
+    const anchor = spot.anchor ?? null;
+    const point = anchor ? null : spot;
     const reactions = createReactionButtons;
     const select = (entry, button) => this.chooseMenuItem(button);
     const close = (reason) => this.menuDismissed(reason);
@@ -2222,6 +2416,7 @@ class ChatApplication extends Application {
   }
 
   openSettings(section = '') {
+    this.closeSearch();
     this.closeSidebar();
     this.closePalette();
     if (this.callStage?.mode === 'call') this.callStage.collapse();
@@ -2257,6 +2452,7 @@ class ChatApplication extends Application {
   }
 
   openLibrary() {
+    this.closeSearch();
     this.closeSidebar();
     this.closePalette();
     if (this.callStage?.mode === 'call') this.callStage.collapse();
@@ -2345,7 +2541,8 @@ class ChatApplication extends Application {
         const label = labelOf(channel);
         const unread = this.unreadOf(id);
         const time = activity.get(id) ?? channel.created;
-        entries.push({ id, kind: entity, icon, label, unread, time });
+        const hidden = this.isHiddenChat(id);
+        entries.push({ id, kind: entity, icon, label, unread, time, hidden });
       }
     }
     for (const contact of this.listContacts()) {
@@ -2353,15 +2550,10 @@ class ChatApplication extends Application {
       const { peer, time } = contact;
       const label = `@${contact.nick}`;
       const unread = this.unreadOf(id);
-      entries.push({
-        id,
-        peer,
-        kind: 'contact',
-        icon: '👤',
-        label,
-        unread,
-        time,
-      });
+      const hidden = this.hidden.has('contacts', peer);
+      const kind = 'contact';
+      const icon = '👤';
+      entries.push({ id, peer, kind, icon, label, unread, time, hidden });
     }
     return entries;
   }
@@ -2377,7 +2569,13 @@ class ChatApplication extends Application {
 
   moveChat(step) {
     const items = this.sidebar.querySelectorAll(CHAT_ITEMS);
-    const visible = Array.from(items).filter((item) => item.offsetParent);
+    const seen = new Set();
+    const visible = Array.from(items).filter((item) => {
+      const key = item.dataset.peer ?? item.dataset.id;
+      if (!item.offsetParent || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     if (visible.length === 0) return;
     const isActive = (item) => item.classList.contains('active');
     const current = visible.findIndex(isActive);
@@ -2471,6 +2669,7 @@ class ChatApplication extends Application {
 
   showPanel(name) {
     if (name !== 'capture' && !this.releaseCapture()) return;
+    this.closeSearch();
     const isOpen = this.panel !== '';
     this.panel = name;
     this.renderPanel();
@@ -2549,9 +2748,27 @@ class ChatApplication extends Application {
   }
 
   refreshRecordings() {
+    const request = ++this.localRevision;
     if (this.recordingsView.isOpen) {
       this.recordings.refresh().catch((error) => this.report(error));
+      return;
     }
+    localIdsOf(navigator.storage)
+      .then((ids) => {
+        if (request === this.localRevision) this.setLocalRecordings(ids);
+      })
+      .catch(() => {});
+  }
+
+  setLocalRecordings(ids) {
+    if (sameIds(ids, this.localRecordings)) return;
+    this.localRecordings = ids;
+    this.scheduleRender();
+  }
+
+  watchRecordings(ids) {
+    this.recordings.link(ids);
+    this.openLibrary();
   }
 
   closePanel() {
@@ -3016,6 +3233,7 @@ class ChatApplication extends Application {
 
   handleKey(event) {
     if (event.isComposing) return;
+    this.searchPointer = false;
     if (event.key === 'Escape') {
       event.preventDefault();
       const isCapture = this.panel === 'capture';
@@ -3101,7 +3319,7 @@ class ChatApplication extends Application {
     const isTopicOpen = !this.topicForm.classList.contains('hidden');
     if (isTopicOpen) return void this.closeDescription();
     const isSearchOpen = !this.searchBar.classList.contains('hidden');
-    if (isSearchOpen) return void this.toggleSearch();
+    if (isSearchOpen) return void this.closeSearch();
     if (this.editing) return void this.cancelEdit();
     if (this.picked) return void this.closePicking();
     if (this.quotes.has(this.chat)) return void this.setQuote('');
@@ -3114,6 +3332,9 @@ class ChatApplication extends Application {
   }
 
   selectChat(id) {
+    this.revealChat(id);
+    this.closeSearch();
+    this.clearFound();
     this.closeSettings();
     this.closeRecordings();
     const stage = this.callStage;
@@ -3180,28 +3401,71 @@ class ChatApplication extends Application {
     box.scrollTop = box.scrollHeight - fromBottom;
   }
 
+  isSearching() {
+    return !this.searchBar.classList.contains('hidden');
+  }
+
   toggleSearch() {
-    const isHidden = this.searchBar.classList.toggle('hidden');
-    this.searchBtn.classList.toggle('active', !isHidden);
-    if (!isHidden) {
-      this.closeThread();
-      return void this.searchInput.focus();
-    }
+    if (this.isSearching()) return void this.closeSearch();
+    this.searchBar.classList.remove('hidden');
+    this.paintSearchButton();
+    this.closeThread();
+    this.searchInput.focus();
+  }
+
+  closeSearch() {
+    if (!this.isSearching()) return;
+    this.searchBar.classList.add('hidden');
+    this.paintSearchButton();
     this.searchInput.value = '';
     this.filter = '';
     this.renderMessages();
   }
 
-  closeSearch() {
-    const isOpen = !this.searchBar.classList.contains('hidden');
-    if (isOpen) this.toggleSearch();
+  paintSearchButton() {
+    const isOpen = this.isSearching();
+    this.searchBtn.classList.toggle('active', isOpen);
+    this.searchBtn.setAttribute('aria-pressed', String(isOpen));
+  }
+
+  settleFound(item, place) {
+    if (!this.isSearching()) return place;
+    this.closeSearch();
+    item.scrollIntoView({ block: 'center' });
+    return place.anchor ? place : pointBelow(item);
+  }
+
+  markFound(item) {
+    this.clearFound();
+    item.classList.add('found');
+    item.addEventListener('blur', () => item.classList.remove('found'), {
+      once: true,
+    });
+  }
+
+  clearFound() {
+    for (const item of this.messageList.querySelectorAll('.found')) {
+      item.classList.remove('found');
+    }
+  }
+
+  openFound(id) {
+    const root = threadRootOf(this.view, id, this.article);
+    this.closeSearch();
+    if (root) this.enterThread(root, id);
+    const item = this.itemOf(id);
+    if (!item) return;
+    this.scrollToSelection(item);
+    this.markFound(item);
+    selectItem(item, false);
   }
 
   handleNavClick(event) {
+    if (event.target.closest('.rename-input')) return;
     const action = event.target.closest('[data-action]');
     if (action) {
       const { dataset } = action;
-      return void NAV_ACTIONS[dataset.action](this, dataset);
+      return void NAV_ACTIONS[dataset.action](this, dataset, action);
     }
     const item = event.target.closest('.nav-item');
     if (!item) return;
@@ -3227,7 +3491,7 @@ class ChatApplication extends Application {
     const path = this.folderNameInput.value.split('/');
     const names = path.map((name) => name.trim()).filter(Boolean);
     if (names.length === 0) return;
-    const { children } = folderTree(this.replica, this.peerId);
+    const { children } = this.folders.tree();
     let parent = '';
     for (const text of names) {
       const { icon, name } = parseTitle(text, 'folder');
@@ -3239,39 +3503,297 @@ class ChatApplication extends Application {
         continue;
       }
       const id = generateUUID();
-      const owner = this.peerId;
       const created = Date.now();
-      const folder = { id, name, icon, owner, parent, created };
-      createFolder(this.replica, folder);
+      this.folders.create({ id, name, icon, parent, created });
       this.logger.log('Created folder:', name);
       parent = id;
     }
     this.folderNameInput.value = '';
     this.saveCollapsed();
+    this.renderChannels();
+  }
+
+  openTarget() {
+    const chat = this.chat;
+    if (isPair(chat)) return { kind: 'contact', id: this.peerOf(chat) };
+    return { kind: this.channelEntity(chat), id: chat };
+  }
+
+  navTargetOf(item) {
+    const { id, peer, folder } = item.dataset;
+    if (folder) return { kind: 'folder', id: folder };
+    if (peer) return { kind: 'contact', id: peer };
+    if (!id) return null;
+    return { kind: this.channelEntity(id), id };
+  }
+
+  placeTarget(folder, target, isPlaced) {
+    if (isPlaced) {
+      this.folders.place(folder, target.id);
+      this.collapsed.delete(folder);
+      this.saveCollapsed();
+    } else {
+      this.folders.unplace(folder, target.id);
+    }
+    this.renderChannels();
   }
 
   addToFolder(folder) {
-    if (isPair(this.chat)) {
-      const text = 'Direct messages stay in contacts';
-      return void this.showNotification(text, 'warning');
-    }
-    const { items } = folderTree(this.replica, this.peerId);
-    if (items.get(folder)?.has(this.chat)) return;
-    placeItem(this.replica, folder, this.chat, true);
-    this.collapsed.delete(folder);
-    this.saveCollapsed();
+    const target = this.openTarget();
+    if (!target.id || this.folders.has(folder, target.id)) return;
+    this.placeTarget(folder, target, true);
   }
 
   removeFromFolder(folder, item) {
-    placeItem(this.replica, folder, item, false);
+    this.folders.unplace(folder, item);
+    this.renderChannels();
   }
 
-  toggleVisibility(id) {
-    const folder = this.replica.get(id);
-    if (folder?.owner !== this.peerId) return;
-    const visibility = NEXT_VISIBILITY[folder.visibility ?? 'unlisted'];
-    setVisibility(this.replica, id, visibility);
-    this.logger.log(`Folder ${folder.name} is now ${visibility}`);
+  async deleteFolder(id) {
+    const folder = this.folders.tree().folders.get(id);
+    if (!folder) return;
+    const isConfirmed = await askConfirm({
+      title: 'Delete folder?',
+      lines: [
+        `${folder.name} will be deleted.`,
+        'Items stay in their sections.',
+      ],
+      action: 'delete',
+    });
+    if (!isConfirmed) return;
+    this.folders.remove(id);
+    this.collapsed.delete(id);
+    this.saveCollapsed();
+    this.logger.log('Deleted folder:', folder.name);
+    this.renderChannels();
+  }
+
+  startNaming(id, parent) {
+    const folder = id ? this.folders.tree().folders.get(id) : null;
+    const hasIcon = folder?.icon && folder.icon !== ICONS.folder;
+    const named = hasIcon ? `${folder.icon} ${folder.name}` : folder?.name;
+    this.naming = { id, parent, text: named ?? '', isFocused: false };
+    if (parent) {
+      this.collapsed.delete(parent);
+      this.saveCollapsed();
+    }
+    this.renderChannels();
+  }
+
+  createNameInput() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'rename-input';
+    input.maxLength = 256;
+    input.value = this.naming.text;
+    input.setAttribute('aria-label', 'Folder name');
+    input.addEventListener('input', () => {
+      this.naming.text = input.value;
+    });
+    input.addEventListener('keydown', (event) => this.handleNamingKey(event));
+    input.addEventListener('blur', () => {
+      if (input.isConnected) this.commitNaming();
+    });
+    return input;
+  }
+
+  showNaming(name) {
+    name.replaceChildren(this.createNameInput());
+  }
+
+  createNamingItem() {
+    const item = document.createElement('li');
+    item.className = 'nav-item naming';
+    const icon = document.createElement('span');
+    icon.className = 'icon';
+    icon.textContent = ICONS.folder;
+    const name = document.createElement('span');
+    name.className = 'name';
+    this.showNaming(name);
+    item.append(icon, name);
+    return item;
+  }
+
+  focusNaming() {
+    const naming = this.naming;
+    if (!naming) return;
+    const input = this.folderList.querySelector('.rename-input');
+    if (!input || document.activeElement === input) return;
+    input.focus();
+    if (!naming.isFocused) input.select();
+    else input.setSelectionRange(input.value.length, input.value.length);
+    naming.isFocused = true;
+  }
+
+  handleNamingKey(event) {
+    if (event.isComposing) return;
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      this.commitNaming();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelNaming();
+    }
+  }
+
+  commitNaming() {
+    const naming = this.naming;
+    if (!naming) return;
+    this.naming = null;
+    const text = naming.text.trim();
+    if (text) this.saveNaming(naming, text);
+    this.renderChannels();
+  }
+
+  saveNaming({ id, parent }, text) {
+    const { icon, name } = parseTitle(text, 'folder');
+    if (id) return void this.folders.rename(id, name, icon);
+    const created = Date.now();
+    this.folders.create({ id: generateUUID(), name, icon, parent, created });
+  }
+
+  cancelNaming() {
+    if (!this.naming) return;
+    this.naming = null;
+    this.renderChannels();
+  }
+
+  toggleNavMenu(button) {
+    const row = button.closest('.nav-item');
+    const target = row ? this.navTargetOf(row) : this.openTarget();
+    if (!target) return;
+    const isOwn = this.navMenu.isOpen && this.navMenu.target === keyOf(target);
+    if (isOwn) return void this.navMenu.close();
+    this.openNavMenu(row, { anchor: button }, target);
+  }
+
+  openNavMenu(item, place, target = this.navTargetOf(item)) {
+    if (!target) return;
+    const anchor = place.anchor ?? null;
+    this.navMenu.open({
+      id: keyOf(target),
+      items: this.navMenuItems(target),
+      anchor,
+      point: anchor ? null : place.point,
+      label: 'Actions',
+      select: (entry) => this.chooseNavItem(entry, target),
+    });
+  }
+
+  navMenuItems(target) {
+    if (target.kind === 'folder') return this.folderMenuItems(target.id);
+    const items = [this.folderChoices(target)];
+    const label = LEAVE_LABELS[target.kind];
+    if (label && target.id !== GENERAL) items.push({ action: 'leave', label });
+    return items;
+  }
+
+  folderChoices(target) {
+    const { folders, children } = this.folders.tree();
+    if (folders.size === 0) {
+      const reason = 'Create a folder first';
+      return {
+        action: 'none',
+        label: 'Add to folder…',
+        disabled: true,
+        reason,
+      };
+    }
+    const items = [];
+    const walk = (parent, path) => {
+      for (const folder of children.get(parent) ?? []) {
+        const label = [...path, folder.name].join(' / ');
+        const checked = this.folders.has(folder.id, target.id);
+        const kind = 'checkbox';
+        items.push({
+          kind,
+          action: 'toggle-folder',
+          folder: folder.id,
+          label,
+          checked,
+        });
+        walk(folder.id, [...path, folder.name]);
+      }
+    };
+    walk('', []);
+    return { kind: 'group', label: 'Add to folder', items };
+  }
+
+  folderMenuItems(id) {
+    const target = this.openTarget();
+    const isPlaced = !target.id || this.folders.has(id, target.id);
+    const reason = target.id ? 'Already in this folder' : '';
+    return [
+      {
+        action: 'folder-add',
+        label: 'Add the open chat',
+        disabled: isPlaced,
+        reason,
+      },
+      { action: 'folder-new', label: 'New subfolder' },
+      { action: 'folder-rename', label: 'Rename' },
+      { kind: 'separator' },
+      { action: 'folder-delete', label: 'Delete folder' },
+    ];
+  }
+
+  chooseNavItem(entry, target) {
+    const run = NAV_MENU_ACTIONS[entry.action];
+    if (!run) return;
+    if (entry.kind === 'checkbox') return void run(this, entry, target);
+    queueMicrotask(() => run(this, entry, target));
+  }
+
+  handleNavContext(event) {
+    const item = event.target.closest('.nav-item');
+    if (!item || event.target.closest('.rename-input')) return;
+    event.preventDefault();
+    if (this.navMenu.isOpen) return;
+    this.openNavMenu(item, { point: { x: event.clientX, y: event.clientY } });
+  }
+
+  startNavPress(event) {
+    const item = event.target.closest('.nav-item');
+    if (!item || event.target.closest('button, input')) return;
+    this.navPress.start(event, item, false);
+  }
+
+  hideTarget(target) {
+    const rule = HIDING[target.kind];
+    if (!rule || target.id === GENERAL) return;
+    const chat =
+      target.kind === 'contact' ? pairOf(this.peerId, target.id) : target.id;
+    const name = this.chatName(chat);
+    if (!this.hidden.hide(rule.kind, target.id)) return;
+    this.logger.log(rule.text(name));
+    if (this.chat === chat) this.selectChat(GENERAL);
+    else this.render();
+    this.showUndo(rule.text(name), () => {
+      this.hidden.restore(rule.kind, target.id);
+      this.render();
+    });
+  }
+
+  showUndo(text, undo) {
+    this.undo = undo;
+    this.undoText.textContent = text;
+    this.undoToast.classList.remove('hidden');
+    clearTimeout(this.undoTimer);
+    this.undoTimer = setTimeout(() => this.hideUndo(), UNDO_MS);
+  }
+
+  hideUndo() {
+    clearTimeout(this.undoTimer);
+    this.undoTimer = null;
+    this.undo = null;
+    this.undoToast.classList.add('hidden');
+  }
+
+  runUndo() {
+    const undo = this.undo;
+    this.hideUndo();
+    undo?.();
   }
 
   toggleFolder(id) {
@@ -3746,7 +4268,8 @@ class ChatApplication extends Application {
   }
 
   forwardEntries() {
-    const isTarget = (entry) => entry.kind !== 'feed' && entry.id !== this.chat;
+    const isTarget = (entry) =>
+      entry.kind !== 'feed' && entry.id !== this.chat && !entry.hidden;
     return this.switchEntries().filter(isTarget);
   }
 
@@ -3922,11 +4445,11 @@ class ChatApplication extends Application {
   updateInterface() {
     const info = this.aboutState();
     const nick = this.username;
-    const status = STATUS_OF[linkOf(info)];
     this.profileRow.paint({
       nick,
       peer: this.peerId,
-      status,
+      link: linkOf(info),
+      isLeader: info.leader,
       text: summaryOf(info),
     });
     this.settings?.refresh();
@@ -4351,6 +4874,7 @@ class ChatApplication extends Application {
     const nick = typeof from.nick === 'string' ? from.nick : '';
     const peer = typeof from.peer === 'string' ? from.peer : '';
     const chat = typeof data.chat === 'string' ? data.chat : '';
+    if (this.isHiddenChat(chat)) return;
     const tab = tabId();
     this.ring.show({ call: data.call, chat, nick, peer, tab });
   }
@@ -4417,6 +4941,7 @@ class ChatApplication extends Application {
     const { api } = this;
     const options = { api, endpoint, call, chat, ice, pagehide: false };
     const session = new CallSession(options);
+    this.closeSearch();
     this.ensureCallStage().attach(session, token, camera);
     this.callSession = session;
     this.renderRecordingsState();

@@ -411,7 +411,8 @@ test(
       browser,
       left,
       `return Array.from(document.querySelectorAll('.recording-card'))
-        .some((card) => /^● alex recorded \\d+ min$/.test(card.textContent));`,
+        .some((card) =>
+          /^● alex recorded \\d+ min▶ watch$/.test(card.textContent));`,
     );
     await waitFor(
       browser,

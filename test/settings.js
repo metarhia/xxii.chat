@@ -670,7 +670,7 @@ test('settings screen', { timeout: 240000 }, async (t) => {
           JSON.parse(localStorage.getItem('xxii:settings')).theme,
         ];`,
       ),
-      ['light', '#f6f7f8', 'light', 'rgb(246, 247, 248)', 'light'],
+      ['light', '#eef1f4', 'light', 'rgb(238, 241, 244)', 'light'],
     );
     const source = `new MutationObserver((records, observer) => {
       if (!document.body) return;

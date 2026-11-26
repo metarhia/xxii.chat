@@ -214,8 +214,15 @@ const createPrejoin = (title, hasNick) => {
   level.append(bar);
   const actions = document.createElement('div');
   actions.className = 'prejoin-actions';
-  const micButton = createButton('mic', 'mic on');
-  const cameraButton = createButton('camera', 'camera on');
+  const micButton = createIconButton('mic', 'mic', 'Microphone', MIC_HINT);
+  const cameraButton = createIconButton(
+    'camera',
+    'camera',
+    'Camera',
+    CAMERA_HINT,
+  );
+  micButton.setAttribute('aria-pressed', 'true');
+  cameraButton.setAttribute('aria-pressed', 'true');
   actions.append(micButton, cameraButton);
   preview.append(createVideo(true), createAvatar(), level, actions);
   const side = document.createElement('div');
@@ -240,11 +247,12 @@ const createPrejoin = (title, hasNick) => {
   const mic = createField('prejoin-mic', 'mic');
   const speaker = createField('prejoin-speaker', 'speaker');
   speaker.classList.add('speaker-field');
-  const row = document.createElement('div');
-  row.className = 'prejoin-actions';
-  row.append(createButton('join', 'join'), createButton('cancel', 'cancel'));
-  side.append(heading, note, nick, camera, mic, speaker, row);
-  section.append(preview, side);
+  side.append(heading, note, nick, camera, mic, speaker);
+  const footer = createSideBar(
+    createButton('join', 'join'),
+    createButton('cancel', 'cancel'),
+  );
+  section.append(preview, side, footer);
   return section;
 };
 
@@ -254,7 +262,8 @@ const createLobby = () => {
   section.className = 'lobby';
   const text = document.createElement('p');
   text.textContent = LOBBY;
-  section.append(text, createButton('cancel', 'cancel'));
+  const body = createSideBody(text);
+  section.append(body, createSideBar(createButton('cancel', 'cancel')));
   return section;
 };
 
@@ -288,6 +297,12 @@ const createPeople = () => {
 
 const isControl = (element) =>
   Boolean(element?.closest?.('button, select, input, a'));
+
+const isBeside = (element) =>
+  Boolean(element?.closest?.('#chat-view, .sidebar, .panel'));
+
+const isChatText = (element, isText) =>
+  Boolean(element?.closest?.('#chat-view')) && isText(element);
 
 const createPrompt = () => {
   const row = document.createElement('div');
@@ -1358,6 +1373,8 @@ class CallStage {
     const isEnter = event.key === 'Enter' && !event.isComposing;
     if (!isEsc && !isEnter) return;
     if (isEnter && isControl(event.target)) return;
+    if (isChatText(event.target, this.hooks.isText)) return;
+    if (isEnter && isBeside(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     if (isEsc) this.cancel();
@@ -1999,19 +2016,6 @@ class CallStage {
     if (root === this.host) this.controls?.paint();
     this.paintCapture(root);
     this.paintIcons(root, media);
-    const micSelector = '[data-action="mic"]:not(.call-control, .call-icon)';
-    for (const button of root.querySelectorAll(micSelector)) {
-      button.textContent = media.micOn ? 'mic on' : 'mic off';
-      button.classList.toggle('off', !media.micOn);
-      button.classList.toggle('warn', media.micMissing);
-    }
-    const cameraSelector =
-      '[data-action="camera"]:not(.call-control, .call-icon)';
-    for (const button of root.querySelectorAll(cameraSelector)) {
-      button.textContent = media.cameraOn ? 'camera on' : 'camera off';
-      button.classList.toggle('off', !media.cameraOn);
-      button.classList.toggle('warn', media.cameraMissing);
-    }
   }
 
   paintIcons(root, media) {

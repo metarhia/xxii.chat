@@ -18,10 +18,11 @@ const kindOf = ({ isDirect, isReply, settings }) => {
   return '';
 };
 
-const noticeOf = ({ id, record, parent, me, settings, names }) => {
+const noticeOf = ({ id, record, parent, me, settings, names, isHidden }) => {
   const chat = containerOf(record);
   const isOwn = record.author === me;
   if (chat === undefined || isOwn || isDeleted(record)) return null;
+  if (isHidden?.(chat, record)) return null;
   const isDirect = isPair(chat);
   const isReply = parent?.author === me;
   const kind = kindOf({ isDirect, isReply, settings });
@@ -87,6 +88,7 @@ class MessageNotices {
       me: hooks.me(),
       settings,
       names,
+      isHidden: hooks.isHidden,
     });
     if (notice) postNotice(notice).catch(() => undefined);
   }

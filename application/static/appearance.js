@@ -1,7 +1,7 @@
 import { SETTINGS_KEY, read, write, validate } from './app-settings.js';
 
 const LIGHT_QUERY = '(prefers-color-scheme: light)';
-const COLORS = { dark: '#090a0c', light: '#f6f7f8' };
+const COLORS = { dark: '#090a0c', light: '#eef1f4' };
 
 const queryOf = (win) => win.matchMedia?.(LIGHT_QUERY) ?? null;
 

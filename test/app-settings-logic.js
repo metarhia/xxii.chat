@@ -181,7 +181,7 @@ test('theme.js resolves system and paints the meta tags', () => {
   const light = runTheme({ saved, light: true });
   assert.equal(light.dataset.theme, 'light');
   assert.equal(light.metas['color-scheme'].content, 'light');
-  assert.equal(light.metas['theme-color'].content, '#f6f7f8');
+  assert.equal(light.metas['theme-color'].content, '#eef1f4');
 });
 
 test('resolveTheme follows the media query only for system', async () => {
@@ -194,13 +194,39 @@ test('resolveTheme follows the media query only for system', async () => {
 });
 
 const BASES = ['--bg', '--surface', '--panel'];
-const FOREGROUNDS = [
-  ['--text', 4.5],
-  ['--muted', 4.5],
-  ['--light', 4.5],
-  ['--link', 4.5],
-  ['--placeholder', 3],
+const FOREGROUNDS = {
+  dark: [
+    ['--text', 4.5],
+    ['--muted', 4.5],
+    ['--light', 4.5],
+    ['--link', 4.5],
+    ['--placeholder', 3],
+  ],
+  light: [
+    ['--text', 7],
+    ['--muted', 7],
+    ['--light', 7],
+    ['--link', 4.5],
+    ['--placeholder', 4.5],
+  ],
+};
+const BARS = ['--bar-left', '--bar-center', '--bar-right'];
+const NEIGHBORS = [
+  ['--bg', '--surface'],
+  ['--bg', '--panel'],
+  ['--surface', '--panel'],
+  ['--panel', '--raised'],
+  ['--bg', '--raised'],
+  ['--panel', '--field'],
+  ['--bg', '--field'],
+  ['--bar-left', '--bar-center'],
+  ['--bar-center', '--bar-right'],
+  ['--bar-left', '--panel'],
+  ['--bar-right', '--panel'],
+  ['--bar-center', '--bg'],
 ];
+const OVERLAYS = ['--button', '--button-hover', '--active-bg'];
+const SEPARATION = 1.08;
 const blockOf = (css, selector) => {
   const start = css.indexOf(`${selector} {`);
   assert.notEqual(start, -1, selector);
@@ -228,6 +254,24 @@ const luminanceOf = (hex) => {
     0.2126 * channelOf(red) +
     0.7152 * channelOf(green) +
     0.0722 * channelOf(blue)
+  );
+};
+
+const hexOf = (rgb) => {
+  const parts = rgb.map((value) => Math.round(value).toString(16));
+  return `#${parts.map((part) => part.padStart(2, '0')).join('')}`;
+};
+
+const overlayOn = (overlay, base) => {
+  const match = overlay.match(/rgba\(([^)]+)\)/);
+  assert.ok(match, overlay);
+  const [red, green, blue, alpha] = match[1].split(',').map(Number);
+  const under = [1, 3, 5].map((index) =>
+    parseInt(base.slice(index, index + 2), 16),
+  );
+  const over = [red, green, blue];
+  return hexOf(
+    over.map((value, index) => value * alpha + under[index] * (1 - alpha)),
   );
 };
 
@@ -276,7 +320,7 @@ test('the light theme defines the full token set', () => {
 const failuresOf = (theme) => {
   const failures = [];
   for (const base of BASES) {
-    for (const [name, minimum] of FOREGROUNDS) {
+    for (const [name, minimum] of FOREGROUNDS[theme]) {
       const ratio = contrastOf(themes[theme][name], themes[theme][base]);
       const label = `${theme} ${name} on ${base}`;
       if (ratio < minimum) {
@@ -292,6 +336,34 @@ for (const theme of ['dark', 'light']) {
     assert.deepEqual(failuresOf(theme), []);
   });
 }
+
+test('light bars keep their text readable', () => {
+  const failures = [];
+  for (const base of BARS) {
+    for (const [name] of FOREGROUNDS.light) {
+      const ratio = contrastOf(themes.light[name], themes.light[base]);
+      if (ratio < 4.5) failures.push(`${name} on ${base}: ${ratio}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('neighboring light surfaces are told apart without borders', () => {
+  const tokens = themes.light;
+  const failures = [];
+  for (const [first, second] of NEIGHBORS) {
+    const ratio = contrastOf(tokens[first], tokens[second]);
+    if (ratio < SEPARATION) failures.push(`${first} ${second}: ${ratio}`);
+  }
+  for (const base of [...BASES, ...BARS]) {
+    for (const name of OVERLAYS) {
+      const mixed = overlayOn(tokens[name], tokens[base]);
+      const ratio = contrastOf(mixed, tokens[base]);
+      if (ratio < SEPARATION) failures.push(`${name} on ${base}: ${ratio}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
 
 test('index.html loads theme.js before the stylesheets', () => {
   const html = readStatic('index.html');

@@ -6,7 +6,7 @@
     textSize: ['s', 'm', 'l', 'xl'],
     density: ['comfortable', 'compact'],
   };
-  const colors = { dark: '#090a0c', light: '#f6f7f8' };
+  const colors = { dark: '#090a0c', light: '#eef1f4' };
 
   const readSaved = () => {
     try {

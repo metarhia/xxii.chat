@@ -207,8 +207,10 @@ const createCardMenu = (overlay) => {
 };
 
 class Recordings {
-  constructor(root, onRepair, overlay = {}) {
+  constructor(root, onRepair, overlay = {}, onList = null) {
     this.root = root;
+    this.onList = onList;
+    this.linked = null;
     this.list = root.querySelector('.recordings-list');
     this.storage = root.querySelector('.recordings-storage');
     this.status = root.querySelector('.recordings-status');
@@ -296,6 +298,8 @@ class Recordings {
         ...entries.map((entry) => this.createRow(entry, folder)),
       );
       this.setStatus(entries.length ? '' : 'No recordings yet.');
+      this.onList?.(entries.filter(canChange).map(({ id }) => id));
+      this.showLinked();
     } catch {
       if (revision === this.revision) {
         this.setStatus('Could not read the recordings in browser storage.');
@@ -310,8 +314,27 @@ class Recordings {
     }
   }
 
+  link(ids) {
+    this.linked = ids;
+  }
+
+  showLinked() {
+    const ids = this.linked;
+    this.linked = null;
+    if (!ids) return;
+    const rows = [...this.list.querySelectorAll('.recording-item')];
+    const marked = rows.filter((row) => ids.includes(row.dataset.id));
+    for (const row of marked) row.classList.add('linked');
+    if (marked.length === 0) return;
+    marked[0].scrollIntoView({ block: 'nearest' });
+    if (marked.length > 1) return;
+    const card = this.cards.get(marked[0]);
+    if (card.canPlay) this.playCard(card);
+  }
+
   close() {
     this.revision++;
+    this.linked = null;
     this.menu.close();
     this.parts.clear();
     this.stopPlayback();

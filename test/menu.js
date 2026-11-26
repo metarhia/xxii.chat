@@ -663,16 +663,57 @@ test('Anchored menus in Chrome', { timeout: 240000 }, async (t) => {
       controls: true,
       focus: true,
     });
-    await press(page, 'ArrowDown');
-    assert.equal(
-      await run(`return document.activeElement.dataset.action;`),
-      'react',
+    const lines = await run(
+      `const row = app.menuElement.querySelector('.menu-reactions');
+      const tops = [...row.children].map((button) =>
+        Math.round(button.getBoundingClientRect().top));
+      const box = row.getBoundingClientRect();
+      return {
+        lines: [...new Set(tops)].map((top) =>
+          tops.filter((value) => value === top).length),
+        inside: [...row.children].every((button) => {
+          const rect = button.getBoundingClientRect();
+          return rect.left >= box.left && rect.right <= box.right &&
+            rect.bottom <= box.bottom;
+        }),
+      };`,
     );
+    assert.deepEqual(lines, { lines: [5, 4], inside: true });
+    const at = () =>
+      run(
+        `const row = app.menuElement.querySelector('.menu-reactions');
+        const item = document.activeElement;
+        return item.dataset.action === 'react'
+          ? [...row.children].indexOf(item) : item.dataset.action;`,
+      );
+    await press(page, 'ArrowDown');
+    assert.equal(await at(), 0);
+    await press(page, 'ArrowRight');
+    assert.equal(await at(), 1);
+    await press(page, 'ArrowDown');
+    assert.equal(await at(), 6);
+    await press(page, 'ArrowLeft');
+    await press(page, 'ArrowLeft');
+    assert.equal(await at(), 8, 'left wraps inside the second row');
+    await press(page, 'ArrowRight');
+    assert.equal(await at(), 5);
+    await press(page, 'ArrowUp');
+    assert.equal(await at(), 0);
+    for (let step = 0; step < 4; step++) await press(page, 'ArrowRight');
+    assert.equal(await at(), 4);
+    await press(page, 'ArrowDown');
+    assert.equal(await at(), 8, 'the short row takes its last button');
+    await press(page, 'ArrowUp');
+    assert.equal(await at(), 3);
+    await press(page, 'ArrowDown');
+    assert.equal(await at(), 8);
     await press(page, 'ArrowDown');
     assert.equal(
       await run(`return document.activeElement.dataset.action;`),
       'reply',
     );
+    await press(page, 'ArrowUp');
+    assert.equal(await at(), 8);
     await press(page, 'Escape');
     assert.equal(await run(`return app.menu.isOpen;`), false);
     const row = await run(
@@ -807,6 +848,9 @@ test('Anchored menus in Chrome', { timeout: 240000 }, async (t) => {
         modal: app.menu.isModal,
         copy: element.querySelector('.lift .content')?.textContent,
         reactions: element.querySelectorAll('.menu-reactions button').length,
+        rows: new Set([...element.querySelectorAll('.menu-reactions button')]
+          .map((button) => Math.round(button.getBoundingClientRect().top)))
+          .size,
         grabber: element.querySelector('.menu-grabber') !== null,
         sheet: element.classList.contains('sheet'),
         backdrop: !app.backdrop.classList.contains('hidden'),
@@ -818,6 +862,7 @@ test('Anchored menus in Chrome', { timeout: 240000 }, async (t) => {
       modal: true,
       copy: 'menu line',
       reactions: 9,
+      rows: 2,
       grabber: false,
       sheet: false,
       backdrop: true,

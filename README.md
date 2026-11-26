@@ -30,10 +30,25 @@ sync. Terminal-like UI follows the
   (`Ctrl+Enter` publishes), cards show author, date, excerpt, replies, and
   reactions, a card opens the full post in place with an outline from
   `#`, `##`, `###` headings and its replies under it
-- Folders: organize chats, feeds, and nested folders (`a/b` creates a path),
-  `unlisted` folders are listed only for the owner, `public` folders for
-  everyone; a channel in a listed folder leaves the `FEEDS` or `CHATS` list,
-  collapsed folders are remembered per browser
+- Folders are personal: they live in this browser only (`xxii:folders`),
+  are never synced, and nobody else sees them. They hold chats, feeds, and
+  contacts (`a/b` in the form creates a path). An item in a folder stays in
+  its own section, a folder is an extra place. The folder row menu (`⋯`,
+  right click, or long press) has `Rename`, `New subfolder`,
+  `Add the open chat`, and `Delete folder`; deleting asks first, moves the
+  subfolders up, and never touches the items. Collapsed folders are
+  remembered per browser. Folders you made before in the shared replica
+  move into this browser once, other peers' folders are no longer shown
+- Leave a chat, unsubscribe from a feed, or remove a contact from the row
+  menu (`⋯` on hover, right click, or long press) or from the `⋯` button
+  of the open chat's top bar; the menu also has `Add to folder`. This hides
+  the item in this browser only (`xxii:hidden`, synced between tabs): it
+  leaves the sidebar and folders, and its unread count, title badge,
+  message notifications, and direct call rings stop. A toast offers
+  `undo` for 5 seconds. `Ctrl+K` still finds hidden items with a `hidden`
+  mark and opening one brings it back; a removed contact also returns when
+  they send a new direct message. `!general` cannot be left, and leaving the
+  open chat opens `!general`
 - Channel names may start with an emoji icon (`📣 news`), owners edit the
   description by clicking it in the top bar
 - Replies stay in the chat in time order. A thread contains a root message
@@ -66,12 +81,18 @@ sync. Terminal-like UI follows the
 - Pinned messages, clickable links, message search, older messages by pages
   of 50; consecutive messages of one author are grouped, days have sticky
   labels
+- The search bar closes itself and clears its filter when focus leaves it
+  (except into the found messages), on `Esc`, when the chat changes, and when
+  a panel, settings, recordings, a menu, or a call opens. A click on a found
+  message closes the search and keeps that message in view and selected. The
+  `Search` button is highlighted while the search is open
 - A message row shows the nick on the left and the time on the right. On
   hover the time gives way to a toolbar: reply, share, forward, edit and
   delete for your own messages, select, and `⋯` for the menu
 - The menu opens with right click or `⋯` and has reactions and icons for
   Reply, Quote, Thread, the toolbar actions, Pin, Copy text, and downloads.
-  On touch screens a long press lifts the message with
+  The reactions wrap into two rows (5 + 4) that the arrow keys walk like a
+  grid. On touch screens a long press lifts the message with
   reactions above and actions below, and a swipe to the right replies, a
   double tap replies too
 - Every menu of the app is one component with menu roles. `↓`/`↑` move
@@ -146,15 +167,20 @@ sync. Terminal-like UI follows the
   selection, or post. The layout respects safe areas and the on-screen
   keyboard and offers bigger touch targets
 - Nick shared between tabs, members list, and activity log
-- Profile row at the bottom of the sidebar: your avatar, nick, and a
-  connection dot (display only; hover for the connection, mesh role, and
-  peers), a recordings button (it turns red while a capture or call
-  recording runs), and a settings button
+- Profile row at the bottom of the sidebar, two lines: your avatar, then
+  the nick with a recordings button (it turns red while a capture or call
+  recording runs) and a gear settings button on the first line, and the
+  connection on the second (`online · 3 peers`, `peers only`, `via leader
+tab`, or `offline`, with a status dot; display only, hover for the mesh
+  role and peers). The peer count no longer sits in the sidebar header, and
+  the installed desktop app (standalone or window controls overlay) hides
+  the header with the logo, since the window title shows it
 - At most three zones on screen: the sidebar, the center, and one right
   panel (pins, members, capture, or the call tabs) that replaces the open
-  one. The profile row, the composer, the right panel's bar (its `close`),
-  and the call controls are bottom bars of one height with their own
-  slightly different backgrounds; the composer still grows upward
+  one. The pins, members, and capture panels close with `×` at the right of
+  their header. The profile row, the composer, the right panel's bar, and
+  the call controls are bottom bars of one height with their own slightly
+  different backgrounds; the composer still grows upward
 - Settings (`?settings=<section>` opens a section, `Esc`, `×`, or `‹` in
   the sidebar returns to the chat with its draft): while settings are open
   the sidebar shows the section list under `‹ Settings` instead of contacts,
@@ -171,7 +197,9 @@ sync. Terminal-like UI follows the
   composer), and compact density for message rows and sidebar items. A
   sample message shows the size. Changes apply at once and in every open tab;
   `system` follows the device theme live; `theme.js` sets the attributes
-  before the first paint. Browser zoom still scales the whole interface
+  before the first paint. Browser zoom still scales the whole interface.
+  The light theme keeps text at 7:1 contrast or better and separates the
+  sidebar, panels, bars, and controls by background alone
 - Notifications (Settings > Notifications, saved in `xxii:settings`): the
   browser permission with an `allow` button (a blocked site shows how to
   unblock it), the ringtone on or off with a volume from 0 to 100 (50 is the
@@ -214,6 +242,14 @@ missed-call card with call back. Notification permission is requested once
 when starting, joining, or accepting a call, while permission is undecided.
 The prompt does not hold up the call. A notification click focuses the tab
 that rang, a recent app window, or opens the app; answer in the call toast.
+
+Starting a call, joining from a call card, a ring, or a link opens the
+pre-join in the right zone: camera preview, mic level, devices, `join`, and
+`cancel` in its bottom bar. The chat stays in the center with its composer,
+and the waiting screen of a visitor who asks to join takes the same place.
+An open pins, members, or capture panel makes room and comes back on `cancel`
+or `Esc`. Joining switches to the call layout. On a phone the pre-join is a
+full-screen sheet.
 
 The share control sends a screen or window and its available audio to everyone
 in the call, including later arrivals; while sharing it reads `stop`, and a
@@ -383,6 +419,13 @@ Open **Recordings** from the profile row or the call's `more` menu (the
 call shrinks to its mini tile) to see local recordings and browser storage
 usage. Play and seek in the library
 using the service worker's `/recordings/<id>/<file>` route with `Range` support.
+A `● nick recorded 12 min` note in the chat shows `▶ watch` when this
+browser's library holds that recording, and a call card shows `▶ 1 recording`
+or `▶ 2 recordings` for the recordings of that call kept here. `▶ watch`
+opens Recordings and plays the recording; the call link plays a single one or
+marks the call's cards with a bar on the left. Other people's recordings
+stay in their browsers and have no link, and a deleted recording loses its
+link.
 A card shows the chat name as its title until you rename the recording, and
 then the chat moves to the line below. That line reads the chat (only when
 renamed), the date (`today 14:05`, `yesterday 14:05`, `Nov 20`, or `Nov 20
@@ -518,12 +561,13 @@ tab: Replicas in memory; the mesh tab serves them to peers over WebRTC
 
 Records are CRDT states: fields of `author`, `chat`, `feed`, `post`,
 `message`, `file` (attachment metadata), `reaction` (message, author, and
-emoji switched on or off), `folder`, and `entry` (folder to channel link) are
-last-writer-wins registers, so a change is applied once whichever way it
+emoji switched on or off), and the older `folder` and `entry` records (no
+longer written, still accepted) are last-writer-wins registers, so a change is applied once whichever way it
 travels. An edit writes `content` and `edited`, a delete writes an empty
 `content` and `deleted` (records are never removed), and a forwarded copy
-carries `forwarded` (the original id) and `origin` (its author's nick). A folder `parent` loop made by
-concurrent moves shows the looped folders at the root. `application/static/chat.js`
+carries `forwarded` (the original id) and `origin` (its author's nick).
+A personal folder `parent` loop shows the looped folders at the root.
+`application/static/chat.js`
 validates deltas in browsers and on the server. Only the `api` thread
 owns the server replica files.
 
@@ -587,7 +631,7 @@ server) with `files/have`, `get`, and `put`.
   toolbar, edit, delete, forward, copy link, picking, pins, feeds opened
   in place, keyboard selection, `Esc`,
   `Ctrl+K`, drafts, swipe and long press,
-  folders and their visibility between peers, offline writes, OPFS,
+  personal folders that stay out of the replica, offline writes, OPFS,
   automatic WebRTC links, direct messages, files through the server and
   peer to peer, image previews and viewer, group sync and relayed
   reconnection without server, clear database, and an automatic update to
@@ -643,7 +687,8 @@ server) with `files/have`, `get`, and `put`.
   settings validation, migration and toast timing. `test/settings.js`
   checks the settings screen, profile row, deep links, Back, devices,
   appearance, storage and About. `test/app-settings-logic.js` checks the appearance
-  settings, `theme.js`, and the contrast of both themes.
+  settings, `theme.js`, the contrast of both themes, and that the light
+  surfaces next to each other differ.
   `test/storage-usage-logic.js` checks the usage breakdown, the cancellable
   OPFS walk, and which keys a settings reset removes.
   `test/notifications-logic.js` checks the ring volume mapping, the message
@@ -654,6 +699,9 @@ server) with `files/have`, `get`, and `put`.
   checks saved defaults, push-to-talk, auto-lower, mobile controls and Back;
   `test/call-mirror.js` checks the mirrored self view and remote tile, the
   toggle without renegotiation, the stats path, and camera off (scenario 23);
+  `test/sidebar-actions.js` checks leave, unsubscribe, remove, undo,
+  `Ctrl+K` restore, folder rename and delete, migration, and tab sync, and
+  `test/folders-logic.js` checks the folder and hidden stores;
   `test/recording-route.js` checks byte ranges (scenario 16),
   `test/recording-repair.js` checks startup recovery and playback (scenario 17),
   `test/recording-export.js` checks picker and folder export (scenario 18),
