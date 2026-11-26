@@ -185,8 +185,9 @@ test(
     await wait(`return !app.callStage.sheet && app.callStage.mode === 'call';`);
     await enter('.call-controls [data-action=more]');
     await enter('.call-bar-menu [data-action=chat]');
-    await wait(`return document.activeElement.id === 'close-call-chat';`);
-    await enter('#close-call-chat');
+    await wait(`return app.callStage.sheet === 'chat' &&
+    document.activeElement.dataset.action === 'close-sheet';`);
+    await enter('.call-tabs-close');
     await wait('return !app.callStage.sheet && app.pops === 0;');
     await enter('.call-controls [data-action=more]');
     await enter('.call-bar-menu [data-action=settings]');

@@ -36,6 +36,20 @@ test('names replace unsafe characters and keep the date', async () => {
   assert.equal(programFileOf('webm'), 'program.webm');
 });
 
+test('short dates name today, yesterday, then the day and year', async () => {
+  const { dateText } = await loadFiles();
+  const now = new Date(2026, 10, 26, 9, 0).getTime();
+  const at = (year, month, day, hour, minute) =>
+    new Date(year, month, day, hour, minute).getTime();
+  assert.equal(dateText(at(2026, 10, 26, 14, 5), now), 'today 14:05');
+  assert.equal(dateText(at(2026, 10, 26, 0, 0), now), 'today 00:00');
+  assert.equal(dateText(at(2026, 10, 25, 23, 59), now), 'yesterday 23:59');
+  assert.equal(dateText(at(2026, 10, 20, 14, 5), now), 'Nov 20');
+  assert.equal(dateText(at(2026, 0, 3, 14, 5), now), 'Jan 3');
+  assert.equal(dateText(at(2025, 10, 20, 14, 5), now), 'Nov 20 2025');
+  assert.equal(dateText(at(2025, 11, 31, 23, 59), now), 'Dec 31 2025');
+});
+
 test('content disposition has ASCII and UTF-8 names', async () => {
   const { dispositionOf } = await loadFiles();
   const mark = String.fromCharCode(39).repeat(2);

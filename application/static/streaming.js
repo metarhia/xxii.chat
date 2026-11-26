@@ -171,7 +171,7 @@ class Streaming {
       this.#paintRow(row, isActive);
     }
     this.#paintEditor(section);
-    const button = section.querySelector('[data-action="go-live"]');
+    const button = panel.querySelector('[data-action="go-live"]');
     button.textContent = isActive ? 'Stop live' : 'Go live';
     button.setAttribute('aria-pressed', `${isActive}`);
     button.disabled = !isActive && !this.canGoLive;

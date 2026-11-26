@@ -2,7 +2,10 @@ import { MediaCapture } from './media.js';
 import { membersOf } from './members.js';
 import { RecordingSession } from './recording-session.js';
 import { createField, createProgramControls } from './record-panel.js';
-import { createRecordFields } from './record-panel.js';
+import { createButton, createRecordFields } from './record-panel.js';
+import { paintCaptureHeader } from './record-panel.js';
+import { targetLabel } from './call-settings.js';
+import { canPickFolder, folderRecord } from './recording-folder.js';
 import { labeled } from './view.js';
 
 const LAYOUTS = {
@@ -37,6 +40,25 @@ const createSources = () => {
   return sources;
 };
 
+const targetOf = (target, folder) => {
+  if (target !== 'folder') return targetLabel(target).toLowerCase();
+  return folder ? `folder: ${folder}` : 'folder';
+};
+
+const summaryOf = ({ quality, recordingTarget }, folder) =>
+  `${quality} · ${targetOf(recordingTarget, folder)} · `;
+
+const createSummary = () => {
+  const summary = document.createElement('p');
+  summary.className = 'muted capture-summary';
+  const text = document.createElement('span');
+  text.className = 'capture-summary-text';
+  const change = createButton('capture-settings', 'change');
+  change.title = 'Change in Settings > Recordings';
+  summary.append(text, change);
+  return summary;
+};
+
 const createCapturePanel = (panel) => {
   const layout = createField({
     name: 'captureLayout',
@@ -49,13 +71,14 @@ const createCapturePanel = (panel) => {
   note.className = 'call-note capture-note';
   note.setAttribute('role', 'status');
   note.hidden = true;
-  const fields = createRecordFields();
+  const fields = createRecordFields([]);
   fields.prepend(layout);
   panel.replaceChildren(
     ...createProgramControls(),
     createSources(),
     note,
     fields,
+    createSummary(),
   );
 };
 
@@ -64,6 +87,7 @@ class SoloCapture extends RecordingSession {
   #hooks = null;
   #context = null;
   #disposing = null;
+  folderName = '';
 
   constructor(panel, context, settings, hooks) {
     super(settings, hooks);
@@ -88,6 +112,7 @@ class SoloCapture extends RecordingSession {
     panel.onclick = (event) => this.#click(event);
     panel.onchange = (event) => this.#change(event.target);
     this.paint();
+    this.#loadFolderName();
     media.start().catch((error) => {
       if (!this.isDisposed) hooks.fail(error);
     });
@@ -137,6 +162,8 @@ class SoloCapture extends RecordingSession {
     for (const control of panel.querySelectorAll('[data-source]')) {
       Object.assign(control, state[control.dataset.source]);
     }
+    const summary = panel.querySelector('.capture-summary-text');
+    summary.textContent = summaryOf(this.options, this.folderName);
     const note = panel.querySelector('.capture-note');
     const unsupported = !supported
       ? 'Camera and mic capture are unavailable.'
@@ -156,6 +183,7 @@ class SoloCapture extends RecordingSession {
     const needsTracks = this.isActive;
     const disposed = super.dispose();
     if (!needsTracks) media.stop();
+    paintCaptureHeader(this.#panel, '');
     this.#panel.onclick = null;
     this.#panel.onchange = null;
     this.#panel.replaceChildren();
@@ -165,10 +193,21 @@ class SoloCapture extends RecordingSession {
     return this.#disposing;
   }
 
+  #loadFolderName() {
+    if (!canPickFolder() || this.options.recordingTarget !== 'folder') return;
+    folderRecord()
+      .then((record) => {
+        this.folderName = record?.name ?? '';
+        this.paint();
+      })
+      .catch(() => {});
+  }
+
   #click(event) {
     const action = event.target.closest('button')?.dataset.action;
     if (action === 'record') this.toggle();
     if (action === 'record-pause') this.togglePause();
+    if (action === 'capture-settings') this.#hooks.settings();
   }
 
   #change(control) {

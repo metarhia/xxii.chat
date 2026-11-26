@@ -4,6 +4,7 @@ import { DEFAULTS, OPTIONS, targetLabel } from './call-settings.js';
 import { segmentLabel } from './call-settings.js';
 import { canPickFolder } from './recording-folder.js';
 import { optionOf, labeled } from './view.js';
+import { createSideBar, createSideBody } from './call-side.js';
 
 const SURFACE_COLOR = '#0f1418';
 const VOLUME_MAX = 200;
@@ -229,20 +230,16 @@ const createRecordPanel = () => {
   const aside = document.createElement('aside');
   aside.className = 'call-record';
   aside.setAttribute('aria-label', 'Recording');
-  const head = document.createElement('div');
-  head.className = 'record-head';
-  const title = document.createElement('p');
-  title.className = 'chat-title';
-  title.textContent = 'Record';
-  head.append(title, createButton('record-panel', 'close'));
   const fields = createRecordFields(FIELDS);
   fields.append(createBackground());
   const follows = document.createElement('p');
   follows.className = 'call-note record-follows hidden';
   const capture = createButton('capture-local', 'Add a screen to my recording');
-  aside.append(head, ...createProgramControls(), follows, capture, fields);
-  aside.append(createList('pinned', 'Chosen people'));
-  aside.append(createList('volumes', 'Volume per person'));
+  const [state, preview, actions, note] = createProgramControls();
+  const body = createSideBody(state, preview, note, follows, capture, fields);
+  body.append(createList('pinned', 'Chosen people'));
+  body.append(createList('volumes', 'Volume per person'));
+  aside.append(body, createSideBar(...actions.children));
   return aside;
 };
 
@@ -375,6 +372,13 @@ const paintSceneFields = (root, program, people) => {
   paintLists(root, program, people);
 };
 
+const paintCaptureHeader = (root, text) => {
+  const meta = root.closest('.panel')?.querySelector('.panel-meta');
+  if (!meta) return;
+  meta.textContent = text;
+  meta.hidden = text === '';
+};
+
 const paintRecordPanel = (root, view) => {
   const isCall = !root.matches('.capture-panel');
   const panel = isCall ? root.querySelector('.call-record') : root;
@@ -382,7 +386,10 @@ const paintRecordPanel = (root, view) => {
   const state = panel.querySelector('.record-state');
   const isActive = view.state !== 'idle';
   const label = view.state === 'paused' ? 'paused' : 'recording';
-  state.textContent = isActive ? `${label} · ${view.text}` : 'not recording';
+  const status = isCall ? `${label} · ${view.text}` : label;
+  state.textContent = isActive ? status : 'not recording';
+  const pause = view.state === 'paused' ? 'paused ' : '';
+  if (!isCall) paintCaptureHeader(panel, isActive ? pause + view.text : '');
   const note = panel.querySelector('.record-note');
   note.textContent = view.notice;
   note.classList.toggle('hidden', view.notice === '');
@@ -418,4 +425,4 @@ export { FIELDS, PROGRAM_FIELDS, defaultsOf, labelOf, valueOf };
 export { createSceneFields, paintSceneFields };
 export { createRecordPanel, paintRecordControl };
 export { createProgramControls, createRecordFields, createField };
-export { createButton };
+export { createButton, paintCaptureHeader };

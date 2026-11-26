@@ -38,10 +38,10 @@ class SettingsView {
     this.root = root;
     this.hooks = hooks;
     this.app = root.closest('.app');
-    this.list = root.querySelector('.settings-list');
+    this.list = this.app.querySelector('.settings-list');
     this.title = root.querySelector('#settings-section-name');
     this.back = root.querySelector('#settings-back');
-    this.buttons = Array.from(root.querySelectorAll('.settings-list button'));
+    this.buttons = Array.from(this.list.querySelectorAll('button'));
     this.pages = Array.from(root.querySelectorAll('.settings-page'));
     this.section = DEFAULT_SECTION;
     this.last = DEFAULT_SECTION;
@@ -59,6 +59,7 @@ class SettingsView {
       if (button) this.choose(button.dataset.section);
     });
     this.back.onclick = () => hooks.closeLayer('settings-section');
+    this.app.querySelector('#settings-exit').onclick = () => hooks.close();
     root.querySelector('#settings-close').onclick = () => hooks.close();
     root.querySelector('#peer-copy').onclick = () => hooks.copy(hooks.peer());
     root.querySelector('#open-recordings').onclick = () => hooks.library();

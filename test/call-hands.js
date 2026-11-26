@@ -148,7 +148,8 @@ const clickHand = `${openReactions}
 
 const rosterIs = (endpoints) => {
   const expected = JSON.stringify(endpoints);
-  return `const items = document.querySelectorAll('#call-view .call-roster li');
+  return `const items = document.querySelectorAll(
+    '.call-people .call-roster li');
     const raised = [];
     for (const item of items) {
       const hand = item.querySelector('.roster-hand');

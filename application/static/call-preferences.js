@@ -229,7 +229,7 @@ const createSettingRow = (name) => {
   const note = notes[name];
   if (name === 'noise') return createSegments(caption, note, name, choices);
   if (name === 'title') {
-    const control = createInput(name, TITLE_LIMIT);
+    const control = createInput(name, TITLE_LIMIT, 'e.g. Producer');
     return createRow(caption, note, control, createSaved());
   }
   if (!choices) return createRow(caption, note, createSwitch(name));
@@ -354,6 +354,7 @@ class CallPreferences {
   }
 
   setPreview(isWanted) {
+    if (isWanted && !this.isPreviewWanted) this.hasAccess = false;
     this.isPreviewWanted = isWanted;
     this.syncPreview();
   }

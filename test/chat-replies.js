@@ -622,7 +622,7 @@ test('Thread colors and replies in Chrome', { timeout: 120000 }, async (t) => {
         app.messageInput.placeholder,
       ];`,
       );
-      assert.deepEqual(bar, [true, latest, '> reply to ada']);
+      assert.deepEqual(bar, [true, latest, 'reply to ada']);
       await run(bob, `${rowOf('D2')}.querySelector('.content').click();`);
       const to = await idOf(bob, 'D2');
       await wait(bob, `return app.targetId() === '${to}';`);

@@ -17,6 +17,21 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 const SECOND_MS = 1000;
 const MINUTE_SECONDS = 60;
 const HOUR_SECONDS = 3600;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
 const RANGE = /^bytes=(\d*)-(\d*)$/;
 const ROUTE = /^\/recordings\/([\w-]+)\/([\w.-]+)$/;
@@ -53,6 +68,21 @@ const safeChar = (char) => {
 const fileNameOf = (chat, started, extension) => {
   const name = `xxii ${chat} ${stampOf(started)}`;
   return `${Array.from(name, safeChar).join('')}.${extension}`;
+};
+
+const dayStartOf = (date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+
+const dateText = (started, now = Date.now()) => {
+  const date = new Date(started);
+  const today = new Date(now);
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const days = Math.round((dayStartOf(today) - dayStartOf(date)) / DAY_MS);
+  if (days === 0) return `today ${clock}`;
+  if (days === 1) return `yesterday ${clock}`;
+  const day = `${MONTHS[date.getMonth()]} ${date.getDate()}`;
+  const year = date.getFullYear();
+  return year === today.getFullYear() ? day : `${day} ${year}`;
 };
 
 const titleOf = (chatName, started) => `${chatName} ${stampOf(started, ':')}`;
@@ -243,7 +273,7 @@ const recordingsOf = async (storage) => {
 
 export { RECORDINGS, META_FILE, POSTER_FILE, STATES, TYPES };
 export { FLUSH_MS, META_MS, POSTER_MS, LOW_BYTES, STOP_BYTES };
-export { stampOf, fileNameOf, titleOf, programFileOf, dispositionOf };
+export { stampOf, dateText, fileNameOf, titleOf, programFileOf, dispositionOf };
 export { recordingUrlOf, timeText, sizeText };
 export { typeOf, extensionOf, routeOf, rangeOf };
 export { createMeta, nextMeta, isOpen, scheduleOf, markedOf, spaceOf };

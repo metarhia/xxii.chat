@@ -26,6 +26,7 @@ test('sorts newest first without changing the input', async () => {
 test('lists recording details and labels', async () => {
   const { labelsOf } = await load();
   const started = new Date(2026, 10, 19, 14, 5).getTime();
+  const now = new Date(2026, 10, 26, 9, 0).getTime();
   const meta = {
     title: ' Team notes ',
     chatName: '!team',
@@ -36,40 +37,82 @@ test('lists recording details and labels', async () => {
     state: 'done',
     folder: '',
   };
-  assert.deepEqual(labelsOf(meta), {
+  assert.deepEqual(labelsOf(meta, now), {
     title: 'Team notes',
     chat: '!team',
-    date: '2026-11-19 14:05',
+    isRenamed: true,
+    name: 'Team notes',
+    date: 'Nov 19',
     duration: '1:01:01',
     size: '1.5 MB',
-    state: 'Done',
-    location: 'Browser storage',
+    meta: '!team · Nov 19 · 1.5 MB',
+    badge: '',
+    folder: '',
   });
-  assert.equal(labelsOf({ ...meta, folder: 'Movies' }).location, 'Movies');
-  const states = [
-    ['recording', 'Recording'],
-    ['paused', 'Recording (paused)'],
-    ['interrupted', 'Interrupted'],
-    ['constructor', 'Unknown'],
+  assert.equal(labelsOf({ ...meta, folder: 'Movies' }, now).folder, 'Movies');
+  const badges = [
+    ['recording', 'recording'],
+    ['paused', 'paused'],
+    ['interrupted', 'interrupted'],
+    ['done', ''],
+    ['constructor', ''],
   ];
-  for (const pair of states) {
+  for (const pair of badges) {
     const state = pair[0];
-    const label = pair[1];
-    assert.equal(labelsOf({ ...meta, state }).state, label);
+    const badge = pair[1];
+    assert.equal(labelsOf({ ...meta, state }, now).badge, badge);
   }
+});
+
+test('the chat shows once for a default or empty title', async () => {
+  const { labelsOf } = await load();
+  const { titleOf } = await import('../application/static/recording-files.js');
+  const started = new Date(2026, 10, 26, 8, 30).getTime();
+  const now = new Date(2026, 10, 26, 9, 0).getTime();
+  const meta = {
+    chatName: '!general',
+    started,
+    duration: 1000,
+    size: 2048,
+    state: 'done',
+  };
+  const expected = {
+    title: '!general',
+    chat: '!general',
+    isRenamed: false,
+    name: '!general today 08:30',
+    date: 'today 08:30',
+    meta: 'today 08:30 · 2 KB',
+  };
+  const defaulted = { ...meta, title: titleOf('!general', started) };
+  for (const input of [defaulted, { ...meta, title: '' }, meta]) {
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.keys(expected).map((key) => [key, labelsOf(input, now)[key]]),
+      ),
+      expected,
+    );
+  }
+  const renamed = labelsOf({ ...meta, title: 'Standup' }, now);
+  assert.equal(renamed.title, 'Standup');
+  assert.equal(renamed.meta, '!general · today 08:30 · 2 KB');
 });
 
 test('formats partial metadata and storage estimates', async () => {
   const { labelsOf, storageText } = await load();
   assert.deepEqual(labelsOf({ chat: 'general' }), {
-    title: 'Untitled recording',
+    title: 'general',
     chat: 'general',
+    isRenamed: false,
+    name: 'general Unknown date',
     date: 'Unknown date',
     duration: 'Unknown duration',
     size: 'Unknown size',
-    state: 'Unknown',
-    location: 'Browser storage',
+    meta: 'Unknown date · Unknown size',
+    badge: '',
+    folder: '',
   });
+  assert.equal(labelsOf({ title: 'Mine' }).meta.startsWith('No chat'), true);
   assert.equal(labelsOf({ duration: 0 }).duration, '00:00');
   assert.equal(labelsOf({ duration: 65000 }).duration, '01:05');
   assert.equal(labelsOf({ size: 0 }).size, '0 B');

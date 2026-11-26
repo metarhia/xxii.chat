@@ -950,6 +950,7 @@ class CallControls {
     const chatName = unread > 0 ? `Chat, ${unread} unread` : 'Chat';
     chat.setAttribute('aria-label', chatName);
     paintMore(root, isPhone ? waiting + unread : 0);
+    stage.paintTabs();
   }
 
   #paintSharing(media) {

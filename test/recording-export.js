@@ -126,6 +126,12 @@ test('scenario 18: export recordings through the library', async (t) => {
   const click = (selector) =>
     run(`document.querySelector('${selector}').click();`);
   const activate = (selector) => realClick(browser, sessionId, selector);
+  const choose = async (row, action) => {
+    await activate(`${row} .recording-more`);
+    await wait(`return !!document.querySelector(
+      '.recording-menu [data-action=${action}]');`);
+    await activate(`.recording-menu [data-action=${action}]`);
+  };
   await wait(`return document.readyState === 'complete' &&
     app.recordings && navigator.serviceWorker.controller;`);
   await run(fixture);
@@ -141,19 +147,19 @@ test('scenario 18: export recordings through the library', async (t) => {
       const url = new URL(link.href);
       const paused = document.querySelector('[data-id=paused]');
       const pausedActions = paused.querySelectorAll(
-        '.recording-download, .recording-save-as, .recording-save-folder',
+        '.recording-download, .recording-save',
       );
       return {
         path: url.pathname,
         name: url.searchParams.get('name'),
         download: url.searchParams.get('download'),
-        hasFolder: !row.querySelector('.recording-save-folder').hidden,
+        save: row.querySelector('.recording-save').title,
         pausedCanExport: [...pausedActions].some((action) => !action.hidden),
       };`);
     assert.equal(behavior.path, '/recordings/fixture/program.webm');
     assert.equal(behavior.name, NAME);
     assert.equal(behavior.download, '1');
-    assert.equal(behavior.hasFolder, false);
+    assert.equal(behavior.save, 'Save as…');
     assert.equal(behavior.pausedCanExport, false);
     await checkDownload(t, browser, () =>
       activate(`${SELECTOR} .recording-download`),
@@ -161,7 +167,7 @@ test('scenario 18: export recordings through the library', async (t) => {
   });
 
   await t.test('Save as writes exact bytes and completes', async () => {
-    await activate(`${SELECTOR} .recording-save-as`);
+    await choose(SELECTOR, 'save-as');
     await wait(`
       const bar = document.querySelector('${SELECTOR} progress');
       return !bar.hidden && bar.value === bar.max && bar.max === 100;
@@ -197,11 +203,11 @@ test('scenario 18: export recordings through the library', async (t) => {
     });
     await run('app.closeSettings(); return true;');
     await click('#recordings-btn');
-    await wait(`return !document.querySelector(
-      '${SELECTOR} .recording-save-folder',
-    ).hidden;`);
-    await activate(`${SELECTOR} .recording-save-folder`);
-    await click(`${SECOND} .recording-save-folder`);
+    await wait(`return document.querySelector(
+      '${SELECTOR} .recording-save',
+    ).title === 'Save to exported';`);
+    await activate(`${SELECTOR} .recording-save`);
+    await click(`${SECOND} .recording-save`);
     await wait(`
       const bars = document.querySelectorAll(
         '${SELECTOR} progress, ${SECOND} progress',
@@ -247,7 +253,7 @@ test('scenario 18: export recordings through the library', async (t) => {
         throw new DOMException('Write failed', 'QuotaExceededError');
       };
     `);
-    await activate(`${SELECTOR} .recording-save-folder`);
+    await activate(`${SELECTOR} .recording-save`);
     await wait(`return document.querySelector('.recordings-status').textContent
       === 'Could not save this recording.';`);
     const readRetry = () =>
@@ -265,7 +271,7 @@ test('scenario 18: export recordings through the library', async (t) => {
         }
       `);
     assert.equal(await readRetry(), null);
-    await activate(`${SELECTOR} .recording-save-folder`);
+    await choose(SELECTOR, 'save-folder');
     await wait(`
       const bar = document.querySelector('${SELECTOR} progress');
       return !bar.hidden && bar.value === 100;

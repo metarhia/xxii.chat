@@ -443,8 +443,14 @@ test(
           noteTag: note.tagName,
           panel: document.querySelector('.call-record .record-state')
             .textContent,
-          first: document.querySelector('.call-record').firstElementChild
-            .nextElementSibling.className,
+          first: document.querySelector('.call-record .side-body')
+            .firstElementChild.className,
+          dot: document.querySelector('.call-tab-record .call-tab-badge')
+            .textContent,
+          dotShown: !document.querySelector('.call-tab-record .call-tab-badge')
+            .classList.contains('hidden'),
+          bar: [...document.querySelectorAll('.call-record .side-bar button')]
+            .map((node) => node.dataset.action),
         };`,
       );
       assert.equal(state.label, 'stop');
@@ -454,6 +460,9 @@ test(
       assert.equal(state.noteTag, 'BUTTON');
       assert.match(state.panel, /^recording · \d\d:\d\d · /);
       assert.equal(state.first, 'record-state');
+      assert.equal(state.dot, '●');
+      assert.equal(state.dotShown, true);
+      assert.deepEqual(state.bar, ['record', 'record-pause']);
       await waitFor(
         browser,
         right,
@@ -469,6 +478,12 @@ test(
           app.callStage.programPanel === 'record';`,
       );
       await run(left, click('.call-recording'));
+      await waitFor(
+        browser,
+        left,
+        `return !document.querySelector('.app').dataset.side;`,
+      );
+      await run(left, click(`${BAR} [data-action=chat]`));
       await gesture(browser, left, click(`${BAR} [data-action=record]`));
       await chord(browser, left, 'r', 'KeyR', 82, CTRL_ALT);
       const asked = await run(left, 'return window.asked;');
@@ -847,29 +862,105 @@ test(
       },
     );
 
-    await t.test('people and chat toggle their panels', async () => {
-      const people = await run(
-        left,
-        `const button = document.querySelector('${BAR} [data-action=people]');
-        const badge = button.querySelector('.call-badge').textContent;
-        const before = button.getAttribute('aria-pressed');
-        button.click();
-        const panel = document.querySelector('.call-people');
-        return [badge, before, button.getAttribute('aria-pressed'),
-          getComputedStyle(panel).display];`,
-      );
-      assert.deepEqual(people, ['2', 'true', 'false', 'none']);
+    await t.test('people and chat select the right zone tabs', async () => {
+      const state = `
+        const people = document.querySelector('${BAR} [data-action=people]');
+        const chat = document.querySelector('${BAR} [data-action=chat]');
+        const display = (selector) =>
+          getComputedStyle(document.querySelector(selector)).display;
+        const tab = (name) => document.querySelector('.call-tab-' + name)
+          .getAttribute('aria-selected');
+        return {
+          side: document.querySelector('.app').dataset.side ?? '',
+          people: people.getAttribute('aria-pressed'),
+          chat: chat.getAttribute('aria-pressed'),
+          panes: [display('.call-people'), display('#chat-view'),
+            display('.call-record'), display('.call-side')],
+          tabs: [tab('chat'), tab('people'), tab('record')],
+          badge: people.querySelector('.call-badge').textContent,
+        };`;
+      const wait = (body) => waitFor(browser, left, body);
+      assert.deepEqual(await run(left, state), {
+        side: 'chat',
+        people: 'false',
+        chat: 'true',
+        panes: ['none', 'flex', 'none', 'flex'],
+        tabs: ['true', 'false', 'false'],
+        badge: '2',
+      });
       await run(left, click(`${BAR} [data-action=people]`));
+      await wait(`return document.querySelector('.app').dataset.side ===
+        'people';`);
+      assert.deepEqual(await run(left, state), {
+        side: 'people',
+        people: 'true',
+        chat: 'false',
+        panes: ['flex', 'none', 'none', 'flex'],
+        tabs: ['false', 'true', 'false'],
+        badge: '2',
+      });
+      await run(left, click(`${BAR} [data-action=people]`));
+      await wait(`return !document.querySelector('.app').dataset.side;`);
+      assert.deepEqual(await run(left, state), {
+        side: '',
+        people: 'false',
+        chat: 'false',
+        panes: ['none', 'none', 'none', 'none'],
+        tabs: ['false', 'false', 'false'],
+        badge: '2',
+      });
       await run(left, click(`${BAR} [data-action=chat]`));
+      await run(left, click('.call-tab-people'));
+      await wait(`return document.querySelector('.app').dataset.side ===
+        'people';`);
+      await run(left, click('.call-tab-people'));
+      assert.equal(await run(left, `return app.callStage.shownTab;`), 'people');
+      await run(left, click('.call-tabs-close'));
+      await wait(`return !document.querySelector('.app').dataset.side;`);
+      await run(left, click(`${BAR} [data-action=chat]`));
+      await wait(`return document.querySelector('.app').dataset.side ===
+        'chat';`);
       assert.equal(
         await run(
           left,
           `return document.querySelector('${BAR} [data-action=chat]')
             .getAttribute('aria-pressed');`,
         ),
-        'false',
+        'true',
       );
-      await run(left, click(`${BAR} [data-action=chat]`));
+    });
+
+    await t.test('the right zone follows the stage, with tabs', async () => {
+      const zone = await run(
+        left,
+        `const stage = document.querySelector('.call-stage');
+        const side = document.querySelector('.call-side');
+        const box = (selector) =>
+          document.querySelector(selector).getBoundingClientRect();
+        const grid = box('.call-grid');
+        const tabs = [...document.querySelectorAll('.call-tab')];
+        return {
+          order: [...stage.children]
+            .filter((node) => node.tagName !== 'AUDIO')
+            .map((node) => node.className || node.id),
+          inside: ['.call-people', '.call-record', '#chat-view']
+            .map((selector) => document.querySelector(selector)
+              .parentElement === side),
+          right: box('.call-side').left >= grid.right,
+          tabs: tabs.map((node) => node.dataset.tab),
+          tablist: document.querySelector('.call-tablist')
+            .getAttribute('role'),
+          top: box('.call-tabs').top === box('.call-topbar').top,
+        };`,
+      );
+      assert.deepEqual(zone, {
+        order: ['call-view', 'call-side'],
+        inside: [true, true, true],
+        right: true,
+        tabs: ['chat', 'people', 'record', 'studio'],
+        tablist: 'tablist',
+        top: true,
+      });
     });
 
     await t.test('phone: one row, the rest inside more, sheets', async () => {

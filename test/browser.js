@@ -176,7 +176,7 @@ test('XXII Chat in Chrome', { timeout: 240000 }, async (t) => {
     );
     const bar = `return !app.replyBar.classList.contains('hidden')
       && app.replyText.textContent === 'in dev chat'
-      && app.messageInput.placeholder === '> reply to ada';`;
+      && app.messageInput.placeholder === 'reply to ada';`;
     await wait(first, bar);
     await run(
       first,

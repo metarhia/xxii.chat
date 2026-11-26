@@ -18,6 +18,9 @@ const selection = (name, value) => `
   return true;
 `;
 
+const settingOf = (name, value) =>
+  `app.preferences.set('${name}', '${value}');`;
+
 const currentId = `return app.capture.recorder.meta.id;`;
 const closed = `
   return !app.capture && !document.querySelector('${PANEL} canvas');
@@ -79,8 +82,8 @@ test('solo capture', { timeout: 180000 }, async (t) => {
   await t.test(
     'session capture previews three layouts and saves locally',
     async () => {
-      await run(`app.openCapture(''); return true;`);
-      await set('quality', '720p30');
+      await run(`${settingOf('recordingQuality', '720p30')}
+        app.openCapture(''); return true;`);
       assert.equal(
         await run(`return app.capture.media.cameraTrack === null &&
       app.capture.media.micTrack === null;`),
@@ -116,6 +119,9 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       await wait(recording);
       const id = await run(currentId);
       await wait(elapsed(1000));
+      await wait(`const meta = document.getElementById('panel-meta');
+        return !meta.hidden && /^\\d\\d:\\d\\d · [\\d.]+ \\w+$/.test(
+          meta.textContent);`);
       await click(PAUSE);
       await wait(`return app.capture.recorder.state === 'paused';`);
       await click(PAUSE);
@@ -123,6 +129,10 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       await wait(elapsed(3000));
       await click(RECORD);
       await wait(`return app.capture.isActive === false;`);
+      assert.equal(
+        await run(`return document.getElementById('panel-meta').hidden;`),
+        true,
+      );
       const meta = await run(storedMeta(id));
       assert.equal(meta.state, 'done');
       assert.equal(meta.call, '');
@@ -172,7 +182,6 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       return true;
     `);
       await click('#direct-capture-btn');
-      await set('quality', '720p30');
       await click(source('camera'));
       await wait(
         `return app.capture.media.cameraTrack?.readyState === 'live';`,
@@ -230,10 +239,16 @@ test('solo capture', { timeout: 180000 }, async (t) => {
       window.showDirectoryPicker = () => Promise.resolve(captureFolder);
       return true;
     `);
-    await run(`app.openCapture(''); return true;`);
-    await set('quality', '720p30');
-    await set('recordingTarget', 'folder');
+    await run(`
+      const { chooseRecordingFolder } = await import('/recording-folder.js');
+      await chooseRecordingFolder();
+      ${settingOf('recordingTarget', 'folder')}
+      app.openCapture('');
+      return true;
+    `);
     await wait(`return app.capture.options.recordingTarget === 'folder';`);
+    await wait(`return document.querySelector('${PANEL} .capture-summary')
+      .textContent.endsWith(' · folder: solo-folder · change');`);
     await run(`app.capture.options.recordingSegment = 0.05; return true;`);
     await click(source('camera'));
     await wait(`return app.capture.media.cameraTrack?.readyState === 'live';`);
@@ -274,6 +289,74 @@ test('solo capture', { timeout: 180000 }, async (t) => {
     }));
     assert.deepEqual(files, expected);
     await click('#panel-close-btn');
+    await run(`${settingOf('recordingTarget', 'browser')} return true;`);
+  });
+
+  await t.test(
+    'the panel has no quality or target and links to settings',
+    async () => {
+      await run(`${settingOf('recordingQuality', '1080p60')}
+      app.openCapture(''); return true;`);
+      const panel = await run(`
+      const root = document.querySelector('${PANEL}');
+      return {
+        fields: Array.from(root.querySelectorAll('[data-record]'),
+          (control) => control.dataset.record),
+        summary: root.querySelector('.capture-summary').textContent,
+        headerHidden: document.getElementById('panel-meta').hidden,
+      };
+    `);
+      assert.deepEqual(panel, {
+        fields: ['captureLayout'],
+        summary: '1080p60 · browser storage · change',
+        headerHidden: true,
+      });
+      await run(`
+      const { folderHandle } = await import('/recording-folder.js');
+      await folderHandle(null);
+      app.hidePanel(false);
+      ${settingOf('recordingTarget', 'folder')}
+      app.openCapture('');
+      return true;
+    `);
+      assert.equal(
+        await run(`return document.querySelector(
+          '${PANEL} .capture-summary').textContent;`),
+        '1080p60 · folder · change',
+      );
+      await run(`${settingOf('recordingTarget', 'browser')} return true;`);
+      await click(`${PANEL} [data-action="capture-settings"]`);
+      await wait(`return app.settings.isOpen && app.settings.section ===
+      'recordings' && app.panel === '' && app.capture === null;`);
+      await run(`${settingOf('recordingQuality', '720p30')}
+      app.closeSettings(); return true;`);
+      await wait(`return !app.settings.isOpen;`);
+    },
+  );
+
+  await t.test('change asks before it stops a running capture', async () => {
+    await run(`
+      window.changeAnswers = [];
+      const original = window.confirm;
+      window.confirm = () => changeAnswers.shift() ?? true;
+      window.restoreChange = () => { window.confirm = original; };
+      app.openCapture(''); return true;
+    `);
+    await click(source('mic'));
+    await wait(`return app.capture.media.micTrack?.readyState === 'live';`);
+    await click(RECORD);
+    await wait(recording);
+    await run(`changeAnswers.push(false); return true;`);
+    await click(`${PANEL} [data-action="capture-settings"]`);
+    assert.equal(
+      await run(`return app.capture?.isActive && !app.settings.isOpen;`),
+      true,
+    );
+    await click(`${PANEL} [data-action="capture-settings"]`);
+    await wait(`return app.settings.isOpen && app.capture === null &&
+      app.settings.section === 'recordings';`);
+    await run(`restoreChange(); app.closeSettings(); return true;`);
+    await wait(`return !app.settings.isOpen;`);
   });
 
   await t.test('capture is unavailable while in a call', async () => {

@@ -39,6 +39,7 @@ const ASSETS = [
   '/call-preferences.js',
   '/call-keys.js',
   '/call-controls.js',
+  '/call-side.js',
   '/icons.js',
   '/layout.js',
   '/avatar.js',

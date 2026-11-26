@@ -186,7 +186,7 @@ test('scenario 20: stage and backstage', { timeout: 240000 }, async (t) => {
       app.layers.filter((layer) => layer === 'callSheet').length === 1;`),
     true,
   );
-  await guest.click('.call-record .record-head [data-action=record-panel]');
+  await guest.click('.call-tabs-close');
   await guest.wait(`return app.callStage.sheet === '';`);
 
   await host.front();
@@ -201,6 +201,7 @@ test('scenario 20: stage and backstage', { timeout: 240000 }, async (t) => {
   await host.click(`${tile} [data-action=tile-menu]`);
   await host.click('.call-tile-menu [data-action=move-to-backstage]');
   await host.wait(programHas(endpoint, false));
+  await host.click('.call-tab-people');
   await host.click(`${roster} [data-action=roster-menu]`);
   await host.click('.call-tile-menu [data-action=move-to-stage]');
   await host.wait(programHas(endpoint, true));

@@ -92,6 +92,18 @@ const ICONS = {
   expand: {
     paths: ['M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9'],
   },
+  play: { fills: ['M5 2.8v10.4l8.5-5.2z'] },
+  download: { paths: ['M8 2v8.5M4.5 7.2 8 10.7l3.5-3.5M2.5 13.5h11'] },
+  save: {
+    paths: ['M2.5 2.5h9l2 2v9h-11z', 'M5 2.5v3.5h5V2.5M5 13.5V9h6v4.5'],
+  },
+  delete: {
+    paths: [
+      'M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4',
+      'M6.7 6.5v4.5M9.3 6.5v4.5',
+    ],
+  },
+  folder: { paths: ['M1.5 3.5h4.5l1.5 1.8h7v7.7h-13z'] },
   studio: {
     paths: [
       'M1.5 6h13v7.5h-13z',

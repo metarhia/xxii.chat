@@ -84,9 +84,9 @@ test(
     await wait(`
       const row = document.querySelector('${LIBRARY}');
       const panel = row?.closest('.recordings-view');
-      const details = row?.querySelector('.recording-details').textContent;
+      const badge = row?.querySelector('.recording-state').textContent;
       const isVisible = panel?.getClientRects().length > 0;
-      return isVisible && details.includes('Recording');
+      return isVisible && badge === 'recording';
     `);
     const card = await run(`
       const row = document.querySelector('${LIBRARY}');
@@ -100,12 +100,16 @@ test(
       const actions = row.querySelector('.recording-actions');
       const buttons = Array.from(
         actions.querySelectorAll('button:not([hidden])'),
-        (button) => button.disabled,
+        (button) => [button.className.split(' ')[0], button.disabled],
       );
       return { buttons, download: actions.querySelector('a').hidden };
     `);
     assert.deepEqual(activeButtons, {
-      buttons: [true, true, true],
+      buttons: [
+        ['recording-play', true],
+        ['recording-delete', true],
+        ['recording-more', false],
+      ],
       download: true,
     });
 
@@ -120,31 +124,41 @@ test(
     await run(`app.callStage.recording.toggle(); return true;`);
     await wait(`
       const row = document.querySelector('${LIBRARY}');
-      const details = row?.querySelector('.recording-details').textContent;
       const hasPoster = row?.querySelector('img')?.naturalWidth > 0;
-      return details?.includes('Done') && hasPoster;
+      return row?.querySelector('.recording-state').hidden && hasPoster &&
+        !row.querySelector('.recording-play').disabled;
     `);
     const listed = await run(`
       const row = document.querySelector('${LIBRARY}');
       return {
         id: row.dataset.id,
         title: row.querySelector('.recording-title').textContent,
-        chat: row.querySelector('.recording-chat').textContent,
-        details: row.querySelector('.recording-details').textContent,
+        meta: row.querySelector('.recording-meta').textContent.trim(),
+        duration: row.querySelector('.recording-duration').textContent,
+        onPoster: row.querySelector('.recording-poster')
+          .contains(row.querySelector('.recording-duration')),
+        names: Array.from(row.querySelectorAll('.recording-actions > *'),
+          (control) => control.getAttribute('aria-label') + '|' +
+            control.title),
         poster: row.querySelector('img').getAttribute('src'),
         storage: document.querySelector('.recordings-storage').textContent,
       };
     `);
-    assert.match(listed.title, /^!general \d{4}-\d\d-\d\d \d\d:\d\d$/);
-    assert.match(listed.chat, /^!general · \d{4}-\d\d-\d\d \d\d:\d\d$/);
-    assert.match(
-      listed.details,
-      /^\d\d:\d\d · [\d.]+ \w+ · Done · Browser storage$/,
-    );
+    assert.equal(listed.title, '!general');
+    assert.match(listed.meta, /^today \d\d:\d\d · [\d.]+ \w+$/);
+    assert.match(listed.duration, /^\d\d:\d\d$/);
+    assert.equal(listed.onPoster, true);
+    assert.deepEqual(listed.names, [
+      'Play|Play',
+      'Download|Download',
+      'Save as…|Save as…',
+      'Delete|Delete',
+      'More actions|More actions',
+    ]);
     assert.equal(listed.poster, `/recordings/${listed.id}/poster.jpg`);
     assert.match(listed.storage, /^[\d.]+ \w+ used · [\d.]+ \w+ free$/);
 
-    await click('.recording-play');
+    await click('.recording-poster-play');
     await wait(`
       const video = document.querySelector('.recordings-player');
       return video.readyState >= HTMLMediaElement.HAVE_METADATA &&
@@ -181,7 +195,20 @@ test(
     `);
     assert.equal(nativeKeys, true);
 
-    await click('.recording-rename');
+    await click('.recording-more');
+    await run(`
+      const items = document.querySelectorAll('.recording-menu .menu-item');
+      const labels = Array.from(items, (item) => item.textContent);
+      window.menuLabels = labels;
+      items[labels.indexOf('Rename')].click();
+    `);
+    assert.deepEqual(await run('return menuLabels;'), [
+      'Play',
+      'Download',
+      'Save as…',
+      'Rename',
+      'Delete',
+    ]);
     await run(`
       const form = document.querySelector('.recording-form');
       const input = form.querySelector('input');
@@ -192,6 +219,11 @@ test(
     const renamed = `return document.querySelector('.recording-title')
       ?.textContent === ${title};`;
     await wait(renamed);
+    assert.match(
+      await run(`return document.querySelector('.recording-meta')
+        .textContent.trim();`),
+      /^!general · today \d\d:\d\d · [\d.]+ \w+$/,
+    );
     await run(`
       const video = document.querySelector('.recordings-player');
       video.focus();
