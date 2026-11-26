@@ -94,6 +94,7 @@ const ACTIONS = {
   'switch-camera': (stage) => stage.media?.switchCamera(),
   people: (stage) => stage.toggleTab('people'),
   chat: (stage) => stage.toggleTab('chat'),
+  'search-chat': (stage) => stage.hooks.search(),
   'close-sheet': (stage) => stage.closeSide(),
   settings: (stage) => stage.hooks.settings(),
   shortcuts: (stage) => stage.controls?.showShortcuts(),
@@ -934,6 +935,7 @@ class CallStage {
     this.studio?.dispose();
     this.studio = null;
     this.releaseWake();
+    this.hooks.closeSearch?.();
     this.closeSheet();
     this.hooks.popLayer('call');
     clearTimeout(this.toastTimer);
@@ -1076,6 +1078,7 @@ class CallStage {
   collapse() {
     if (this.mode !== 'call') return;
     this.tileMenu?.close(false);
+    this.hooks.closeSearch?.();
     this.closeSheet();
     this.hooks.popLayer('call');
     this.mode = 'mini';
@@ -1175,6 +1178,7 @@ class CallStage {
     else this.root.removeAttribute('data-side');
     this.recording?.paint();
     this.controls?.paint();
+    if (shown !== 'chat') this.hooks.closeSearch?.();
     this.paintTabs();
   }
 
@@ -1208,7 +1212,9 @@ class CallStage {
 
   paintTabs() {
     const side = this.host?.querySelector('.call-side');
-    if (side) paintTabs(side, this.shownTab, this.tabStates());
+    if (!side) return;
+    const isSearching = this.hooks.isSearching?.() ?? false;
+    paintTabs(side, this.shownTab, this.tabStates(), isSearching);
   }
 
   onTabKey(event) {
@@ -1345,7 +1351,8 @@ class CallStage {
       event.stopImmediatePropagation();
       return;
     }
-    if (event.key === 'Escape' && this.sheet) {
+    const isSearching = this.hooks.isSearching?.() ?? false;
+    if (event.key === 'Escape' && this.sheet && !isSearching) {
       event.preventDefault();
       event.stopImmediatePropagation();
       this.closeSheet();

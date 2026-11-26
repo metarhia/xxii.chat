@@ -420,7 +420,8 @@ const createHeadingLink = (index, text) => {
 };
 
 const CONTROLS = 'button, a, input, .message-editor';
-const SEARCH_KEEP = '#search-bar, #search-btn, .message-list';
+const SEARCH_KEEP =
+  '#search-bar, #search-btn, .call-tabs-search, .message-list';
 
 const replyTargetOf = (event) => {
   const item = event.target.closest('.message');
@@ -3407,6 +3408,7 @@ class ChatApplication extends Application {
 
   toggleSearch() {
     if (this.isSearching()) return void this.closeSearch();
+    this.callStage?.selectTab('chat');
     this.searchBar.classList.remove('hidden');
     this.paintSearchButton();
     this.closeThread();
@@ -3426,6 +3428,7 @@ class ChatApplication extends Application {
     const isOpen = this.isSearching();
     this.searchBtn.classList.toggle('active', isOpen);
     this.searchBtn.setAttribute('aria-pressed', String(isOpen));
+    this.callStage?.paintTabs();
   }
 
   settleFound(item, place) {
@@ -4598,6 +4601,9 @@ class ChatApplication extends Application {
       focusChat: (id) => this.focusCallChat(id),
       unread: (chat) => this.unreadOf(chat),
       changed: () => this.scheduleRender(),
+      search: () => this.toggleSearch(),
+      closeSearch: () => this.closeSearch(),
+      isSearching: () => this.isSearching(),
       fail: (error) => this.report(error),
       notice: (text, region) => this.showNotification(text, 'warning', region),
       admit: (call, endpoint) => this.api.call.admit({ call, endpoint }),

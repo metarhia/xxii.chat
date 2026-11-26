@@ -2864,6 +2864,22 @@ svg {
   font-size: 20px;
 }
 
+.call-tabs-search {
+  flex: none;
+  width: 36px;
+  color: var(--light);
+}
+
+.call-tabs-search:hover {
+  background: var(--button);
+  color: var(--text);
+}
+
+.call-tabs-search.active {
+  box-shadow: inset 0 -3px 0 var(--text);
+  color: var(--text);
+}
+
 .call-tabs-close:focus-visible {
   outline-offset: -3px;
 }

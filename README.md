@@ -85,7 +85,9 @@ sync. Terminal-like UI follows the
   (except into the found messages), on `Esc`, when the chat changes, and when
   a panel, settings, recordings, a menu, or a call opens. A click on a found
   message closes the search and keeps that message in view and selected. The
-  `Search` button is highlighted while the search is open
+  `Search` button is highlighted while the search is open. In a call the
+  Chat tab has a search icon next to the `×` (and `Ctrl+F` switches to Chat
+  and opens the search); changing tab or collapsing the call closes it
 - A message row shows the nick on the left and the time on the right. On
   hover the time gives way to a toolbar: reply, share, forward, edit and
   delete for your own messages, select, and `⋯` for the menu
