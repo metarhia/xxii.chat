@@ -120,7 +120,7 @@ test('Message actions in Chrome', { timeout: 120000 }, async (t) => {
   await t.test(
     'the time is on the right and tools take its place',
     async () => {
-      const sidebar = `return ['calls-btn', 'recordings-btn'].map((id) => {
+      const sidebar = `return ['settings-btn', 'recordings-btn'].map((id) => {
         const button = document.getElementById(id);
         const width = button.getBoundingClientRect().width;
         const style = getComputedStyle(button);

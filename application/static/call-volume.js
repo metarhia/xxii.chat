@@ -54,6 +54,11 @@ class ParticipantVolume {
     return value;
   }
 
+  forget() {
+    this.values.clear();
+    for (const entry of this.entries.values()) this.apply(entry);
+  }
+
   attach(audio, peer) {
     if (this.entries.has(audio)) return;
     const entry = { audio, peer, source: null, gain: null, pending: false };
@@ -175,4 +180,4 @@ class ParticipantVolume {
   }
 }
 
-export { volumeValue, disconnectNode, ParticipantVolume };
+export { VOLUME_KEY, volumeValue, disconnectNode, ParticipantVolume };

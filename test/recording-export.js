@@ -186,8 +186,8 @@ test('scenario 18: export recordings through the library', async (t) => {
   });
 
   await t.test('folder saves preserve and disambiguate filenames', async () => {
-    await click('#panel-close-btn');
-    await click('#calls-btn');
+    await click('#recordings-close');
+    await run(`app.openSettings('recordings'); return true;`);
     await activate('.record-folder');
     await wait(`return document.querySelector('.record-folder').textContent
       === 'folder: exported';`);
@@ -195,7 +195,7 @@ test('scenario 18: export recordings through the library', async (t) => {
       options: { mode: 'readwrite', id: 'xxii-recordings', startIn: 'videos' },
       active: true,
     });
-    await click('#panel-close-btn');
+    await run('app.closeSettings(); return true;');
     await click('#recordings-btn');
     await wait(`return !document.querySelector(
       '${SELECTOR} .recording-save-folder',

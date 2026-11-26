@@ -61,7 +61,7 @@ test(
     await request('Page.addScriptToEvaluateOnNewDocument', { source: setup });
     await request('Page.navigate', { url: harness.ORIGIN });
     await wait(ready);
-    await run(`document.getElementById('calls-btn').click();
+    await run(`app.openSettings('media');
     const flags = ['pushToTalk', 'autoLower', 'joinMicOff'];
     for (const name of flags.concat(['joinCameraOff', 'mirror'])) {
       document.querySelector('[data-setting="' + name + '"]').click();
@@ -79,7 +79,7 @@ test(
       return sessionStorage.firstPage !== now
     && app.connected && app.mesh.peers.has(app.peerId);`);
     await wait(folder);
-    await run(`document.getElementById('calls-btn').click();`);
+    await run(`app.openSettings('media');`);
     assert.deepEqual(
       await run(`const flags = ['pushToTalk', 'autoLower', 'joinMicOff'];
         return flags.concat(['mirror', 'recordingAudio'])
@@ -187,14 +187,18 @@ test(
     await enter('summary[aria-label="more options"]');
     await enter('[data-action=settings]');
     await wait(
-      `const panel = document.getElementById('panel');
-        return app.panel === 'calls' && panel.offsetHeight > 0;`,
+      `return app.settings.isOpen && app.settings.section === 'media'
+        && app.settings.root.dataset.pane === 'section'
+        && app.callStage.mode === 'mini';`,
     );
     await run('history.back();');
-    await wait(`return !app.panel && app.callStage.mode === 'call';`);
+    await wait(
+      `return app.settings.isOpen &&
+        app.settings.root.dataset.pane === 'list';`,
+    );
     await run('history.back();');
     await wait(
-      `return app.callStage.mode === 'mini' &&
+      `return !app.settings.isOpen && app.callStage.mode === 'mini' &&
         app.callSession.phase === 'joined';`,
     );
     await run('await app.closeCall();');

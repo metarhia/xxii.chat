@@ -16,6 +16,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="XXII Chat" />
     <title>XXII Chat</title>
+    <script src="/theme.js"></script>
     <link rel="stylesheet" href="/default.css" />
     <link rel="stylesheet" href="/markdown.css" />
     <link rel="manifest" href="/manifest.json" />
@@ -91,41 +92,51 @@
           </form>
         </section>
 
-        <section class="section session">
-          <h3 class="small">SESSION</h3>
-          <label class="nick">
-            <span class="accent">@</span>
-            <input
-              id="username-input"
-              type="text"
-              maxlength="32"
-              placeholder="your nick"
-            />
-          </label>
-          <div class="status-line">
-            <span id="connection-status" class="status offline">offline</span>
-            <span id="mesh-status" class="muted"></span>
-          </div>
-          <div class="tools">
-            <button id="calls-btn" class="link-btn">calls</button>
-            <button id="recordings-btn" class="link-btn">recordings</button>
-            <button id="capture-btn" class="link-btn hidden" type="button">
-              capture
-            </button>
-            <button id="install-btn" class="link-btn hidden">install</button>
-            <button
-              id="version-btn"
-              class="link-btn"
-              type="button"
-              title="Updates install automatically; click to check now"
+        <footer class="profile-row">
+          <button
+            id="profile-btn"
+            class="profile-main"
+            type="button"
+            aria-label="Profile, offline"
+            title="offline"
+          >
+            <span id="profile-avatar" class="profile-avatar" aria-hidden="true"
+              >?</span
             >
-              v…
-            </button>
-            <button id="clear-messages-btn" class="link-btn">
-              clear database
-            </button>
-          </div>
-        </section>
+            <span id="profile-nick" class="profile-nick muted"
+              >set your nick</span
+            >
+            <span id="profile-dot" class="dot" data-status="offline"></span>
+          </button>
+          <button
+            id="recordings-btn"
+            class="icon-btn"
+            type="button"
+            title="Recordings"
+            aria-label="Recordings"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="5.5" />
+              <circle cx="8" cy="8" r="2" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            id="settings-btn"
+            class="icon-btn"
+            type="button"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="4.2" />
+              <circle cx="8" cy="8" r="1.6" />
+              <path
+                d="M13.4 8H15M8 13.4V15M2.6 8H1M8 2.6V1M11.8 11.8l1.15 1.15M4.2 11.8l-1.15 1.15M4.2 4.2 3.05 3.05M11.8 4.2l1.15-1.15"
+              />
+            </svg>
+            <span id="settings-dot" class="update-dot" hidden>•</span>
+          </button>
+        </footer>
       </aside>
 
       <main id="chat-view" class="chat-view">
@@ -188,7 +199,6 @@
             <button id="search-btn" class="link-btn">Search</button>
             <button id="pins-btn" class="link-btn">Pin list</button>
             <button id="members-btn" class="link-btn">Members</button>
-            <button id="log-btn" class="link-btn">Log</button>
           </nav>
         </header>
         <div id="search-bar" class="search hidden">
@@ -336,6 +346,339 @@
         </form>
       </main>
 
+      <section
+        id="settings-view"
+        class="settings-view"
+        aria-label="Settings"
+        data-pane="list"
+      >
+        <header class="settings-header">
+          <button
+            id="settings-back"
+            class="link-btn settings-back"
+            type="button"
+          >
+            ‹ Settings
+          </button>
+          <h2 class="settings-title">
+            <span class="settings-name">Settings</span>
+            <span id="settings-section-name" class="settings-section-name"
+              ></span
+            >
+          </h2>
+          <button
+            id="settings-close"
+            class="link-btn"
+            type="button"
+            title="Close settings (Esc)"
+            aria-label="Close settings"
+          >
+            ×
+          </button>
+        </header>
+        <div class="settings-body">
+          <nav class="settings-list" aria-label="Settings sections">
+            <button type="button" data-section="profile">Profile</button>
+            <button type="button" data-section="appearance">Appearance</button>
+            <button type="button" data-section="notifications">
+              Notifications
+            </button>
+            <button type="button" data-section="media">Audio &amp; video</button>
+            <button type="button" data-section="network">Network</button>
+            <button type="button" data-section="recordings">Recordings</button>
+            <button type="button" data-section="streaming">Streaming</button>
+            <button type="button" data-section="storage">Storage</button>
+            <button type="button" data-section="shortcuts">
+              Keyboard shortcuts
+            </button>
+            <button type="button" data-section="about">
+              About
+              <span id="about-dot" class="update-dot" hidden>•</span>
+            </button>
+          </nav>
+          <div class="settings-content">
+            <section class="settings-page" data-page="profile">
+              <h3 class="settings-group">YOU</h3>
+              <div class="row">
+                <span id="profile-preview" class="profile-avatar large" aria-hidden="true"
+                  >?</span
+                >
+                <span class="row-text">
+                  <span class="row-label">Avatar</span>
+                  <span class="row-note">Color comes from your peer id</span>
+                </span>
+              </div>
+              <label class="row">
+                <span class="row-text">
+                  <span class="row-label">Nick</span>
+                  <span class="row-note"
+                    >Others see <b>guest</b> while it is empty</span
+                  >
+                </span>
+                <span class="row-field">
+                  <span class="saved" role="status"></span>
+                  <input
+                    id="username-input"
+                    type="text"
+                    maxlength="32"
+                    placeholder="guest"
+                    autocomplete="off"
+                  />
+                </span>
+              </label>
+              <div class="settings-rows" data-group="profile"></div>
+              <div class="row">
+                <span class="row-text">
+                  <span class="row-label">Peer id</span>
+                  <span class="row-note"
+                    >Each browser profile is its own peer</span
+                  >
+                </span>
+                <span class="row-field">
+                  <code id="peer-id"></code>
+                  <button id="peer-copy" class="link-btn" type="button">
+                    copy
+                  </button>
+                </span>
+              </div>
+            </section>
+
+            <section class="settings-page" data-page="appearance">
+              <h3 class="settings-group">THEME</h3>
+              <div class="settings-rows" data-group="theme"></div>
+              <h3 class="settings-group">MESSAGES</h3>
+              <div class="settings-rows" data-group="messages"></div>
+              <p class="settings-note">
+                Browser zoom scales the whole interface
+              </p>
+            </section>
+
+            <section class="settings-page" data-page="notifications">
+              <h3 class="settings-group">BROWSER PERMISSION</h3>
+              <div class="settings-rows" data-group="permission"></div>
+              <h3 class="settings-group">INCOMING CALLS</h3>
+              <div class="settings-rows" data-group="calls"></div>
+              <h3 class="settings-group">MESSAGES</h3>
+              <div class="settings-rows" data-group="messages"></div>
+              <p class="settings-note">
+                Messages are notified only while no xxii.chat tab is visible
+              </p>
+              <h3 class="settings-group">IN CALLS</h3>
+              <div class="settings-rows" data-group="incall"></div>
+            </section>
+
+            <section class="settings-page" data-page="media">
+              <h3 class="settings-group">AUDIO</h3>
+              <div class="settings-rows" data-group="audio"></div>
+              <h3 class="settings-group">VIDEO</h3>
+              <div class="settings-rows" data-group="video"></div>
+              <h3 class="settings-group">JOINING</h3>
+              <div class="settings-rows" data-group="joining"></div>
+              <h3 class="settings-group">HANDS</h3>
+              <div class="settings-rows" data-group="hands"></div>
+            </section>
+
+            <section class="settings-page" data-page="network">
+              <h3 class="settings-group">PRIVACY</h3>
+              <label class="row">
+                <span class="row-text">
+                  <span class="row-label">Public STUN</span>
+                  <span class="row-note"
+                    >These servers see your IP address</span
+                  >
+                </span>
+                <input id="ice-public-stun" type="checkbox" role="switch" />
+              </label>
+              <label class="row">
+                <span class="row-text">
+                  <span class="row-label">Force relay</span>
+                  <span class="row-note"
+                    >Media goes only through TURN</span
+                  >
+                </span>
+                <input id="ice-force-relay" type="checkbox" role="switch" />
+              </label>
+              <h3 class="settings-group">SERVERS</h3>
+              <form id="ice-form" class="ice-form">
+                <input
+                  id="ice-url"
+                  type="text"
+                  placeholder="stun: or turn: url"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <input
+                  id="ice-username"
+                  type="text"
+                  placeholder="username"
+                  autocomplete="off"
+                />
+                <input
+                  id="ice-credential"
+                  type="text"
+                  placeholder="credential"
+                  autocomplete="off"
+                />
+                <button id="ice-add" class="link-btn" type="submit">add</button>
+              </form>
+              <ul id="ice-servers" class="list"></ul>
+            </section>
+
+            <section class="settings-page" data-page="recordings">
+              <h3 class="settings-group">DEFAULTS</h3>
+              <div class="settings-rows" data-group="recording"></div>
+              <p class="settings-note">
+                Opting out of a recording is honored by the recorder's app; a
+                modified app could ignore it.
+              </p>
+              <h3 class="settings-group">LIBRARY</h3>
+              <div class="row">
+                <span class="row-text">
+                  <span class="row-label">Saved recordings</span>
+                  <span class="row-note"
+                    >Play, rename, export, and delete them</span
+                  >
+                </span>
+                <button
+                  id="open-recordings"
+                  class="link-btn"
+                  type="button"
+                >
+                  open recordings library
+                </button>
+              </div>
+            </section>
+
+            <section class="settings-page" data-page="streaming">
+              <h3 class="settings-group">DESTINATIONS</h3>
+              <p class="settings-note">
+                WHIP endpoints for going live from a call. Studio chooses which
+                of them to use.
+              </p>
+              <div id="settings-streaming" class="settings-streaming"></div>
+            </section>
+
+            <section class="settings-page" data-page="storage">
+              <h3 class="settings-group">USAGE</h3>
+              <div class="settings-rows" data-group="usage"></div>
+              <h3 class="settings-group">DANGER ZONE</h3>
+              <div
+                class="settings-rows danger-zone"
+                data-group="danger"
+              ></div>
+            </section>
+
+            <section class="settings-page" data-page="shortcuts">
+              <h3 class="settings-group">CHAT</h3>
+              <dl id="keys-chat" class="settings-keys"></dl>
+              <h3 class="settings-group">CALL</h3>
+              <dl id="keys-call" class="settings-keys"></dl>
+            </section>
+
+            <section class="settings-page" data-page="about">
+              <h3 class="settings-group">APP</h3>
+              <div class="row">
+                <span class="row-text">
+                  <span class="row-label"
+                    >xxii.chat <span id="version-text">v…</span></span
+                  >
+                  <span id="version-state" class="row-note" role="status"
+                    >Version unknown</span
+                  >
+                </span>
+                <button id="version-btn" class="link-btn" type="button">
+                  check now
+                </button>
+              </div>
+              <div class="row">
+                <span class="row-text">
+                  <span class="row-label">Install</span>
+                  <span id="install-state" class="row-note"></span>
+                </span>
+                <button
+                  id="install-btn"
+                  class="link-btn hidden"
+                  type="button"
+                >
+                  install app
+                </button>
+              </div>
+              <h3 class="settings-group">CONNECTION</h3>
+              <div class="row">
+                <span class="row-label">Server</span>
+                <span id="connection-status" class="status offline"
+                  >offline</span
+                >
+              </div>
+              <div class="row">
+                <span class="row-label">Mesh</span>
+                <span id="mesh-status" class="row-value"></span>
+              </div>
+              <div class="row">
+                <span class="row-label">This tab</span>
+                <span id="tab-role" class="row-value"></span>
+              </div>
+              <div class="row">
+                <span class="row-label">Peers</span>
+                <span id="peers-linked" class="row-value"></span>
+              </div>
+              <h3 class="settings-group">DIAGNOSTICS</h3>
+              <div class="row">
+                <span class="row-text">
+                  <span class="row-label">Log</span>
+                  <span class="row-note"
+                    >Events of this tab, kept until it closes</span
+                  >
+                </span>
+                <span class="row-field">
+                  <button id="log-copy" class="link-btn" type="button">
+                    copy
+                  </button>
+                  <button id="clear-log-btn" class="link-btn" type="button">
+                    clear
+                  </button>
+                </span>
+              </div>
+              <pre id="output" class="log"></pre>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="recordings-view"
+        class="recordings-view"
+        aria-label="Recordings"
+      >
+        <header class="settings-header">
+          <h2 class="settings-title">Recordings</h2>
+          <button id="recordings-capture" class="link-btn" type="button">
+            new capture
+          </button>
+          <button
+            id="recordings-close"
+            class="link-btn"
+            type="button"
+            title="Close recordings (Esc)"
+            aria-label="Close recordings"
+          >
+            ×
+          </button>
+        </header>
+        <div class="recordings-body">
+          <p class="recordings-storage muted"></p>
+          <p class="recordings-status muted hidden" role="status"></p>
+          <p class="recordings-repair muted" role="status" hidden></p>
+          <video
+            class="recordings-player hidden"
+            controls
+            playsinline
+            preload="metadata"
+          ></video>
+          <ul class="recordings-list list"></ul>
+        </div>
+      </section>
+
       <aside id="panel" class="panel">
         <header class="panel-header">
           <span id="panel-title" class="panel-title">Members</span>
@@ -352,74 +695,6 @@
         </section>
         <section class="panel-body" data-panel="members">
           <ul id="member-list" class="member-list"></ul>
-        </section>
-        <section class="panel-body" data-panel="log">
-          <div class="panel-tools">
-            <button id="clear-log-btn" class="link-btn">clear</button>
-          </div>
-          <pre id="output" class="log"></pre>
-        </section>
-        <section class="panel-body" data-panel="calls">
-          <section class="section">
-            <h3 class="small">DEVICES</h3>
-            <div class="call-device-fields"></div>
-            <button class="test-speaker link-btn" type="button">
-              test speaker
-            </button>
-          </section>
-          <section class="section">
-            <h3 class="small">CALL PREFERENCES</h3>
-            <div class="join-defaults"></div>
-          </section>
-          <section class="section">
-            <h3 class="small">NETWORK</h3>
-            <label class="check">
-              <input id="ice-public-stun" type="checkbox" />
-              <span>Public STUN, these servers see your IP address</span>
-            </label>
-            <label class="check">
-              <input id="ice-force-relay" type="checkbox" />
-              <span>Force relay, media goes only through TURN</span>
-            </label>
-          </section>
-          <section class="section">
-            <h3 class="small">SERVERS</h3>
-            <form id="ice-form" class="ice-form">
-              <input
-                id="ice-url"
-                type="text"
-                placeholder="stun: or turn: url"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <input
-                id="ice-username"
-                type="text"
-                placeholder="username"
-                autocomplete="off"
-              />
-              <input
-                id="ice-credential"
-                type="text"
-                placeholder="credential"
-                autocomplete="off"
-              />
-              <button id="ice-add" class="link-btn" type="submit">add</button>
-            </form>
-            <ul id="ice-servers" class="list"></ul>
-          </section>
-          <section class="section">
-            <h3 class="small">RECORDINGS</h3>
-            <div class="record-defaults">
-              <button class="record-folder link-btn" type="button">
-                choose folder
-              </button>
-            </div>
-            <p class="settings-note">
-              Opting out of a recording is honored by the recorder's app; a
-              modified app could ignore it.
-            </p>
-          </section>
         </section>
         <section class="panel-body capture-panel" data-panel="capture"></section>
         <section class="panel-body" data-panel="recordings">
@@ -447,7 +722,7 @@
     >
       <input
         type="text"
-        placeholder="Jump to a chat, feed or contact"
+        placeholder="Jump to a chat, feed, contact or command"
         autocomplete="off"
         spellcheck="false"
         aria-label="Chat name"
@@ -510,9 +785,35 @@
       aria-live="polite"
     ></div>
 
+    <template id="confirm-template">
+      <dialog class="confirm">
+        <form method="dialog">
+          <h2 class="confirm-title"></h2>
+          <div class="confirm-body"></div>
+          <div class="confirm-actions">
+            <button
+              class="link-btn confirm-cancel"
+              type="submit"
+              value="cancel"
+              autofocus
+            >
+              cancel
+            </button>
+            <button
+              class="link-btn confirm-action"
+              type="submit"
+              value="confirm"
+            ></button>
+          </div>
+        </form>
+      </dialog>
+    </template>
+
     <template id="recording-item-template">
       <li class="recording-item">
-        <img alt="" loading="lazy" />
+        <div class="recording-poster">
+          <img alt="" loading="lazy" />
+        </div>
         <div class="recording-info">
           <strong class="recording-title"></strong>
           <p class="recording-chat muted"></p>

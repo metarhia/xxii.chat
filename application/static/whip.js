@@ -1,6 +1,7 @@
 import { readJson, writeJson } from './view.js';
 
 const STORAGE_KEY = 'xxii:destinations';
+const DESTINATIONS_EVENT = 'xxii:destinations-changed';
 const NAME_LENGTH = 48;
 const MIN_BITRATE = 1000000;
 const MAX_BITRATE = 20000000;
@@ -590,7 +591,8 @@ class WhipStream {
   }
 }
 
-export { STORAGE_KEY, NAME_LENGTH, DEFAULT_BITRATE, MAX_ENABLED };
+export { STORAGE_KEY, DESTINATIONS_EVENT, NAME_LENGTH };
+export { DEFAULT_BITRATE, MAX_ENABLED };
 export { MIN_BITRATE, MAX_BITRATE };
 export { WhipError, WhipStream };
 export { isEndpointUrl, problemOf, destinationOf, destinationsOf };

@@ -1118,6 +1118,7 @@ export { readLinkStats, LinkMediaPolicy };
 export { createSpeakerState, selectSpeaker, CallLevels };
 
 export {
+  DEVICES_KEY,
   readDevices,
   writeDevices,
   canSink,

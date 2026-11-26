@@ -1,6 +1,7 @@
 import { generateUUID } from './metautil.js';
 import { MAX_ENABLED, DEFAULT_BITRATE } from './whip.js';
 import { WhipStream, problemOf, destinationOf } from './whip.js';
+import { STORAGE_KEY, DESTINATIONS_EVENT } from './whip.js';
 import { readDestinations, writeDestinations } from './whip.js';
 import { createDestinationRow, fillEditor } from './stream-panel.js';
 import { readEditor } from './stream-panel.js';
@@ -25,10 +26,20 @@ class Streaming {
   #isFlagged = false;
   #isHolding = false;
   #isDisposed = false;
+  #reload = () => {
+    if (this.isActive || this.#isDisposed) return;
+    this.destinations = readDestinations();
+    this.#stage.recording?.paint();
+  };
+  #onStorage = ({ key }) => {
+    if (key === STORAGE_KEY || key === null) this.#reload();
+  };
 
   constructor(stage) {
     this.#stage = stage;
     this.destinations = readDestinations();
+    window.addEventListener(DESTINATIONS_EVENT, this.#reload);
+    window.addEventListener('storage', this.#onStorage);
   }
 
   get isActive() {
@@ -94,6 +105,8 @@ class Streaming {
 
   dispose() {
     this.#isDisposed = true;
+    window.removeEventListener(DESTINATIONS_EVENT, this.#reload);
+    window.removeEventListener('storage', this.#onStorage);
     for (const stream of this.#streams.values()) {
       stream.stop().catch((error) => this.#stage.hooks.fail(error));
     }

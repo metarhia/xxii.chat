@@ -129,5 +129,5 @@ const readEditor = (editor) => {
   };
 };
 
-export { createDestinationControls, createDestinationRow };
+export { createDestinationControls, createDestinationRow, createEditor };
 export { fillEditor, readEditor };

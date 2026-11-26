@@ -27,7 +27,7 @@ import { parseMarkdown, plainOf, plainInline } from './markdown.js';
 import { hasOpenFence } from './markdown.js';
 import { renderMarkdown, renderBlock, formatKey } from './markdown-view.js';
 import { CallPreferences } from './call-preferences.js';
-import { isIceUrl, readIce, writeIce, buildIce } from './ice.js';
+import { ICE_KEY, isIceUrl, readIce, writeIce, buildIce } from './ice.js';
 import { Press, Menu, Lightbox, Switcher } from './overlays.js';
 import { Replica, Uplink } from './globalstorage.js';
 import { generateUUID } from './metautil.js';
@@ -36,15 +36,18 @@ import { Application } from './application.js';
 import { CallSession } from './call.js';
 import { requestCallNotifications } from './notifications.js';
 import { CallStage, RingAlert } from './stage.js';
-import { Recordings } from './recordings.js';
+import { Recordings, countRecordings } from './recordings.js';
+import { resetSettings } from './settings-reset.js';
 import { SoloCapture } from './capture.js';
+import { SettingsView } from './settings.js';
+import { MessageNotices } from './message-notice.js';
+import { RecordingsScreen } from './recordings-screen.js';
+import { ProfileRow } from './profile-row.js';
+import { linkOf, summaryOf } from './settings-about.js';
 
 const PANELS = {
   pins: 'Pinned',
   members: 'Members',
-  log: 'Log',
-  calls: 'Calls',
-  recordings: 'Recordings',
   capture: 'Capture',
 };
 
@@ -52,7 +55,35 @@ const SHORTCUTS = {
   f: (app) => app.toggleSearch(),
   p: (app) => app.togglePanel('pins'),
   k: (app) => app.toggleSwitcher(),
+  ',': (app) => app.openSettings(''),
 };
+
+const SCREEN_SHORTCUTS = { k: SHORTCUTS.k };
+
+const COMMANDS = {
+  settings: {
+    icon: '⚙',
+    label: 'Settings',
+    run: (app) => app.openSettings(''),
+  },
+  shortcuts: {
+    icon: '⌨',
+    label: 'Keyboard shortcuts',
+    run: (app) => app.openSettings('shortcuts'),
+  },
+  recordings: {
+    icon: '▶',
+    label: 'Recordings',
+    run: (app) => app.openLibrary(),
+  },
+  capture: {
+    icon: '⏺',
+    label: 'New capture',
+    run: (app) => app.openCapture(''),
+  },
+};
+
+const STATUS_OF = { server: 'online', p2p: 'away', offline: 'offline' };
 
 const NAV_ACTIONS = {
   add: (app, { folder }) => app.addToFolder(folder),
@@ -91,6 +122,24 @@ const readMessageLink = () => {
   const message = params.get('message') ?? '';
   if (chat === '' || message === '') return null;
   return { chat, message };
+};
+
+const commandEntries = () => {
+  const canRecord = typeof MediaRecorder === 'function';
+  const entries = [];
+  for (const command in COMMANDS) {
+    if (command === 'capture' && !canRecord) continue;
+    const { icon, label } = COMMANDS[command];
+    const kind = 'command';
+    const id = command;
+    entries.push({ id, command, kind, icon, label, unread: 0, time: 0 });
+  }
+  return entries;
+};
+
+const readSettingsLink = () => {
+  const params = new URLSearchParams(location.search);
+  return params.has('settings') ? params.get('settings') : null;
 };
 
 const fragmentOf = (id) => {
@@ -164,6 +213,9 @@ const LAYERS = {
   selection: (app) => app.leaveThread(),
   picking: (app) => app.leavePicking(),
   article: (app) => app.leaveArticle(),
+  settings: (app) => app.leaveSettings(),
+  recordings: (app) => app.leaveRecordings(),
+  'settings-section': (app) => app.settings.showList(),
 };
 
 const LIGHTBOX_KEYS = { ArrowLeft: -1, ArrowRight: 1 };
@@ -552,6 +604,10 @@ class ChatApplication extends Application {
     this.hasConnected = false;
     this.isRenderScheduled = false;
     this.started = new Promise((resolve) => this.on('ready', resolve));
+    this.settings = null;
+    this.recordingsView = null;
+    this.viewScroll = 0;
+    this.notified = '';
     this.callStage = null;
     this.callSession = null;
     this.callToken = '';
@@ -575,6 +631,14 @@ class ChatApplication extends Application {
       },
     });
     this.replica = new Replica({ validate });
+    this.notices = new MessageNotices({
+      me: () => this.peerId,
+      names: {
+        nick: (peer) => this.nickMap().get(peer) ?? shortId(peer),
+        chat: (chat) => this.chatName(chat),
+      },
+    });
+    this.notices.watch(this.replica);
     this.uplink = null;
     this.directs = new Map();
     this.mesh = new Mesh(this);
@@ -596,21 +660,30 @@ class ChatApplication extends Application {
     const isSidebarHidden = readSetting(SIDEBAR_KEY, '') === 'hidden';
     this.app.classList.toggle('sidebar-hidden', isSidebarHidden);
     this.usernameInput.value = this.username;
+    const view = document.getElementById('settings-view');
     this.preferences = new CallPreferences(
-      document.querySelector('.panel-body[data-panel="calls"]'),
+      view,
       () => this.callStage,
       (text) => this.showNotification(text, 'warning'),
     );
-    this.recordings = new Recordings(
-      document.querySelector('.panel-body[data-panel="recordings"]'),
-      () => this.refreshRecordings(),
-    );
+    this.settings = new SettingsView(view, this.settingsHooks());
+    const library = document.getElementById('recordings-view');
+    this.recordingsView = new RecordingsScreen(library, {
+      capture: () => this.openCapture(''),
+      close: () => this.closeRecordings(),
+    });
+    this.recordings = new Recordings(library, () => this.refreshRecordings());
     this.recordings.repair().then(() => this.refreshRecordings());
     this.renderIce();
     this.fillPalette();
     this.restoreDraft();
     this.mesh.start();
     this.render();
+    this.updateInterface();
+    const section = readSettingsLink();
+    if (section === null) return;
+    history.replaceState(history.state, '', location.pathname);
+    this.openSettings(section);
   }
 
   getElements() {
@@ -618,17 +691,13 @@ class ChatApplication extends Application {
     this.app = document.querySelector('.app');
     this.sidebar = byId('sidebar');
     this.menuBtn = byId('menu-btn');
-    this.installBtn = byId('install-btn');
     this.versionBtn = byId('version-btn');
-    this.clearMessagesBtn = byId('clear-messages-btn');
-    this.callsBtn = byId('calls-btn');
+    this.profileRow = new ProfileRow();
+    this.profileBtn = byId('profile-btn');
+    this.settingsBtn = byId('settings-btn');
     this.recordingsBtn = byId('recordings-btn');
-    this.captureBtn = byId('capture-btn');
     this.directCaptureBtn = byId('direct-capture-btn');
     this.capturePanel = document.querySelector('.capture-panel');
-    this.clearLogBtn = byId('clear-log-btn');
-    this.connectionStatus = byId('connection-status');
-    this.meshStatus = byId('mesh-status');
     this.peerCount = byId('peer-count');
     this.usernameInput = byId('username-input');
     this.contactList = byId('contact-list');
@@ -652,7 +721,6 @@ class ChatApplication extends Application {
     this.searchBtn = byId('search-btn');
     this.pinsBtn = byId('pins-btn');
     this.membersBtn = byId('members-btn');
-    this.logBtn = byId('log-btn');
     this.searchBar = byId('search-bar');
     this.searchInput = byId('search-input');
     this.chatView = byId('chat-view');
@@ -758,20 +826,15 @@ class ChatApplication extends Application {
     };
 
     this.menuBtn.onclick = () => this.toggleSidebar();
-    this.installBtn.onclick = () => this.install();
-    this.versionBtn.onclick = () => this.handleVersionClick();
-    this.clearMessagesBtn.onclick = () => this.clearDatabase();
-    this.clearLogBtn.onclick = () => this.logger.clear();
+    this.profileBtn.onclick = () => this.openSettings('profile');
+    this.settingsBtn.onclick = () => this.openSettings('');
     document.getElementById('close-call-chat').onclick = () =>
       this.callStage?.closeSheet();
     this.callBtn.onclick = () => beginCall(this);
     this.searchBtn.onclick = () => this.toggleSearch();
     this.pinsBtn.onclick = () => this.togglePanel('pins');
     this.membersBtn.onclick = () => this.togglePanel('members');
-    this.logBtn.onclick = () => this.togglePanel('log');
-    this.callsBtn.onclick = () => this.togglePanel('calls');
-    this.recordingsBtn.onclick = () => this.togglePanel('recordings');
-    this.captureBtn.onclick = () => this.openCapture('');
+    this.recordingsBtn.onclick = () => this.openLibrary();
     this.directCaptureBtn.onclick = () => this.openCapture(this.chat);
     this.icePublicStun.addEventListener('change', () => this.saveIceFlags());
     this.iceForceRelay.addEventListener('change', () => this.saveIceFlags());
@@ -888,6 +951,7 @@ class ChatApplication extends Application {
       if (button) this.insertEmoji(button.textContent);
     });
     this.usernameInput.addEventListener('blur', () => this.syncUsername());
+    this.usernameInput.addEventListener('change', () => this.syncUsername());
     this.usernameInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') this.syncUsername();
     });
@@ -940,6 +1004,9 @@ class ChatApplication extends Application {
     window.addEventListener('resize', () => this.closeMenu());
     window.addEventListener('popstate', () => this.handlePopState());
     window.addEventListener('storage', (event) => this.handleStorage(event));
+    navigator.serviceWorker?.addEventListener('message', (event) =>
+      this.handleWorkerMessage(event.data),
+    );
     window.addEventListener('beforeunload', () => this.syncUsername());
     window.addEventListener('pagehide', () => {
       const session = this.callSession;
@@ -995,6 +1062,7 @@ class ChatApplication extends Application {
     const direct = { pair, peer, replica, uplink: null, ready: null };
     replica.on('log', (event) => this.showChanges(event));
     replica.on('clear', () => this.scheduleRender());
+    this.notices.watch(replica);
     this.directs.set(pair, direct);
     direct.ready = this.connectDirect(direct);
     this.scheduleRender();
@@ -1112,6 +1180,11 @@ class ChatApplication extends Application {
   }
 
   handleStorage({ key }) {
+    if (this.settings.isOpen) this.settings.sync(key);
+    if (key === ICE_KEY) {
+      this.iceCache = null;
+      this.renderIce();
+    }
     if (key !== READ_KEY) return;
     this.readAt = readMap(READ_KEY);
     this.scheduleRender();
@@ -2102,6 +2175,106 @@ class ChatApplication extends Application {
     if (isOpen) this.closeLayer('sidebar');
   }
 
+  settingsHooks() {
+    return {
+      pushLayer: (name) => {
+        if (!this.layers.includes(name)) this.pushLayer(name);
+      },
+      closeLayer: (name) => this.closeLayer(name),
+      close: () => this.closeSettings(),
+      isNarrow: () => isNarrow(),
+      devices: () => this.preferences.refresh(),
+      preview: (isOn) => this.preferences.setPreview(isOn),
+      peer: () => this.peerId,
+      copy: (text, notice = 'Copied') => this.writeClipboard(text, notice),
+      library: () => this.openLibrary(),
+      about: () => this.aboutState(),
+      versionAction: () => this.handleVersionClick(),
+      install: () => this.install(),
+      clear: () => this.clearDatabase(),
+      delete: () => this.deleteRecordings(),
+      reset: () => this.resetSettings(),
+      countRecordings: () => countRecordings(navigator.storage),
+      isRecording: () => this.isRecording(),
+      isOffline: () => !navigator.onLine || !this.connected,
+      clearLog: () => this.logger.clear(),
+    };
+  }
+
+  openSettings(section = '') {
+    this.closeSidebar();
+    this.closePalette();
+    if (this.callStage?.mode === 'call') this.callStage.collapse();
+    this.closeRecordings();
+    this.afterPop(() => this.showSettings(section));
+  }
+
+  showSettings(section) {
+    if (!this.settings.isOpen) {
+      this.closeMenu();
+      this.viewScroll = this.chatMessages.scrollTop;
+    }
+    this.settings.open(section);
+  }
+
+  closeSettings() {
+    if (this.settings.isOpen) this.closeLayer('settings');
+  }
+
+  leaveSettings() {
+    this.popLayer('settings-section');
+    this.settings.hide();
+    this.chatMessages.scrollTop = this.viewScroll;
+    if (!matchMedia(COARSE).matches) this.messageInput.focus();
+  }
+
+  openLibrary() {
+    this.closeSidebar();
+    this.closePalette();
+    if (this.callStage?.mode === 'call') this.callStage.collapse();
+    this.closeSettings();
+    this.afterPop(() => this.showRecordings());
+  }
+
+  showRecordings() {
+    if (!this.recordingsView.isOpen) {
+      this.closeMenu();
+      this.viewScroll = this.chatMessages.scrollTop;
+      this.recordingsView.open();
+      this.pushLayer('recordings');
+    }
+    this.renderRecordingsState();
+    this.refreshRecordings();
+  }
+
+  closeRecordings() {
+    if (this.recordingsView?.isOpen) this.closeLayer('recordings');
+  }
+
+  leaveRecordings() {
+    this.recordingsView.hide();
+    this.recordings.close();
+    this.renderRecordingsState();
+    this.chatMessages.scrollTop = this.viewScroll;
+    if (!matchMedia(COARSE).matches) this.messageInput.focus();
+  }
+
+  renderRecordingsState() {
+    const isOpen = Boolean(this.recordingsView?.isOpen);
+    const isBusy = Boolean(this.callOpening || this.callSession);
+    const isRecording = this.isRecording();
+    this.recordingsView?.paint(isBusy);
+    this.recordingsBtn.classList.toggle('active', isOpen);
+    this.recordingsBtn.classList.toggle('recording', isRecording);
+    this.settings?.refresh();
+  }
+
+  isRecording() {
+    return Boolean(
+      this.capture?.isActive || this.callStage?.recording?.isActive,
+    );
+  }
+
   viewImage(id) {
     const images = this.chatImages();
     const index = images.findIndex((file) => file.id === id);
@@ -2123,7 +2296,7 @@ class ChatApplication extends Application {
 
   toggleSwitcher() {
     if (this.switcher.isOpen) return void this.closeLayer('switcher');
-    this.switcher.open(this.switchEntries());
+    this.switcher.open(this.switchEntries().concat(commandEntries()));
     this.updateBackdrop();
     this.pushLayer('switcher');
   }
@@ -2167,6 +2340,9 @@ class ChatApplication extends Application {
 
   selectEntry(entry) {
     this.closeLayer('switcher');
+    if (entry.command) {
+      return void this.afterPop(() => COMMANDS[entry.command].run(this));
+    }
     if (entry.peer) this.selectDirect(entry.peer);
     else this.selectChat(entry.id);
   }
@@ -2198,9 +2374,6 @@ class ChatApplication extends Application {
     this.app.dataset.panel = this.panel;
     this.pinsBtn.classList.toggle('active', this.panel === 'pins');
     this.membersBtn.classList.toggle('active', this.panel === 'members');
-    this.logBtn.classList.toggle('active', this.panel === 'log');
-    this.callsBtn.classList.toggle('active', this.panel === 'calls');
-    this.recordingsBtn.classList.toggle('active', this.panel === 'recordings');
     this.renderCaptureButtons();
     if (!this.panel) return;
     this.panelTitle.textContent = PANELS[this.panel];
@@ -2271,19 +2444,13 @@ class ChatApplication extends Application {
   showPanel(name) {
     if (name !== 'capture' && !this.releaseCapture()) return;
     const isOpen = this.panel !== '';
-    if (this.panel === 'recordings' && name !== 'recordings') {
-      this.recordings.close();
-    }
     this.panel = name;
-    if (name === 'calls') this.preferences.refresh();
-    if (name === 'recordings') this.refreshRecordings();
     this.renderPanel();
     if (!isOpen && isNarrow()) this.pushLayer('panel');
   }
 
   hidePanel(confirm = true) {
     if (!this.releaseCapture(confirm)) return false;
-    if (this.panel === 'recordings') this.recordings.close();
     this.panel = '';
     this.renderPanel();
     return true;
@@ -2295,14 +2462,11 @@ class ChatApplication extends Application {
     const direct = isPair(this.chat);
     const title = inCall ? 'Use the record control in your call' : '';
     const captureChat = this.capture?.context().chat;
-    this.captureBtn.classList.toggle('hidden', !supported);
     this.directCaptureBtn.classList.toggle('hidden', !supported || !direct);
-    this.captureBtn.classList.toggle('active', captureChat === '');
     this.directCaptureBtn.classList.toggle('active', captureChat === this.chat);
-    for (const button of [this.captureBtn, this.directCaptureBtn]) {
-      button.disabled = inCall;
-      button.title = title;
-    }
+    this.directCaptureBtn.disabled = inCall;
+    this.directCaptureBtn.title = title;
+    this.renderRecordingsState();
   }
 
   openCapture(chat) {
@@ -2310,6 +2474,10 @@ class ChatApplication extends Application {
     const isBusy = Boolean(this.callOpening || this.callSession);
     const isGroup = Boolean(chat && !isPair(chat));
     if (!canRecord || isBusy || isGroup) return;
+    if (this.settings.isOpen) {
+      this.closeSettings();
+      return void this.afterPop(() => this.openCapture(chat));
+    }
     if (this.capture?.context().chat === chat) return void this.closePanel();
     if (!this.releaseCapture()) return;
     const context = {
@@ -2323,6 +2491,7 @@ class ChatApplication extends Application {
       notice: (text) => this.showNotification(text, 'warning'),
       fail: (error) => this.report(error),
       saved: (info, meta) => this.recordCapture(info, meta),
+      state: () => this.renderRecordingsState(),
     };
     this.capture = new SoloCapture(
       this.capturePanel,
@@ -2340,12 +2509,13 @@ class ChatApplication extends Application {
     const text = 'You are recording. Stop the recording and close Capture?';
     if (confirm && capture.isActive && !window.confirm(text)) return false;
     this.capture = null;
+    this.renderRecordingsState();
     capture.dispose().catch((error) => this.report(error));
     return true;
   }
 
   refreshRecordings() {
-    if (this.panel === 'recordings') {
+    if (this.recordingsView.isOpen) {
       this.recordings.refresh().catch((error) => this.report(error));
     }
   }
@@ -2814,12 +2984,14 @@ class ChatApplication extends Application {
     if (event.isComposing) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (this.panel === 'recordings' || this.panel === 'capture') {
-        return void this.closePanel();
-      }
+      const isCapture = this.panel === 'capture';
+      if (isCapture && !this.settings.isOpen) return void this.closePanel();
       return void this.closeTop();
     }
     if (event.target.closest?.('.recordings-player')) return;
+    if (this.settings.isOpen || this.recordingsView.isOpen) {
+      return void this.handleSettingsKey(event);
+    }
     if (this.lightbox.isOpen) {
       const step = LIGHTBOX_KEYS[event.key];
       if (step) this.lightbox.step(step);
@@ -2864,6 +3036,14 @@ class ChatApplication extends Application {
     shortcut(this);
   }
 
+  handleSettingsKey(event) {
+    const isCommand = event.ctrlKey || event.metaKey;
+    const shortcut = isCommand && SCREEN_SHORTCUTS[event.key.toLowerCase()];
+    if (!shortcut) return;
+    event.preventDefault();
+    shortcut(this);
+  }
+
   focusComposer(event) {
     const isPrintable = event.key.length === 1 && event.key !== ' ';
     const isOverlay = this.switcher.isOpen || this.menu.isOpen;
@@ -2876,6 +3056,11 @@ class ChatApplication extends Application {
     if (this.menu.isOpen) return void this.closeMenu();
     if (this.lightbox.isOpen) return void this.closeLayer('lightbox');
     if (this.switcher.isOpen) return void this.closeLayer('switcher');
+    if (this.settings.isOpen) return void this.closeSettings();
+    if (this.recordingsView.isOpen) {
+      if (this.recordings.dismiss()) return;
+      return void this.closeRecordings();
+    }
     const isPaletteOpen = !this.palette.classList.contains('hidden');
     if (isPaletteOpen) return void this.closePalette();
     const isTopicOpen = !this.topicForm.classList.contains('hidden');
@@ -2894,6 +3079,8 @@ class ChatApplication extends Application {
   }
 
   selectChat(id) {
+    this.closeSettings();
+    this.closeRecordings();
     const stage = this.callStage;
     const other = stage?.mode === 'call' && id !== stage.chat;
     if (other && !this.callHold) stage.collapse();
@@ -3103,6 +3290,7 @@ class ChatApplication extends Application {
     this.saveAuthor();
     this.announce();
     this.scheduleRender();
+    this.updateInterface();
     if (this.syncTimeout) clearTimeout(this.syncTimeout);
     this.syncTimeout = setTimeout(() => {
       const { username } = this;
@@ -3119,6 +3307,7 @@ class ChatApplication extends Application {
     writeSetting(NICK_KEY, username);
     this.announce();
     this.scheduleRender();
+    this.updateInterface();
     this.logger.log('Username updated from other tab:', username);
   }
 
@@ -3133,7 +3322,8 @@ class ChatApplication extends Application {
     this.syncUsername();
     if (this.username) return true;
     this.showNotification('Please enter your nick', 'warning');
-    this.usernameInput.focus();
+    this.openSettings('profile');
+    this.afterPop(() => this.usernameInput.focus());
     return false;
   }
 
@@ -3397,6 +3587,15 @@ class ChatApplication extends Application {
     this.openLink({ chat, message: original });
   }
 
+  handleWorkerMessage(data) {
+    if (data?.type !== 'xxii:open') return;
+    const { chat, message } = data;
+    if (typeof chat !== 'string' || typeof message !== 'string') return;
+    this.closeSettings();
+    this.closeRecordings();
+    this.openLink({ chat, message });
+  }
+
   openLink({ chat, message }) {
     const peer = this.peerOf(chat);
     if (isPair(chat) && !peer) {
@@ -3645,7 +3844,9 @@ class ChatApplication extends Application {
 
   afterPop(run) {
     if (this.pops === 0) return void run();
-    window.addEventListener('popstate', () => run(), { once: true });
+    window.addEventListener('popstate', () => this.afterPop(run), {
+      once: true,
+    });
   }
 
   copyPicked() {
@@ -3671,16 +3872,30 @@ class ChatApplication extends Application {
     this.scheduleRender();
   }
 
+  aboutState() {
+    return {
+      version: this.version,
+      next: this.nextVersion,
+      checkedAt: this.checkedAt,
+      canInstall: this.prompt !== null,
+      connected: this.connected,
+      online: this.online,
+      leader: this.mesh?.isLeader === true,
+      linked: this.mesh?.linked ?? 0,
+    };
+  }
+
   updateInterface() {
-    const linked = this.mesh?.linked ?? 0;
-    let link = 'offline';
-    if (this.connected) link = 'server';
-    else if (linked > 0) link = 'p2p';
-    this.connectionStatus.textContent = link;
-    this.connectionStatus.className = `status ${link}`;
-    const isLeader = this.mesh?.isLeader === true;
-    const mesh = isLeader ? `rtc: ${linked} linked` : 'rtc: via leader tab';
-    this.meshStatus.textContent = this.online ? mesh : 'network offline';
+    const info = this.aboutState();
+    const nick = this.username;
+    const status = STATUS_OF[linkOf(info)];
+    this.profileRow.paint({
+      nick,
+      peer: this.peerId,
+      status,
+      text: summaryOf(info),
+    });
+    this.settings?.refresh();
   }
 
   showStatus(connected) {
@@ -3699,13 +3914,12 @@ class ChatApplication extends Application {
     this.showNotification('Request failed', 'error');
   }
 
-  showVersion({ version, next }) {
-    const button = this.versionBtn;
-    button.textContent = next ? `v${version} → v${next}` : `v${version}`;
-    button.classList.toggle('active', next !== '');
-    button.title = next
-      ? 'Update is ready, restarts when idle; click to restart now'
-      : 'Updates install automatically; click to check now';
+  showVersion({ next }) {
+    this.profileRow.markUpdate(next !== '');
+    this.settings?.refresh();
+    if (!next || next === this.notified) return;
+    this.notified = next;
+    this.showNotification(`Version ${next} is ready · restart`);
   }
 
   handleVersionClick() {
@@ -3723,6 +3937,7 @@ class ChatApplication extends Application {
       this.showNotification(text);
     } finally {
       this.versionBtn.disabled = false;
+      this.settings.refresh();
     }
   }
 
@@ -3738,46 +3953,76 @@ class ChatApplication extends Application {
   }
 
   async clearDatabase() {
-    const button = this.clearMessagesBtn;
     this.logger.log('Database clear requested...');
-    button.disabled = true;
-    button.textContent = 'clearing...';
     try {
       await this.api.chat.clear();
       this.logger.log('Database cleared successfully');
-      this.showNotification('Database cleared successfully');
+      this.showNotification('Messages and files cleared');
     } catch (error) {
       this.logger.log('Database clear failed:', error.message);
-      this.showNotification('Database clear failed', 'error');
-    } finally {
-      button.disabled = false;
-      button.textContent = 'clear database';
+      this.showNotification('Could not clear messages and files', 'error');
     }
+  }
+
+  async deleteRecordings() {
+    const storage = navigator.storage;
+    if (typeof storage?.getDirectory !== 'function') {
+      return void this.showNotification('Recordings are unavailable', 'error');
+    }
+    try {
+      const { removed, failed } = await this.recordings.removeAll(storage);
+      this.logger.log(`Recordings deleted: ${removed}, failed: ${failed}`);
+      const text = `Deleted ${plural(removed, 'recording', 'recordings')}`;
+      if (failed === 0) this.showNotification(text);
+      else this.showNotification(`${text}, ${failed} failed`, 'warning');
+    } catch (error) {
+      this.logger.log('Recordings delete failed:', error.message);
+      this.showNotification('Could not delete recordings', 'error');
+    }
+    this.refreshRecordings();
+  }
+
+  resetSettings() {
+    try {
+      resetSettings(localStorage);
+    } catch {
+      return void this.showNotification('Could not reset settings', 'error');
+    }
+    this.iceCache = null;
+    this.renderIce();
+    this.callStage?.volume?.forget();
+    window.dispatchEvent(new window.StorageEvent('storage', { key: null }));
+    this.logger.log('Settings reset');
+    this.showNotification('Settings reset');
   }
 
   showInstallButton(visible = true) {
     const text = 'App installed successfully!';
-    if (!visible) this.showNotification(text);
-    this.installBtn.classList.toggle('hidden', !visible);
+    if (!visible) {
+      this.prompt = null;
+      this.showNotification(text);
+    }
+    this.settings.refresh();
   }
 
   ensureCallStage() {
     if (this.callStage) return this.callStage;
     const hooks = {
       preferences: this.preferences,
-      closeSidePanel: () => this.closePanel(),
-      settings: () => {
-        this.showPanel('calls');
-        this.panelCloseBtn.focus();
-      },
-      recordings: () => {
-        this.showPanel('recordings');
-        this.panelCloseBtn.focus();
-      },
+      settings: () => this.openSettings('media'),
+      recordings: () => this.openLibrary(),
+      state: () => this.renderRecordingsState(),
       pushLayer: (name) => {
-        if (!this.layers.includes(name)) this.pushLayer(name);
+        this.afterPop(() => {
+          if (!this.layers.includes(name)) this.pushLayer(name);
+        });
       },
       popLayer: (name) => this.popLayer(name),
+      mounted: (mode) => {
+        if (mode === 'mini') return;
+        this.closeSettings();
+        this.closeRecordings();
+      },
       nick: () => this.username,
       hasNick: () => this.username !== '',
       saveNick: (nick) => {
@@ -3803,6 +4048,7 @@ class ChatApplication extends Application {
       ready: () => this.linkReady ?? Promise.resolve(),
       closed: () => {
         this.callSession = null;
+        this.renderRecordingsState();
       },
       leave: () => this.closeCall(),
       isText: (element) => isEditable(element),
@@ -4136,6 +4382,7 @@ class ChatApplication extends Application {
     const session = new CallSession(options);
     this.ensureCallStage().attach(session, token, camera);
     this.callSession = session;
+    this.renderRecordingsState();
     return session;
   }
 
