@@ -15,6 +15,7 @@ import { readAsset } from './studio-storage.js';
 import { withStudioDirectory, addAsset } from './studio-storage.js';
 import { deleteAsset } from './studio-storage.js';
 import { createDestinationControls } from './stream-panel.js';
+import { createSideBar, createSideBody } from './call-side.js';
 import { createSceneControls, createSceneEditor } from './studio-panel.js';
 import { createBrandControls, createAssetControls } from './studio-panel.js';
 import { createSceneRow, createAssetRow, paintValues } from './studio-panel.js';
@@ -93,12 +94,6 @@ const createStudioPanel = () => {
   const panel = document.createElement('aside');
   panel.className = 'call-studio';
   panel.setAttribute('aria-label', 'Studio');
-  const head = document.createElement('div');
-  head.className = 'record-head';
-  const title = document.createElement('p');
-  title.className = 'chat-title';
-  title.textContent = 'Studio';
-  head.append(title, createButton('studio', 'close'));
   const preview = document.createElement('div');
   preview.className = 'studio-preview';
   const note = document.createElement('p');
@@ -112,8 +107,9 @@ const createStudioPanel = () => {
   permission.textContent = 'Only hosts can move people';
   const stageLists = document.createElement('div');
   stageLists.className = 'studio-stage-lists';
-  panel.append(
-    head,
+  const live = createButton('go-live', 'Go live');
+  live.classList.add('stream-live');
+  const body = createSideBody(
     createSwitch('enabled', 'Enable Studio'),
     preview,
     note,
@@ -128,6 +124,7 @@ const createStudioPanel = () => {
     createBrandControls(),
     createAssetControls(),
   );
+  panel.append(body, createSideBar(live));
   return panel;
 };
 

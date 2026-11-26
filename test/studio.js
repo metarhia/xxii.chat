@@ -476,7 +476,7 @@ test(
     const stopAt = await run(position);
     await click(page, RECORD);
     await wait('return !app.callStage.recording.isActive;');
-    await click(page, '.call-studio [data-action=studio]');
+    await click(page, '.call-tabs-close');
     const url = await run(recordingURL(id));
     assert.match(url, /^\/recordings\/[^/]+\/program\.mp4$/);
     const { frames, ...playbackInfo } = await playRecording(page, url);

@@ -92,22 +92,53 @@
           </form>
         </section>
 
-        <footer class="profile-row">
+        <header class="settings-head">
           <button
-            id="profile-btn"
-            class="profile-main"
+            id="settings-exit"
+            class="settings-exit"
             type="button"
-            aria-label="Profile, offline"
-            title="offline"
+            title="Close settings (Esc)"
           >
+            ‹ Settings
+          </button>
+        </header>
+
+        <nav class="settings-list" aria-label="Settings sections">
+          <button type="button" data-section="profile">Profile</button>
+          <button type="button" data-section="appearance">Appearance</button>
+          <button type="button" data-section="notifications">
+            Notifications
+          </button>
+          <button type="button" data-section="media">Audio &amp; video</button>
+          <button type="button" data-section="network">Network</button>
+          <button type="button" data-section="recordings">Recordings</button>
+          <button type="button" data-section="streaming">Streaming</button>
+          <button type="button" data-section="storage">Storage</button>
+          <button type="button" data-section="shortcuts">
+            Keyboard shortcuts
+          </button>
+          <button type="button" data-section="about">
+            About
+            <span id="about-dot" class="update-dot" hidden>•</span>
+          </button>
+        </nav>
+
+        <footer class="profile-row">
+          <div id="profile-main" class="profile-main" title="offline">
             <span id="profile-avatar" class="profile-avatar" aria-hidden="true"
               >?</span
             >
             <span id="profile-nick" class="profile-nick muted"
               >set your nick</span
             >
-            <span id="profile-dot" class="dot" data-status="offline"></span>
-          </button>
+            <span
+              id="profile-dot"
+              class="dot"
+              data-status="offline"
+              role="img"
+              aria-label="offline"
+            ></span>
+          </div>
           <button
             id="recordings-btn"
             class="icon-btn"
@@ -129,13 +160,6 @@
       </aside>
 
       <main id="chat-view" class="chat-view">
-        <button
-          id="close-call-chat"
-          class="close-call-chat link-btn"
-          type="button"
-        >
-          close chat
-        </button>
         <header class="topbar">
           <button
             id="menu-btn"
@@ -313,7 +337,7 @@
             id="message-input"
             rows="1"
             enterkeyhint="send"
-            placeholder="> new message to !general"
+            placeholder="new message to !general"
           ></textarea>
           <div class="composer-bar">
             <div class="composer-tools">
@@ -350,7 +374,6 @@
             ‹ Settings
           </button>
           <h2 class="settings-title">
-            <span class="settings-name">Settings</span>
             <span id="settings-section-name" class="settings-section-name"
               ></span
             >
@@ -366,25 +389,6 @@
           </button>
         </header>
         <div class="settings-body">
-          <nav class="settings-list" aria-label="Settings sections">
-            <button type="button" data-section="profile">Profile</button>
-            <button type="button" data-section="appearance">Appearance</button>
-            <button type="button" data-section="notifications">
-              Notifications
-            </button>
-            <button type="button" data-section="media">Audio &amp; video</button>
-            <button type="button" data-section="network">Network</button>
-            <button type="button" data-section="recordings">Recordings</button>
-            <button type="button" data-section="streaming">Streaming</button>
-            <button type="button" data-section="storage">Storage</button>
-            <button type="button" data-section="shortcuts">
-              Keyboard shortcuts
-            </button>
-            <button type="button" data-section="about">
-              About
-              <span id="about-dot" class="update-dot" hidden>•</span>
-            </button>
-          </nav>
           <div class="settings-content">
             <section class="settings-page" data-page="profile">
               <h3 class="settings-group">YOU</h3>
@@ -632,6 +636,7 @@
             </section>
           </div>
         </div>
+        <footer class="settings-bar"></footer>
       </section>
 
       <section
@@ -671,13 +676,7 @@
       <aside id="panel" class="panel">
         <header class="panel-header">
           <span id="panel-title" class="panel-title">Members</span>
-          <button
-            id="panel-close-btn"
-            class="link-btn"
-            aria-label="Close panel"
-          >
-            close
-          </button>
+          <span id="panel-meta" class="panel-meta muted" hidden></span>
         </header>
         <section class="panel-body" data-panel="pins">
           <div id="pin-list" class="pin-list"></div>
@@ -698,6 +697,16 @@
           ></video>
           <ul class="recordings-list list"></ul>
         </section>
+        <footer class="panel-bar">
+          <button
+            id="panel-close-btn"
+            class="link-btn"
+            type="button"
+            aria-label="Close panel"
+          >
+            close
+          </button>
+        </footer>
       </aside>
     </div>
 
@@ -802,31 +811,57 @@
       <li class="recording-item">
         <div class="recording-poster">
           <img alt="" loading="lazy" />
+          <button class="recording-poster-play" type="button"></button>
+          <span class="recording-state" hidden></span>
+          <span class="recording-duration" hidden></span>
         </div>
         <div class="recording-info">
           <strong class="recording-title"></strong>
-          <p class="recording-chat muted"></p>
-          <p class="recording-details muted"></p>
-          <p class="recording-note muted" hidden>
-            Recording ended unexpectedly.
+          <form class="recording-form hidden">
+            <input type="text" aria-label="Recording title" required />
+            <button class="link-btn" type="submit">save</button>
+            <button class="recording-cancel link-btn" type="button">
+              cancel
+            </button>
+          </form>
+          <p class="recording-meta muted">
+            <span class="recording-meta-text"></span>
+            <span class="recording-folder" role="img" hidden></span>
           </p>
           <div class="recording-actions">
-            <select class="recording-part" aria-label="Recording part" hidden>
-            </select>
-            <button class="recording-play link-btn" type="button">play</button>
-            <a class="recording-download link-btn" hidden>download</a>
-            <button class="recording-save-as link-btn" type="button" hidden>
-              save as
-            </button>
-            <button class="recording-save-folder link-btn" type="button" hidden>
-              save to folder
-            </button>
-            <button class="recording-rename link-btn" type="button">
-              rename
-            </button>
-            <button class="recording-delete link-btn" type="button">
-              delete
-            </button>
+            <button
+              class="recording-play icon-btn"
+              type="button"
+              aria-label="Play"
+              title="Play"
+            ></button>
+            <a
+              class="recording-download icon-btn"
+              aria-label="Download"
+              title="Download"
+              hidden
+            ></a>
+            <button
+              class="recording-save icon-btn"
+              type="button"
+              aria-label="Save as"
+              title="Save as"
+              hidden
+            ></button>
+            <button
+              class="recording-delete icon-btn"
+              type="button"
+              aria-label="Delete"
+              title="Delete"
+            ></button>
+            <button
+              class="recording-more icon-btn"
+              type="button"
+              aria-label="More actions"
+              title="More actions"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            ></button>
           </div>
           <progress
             class="recording-export-progress"
@@ -835,13 +870,6 @@
             max="100"
             hidden
           ></progress>
-          <form class="recording-form hidden">
-            <input type="text" aria-label="Recording title" required />
-            <button class="link-btn" type="submit">save</button>
-            <button class="recording-cancel link-btn" type="button">
-              cancel
-            </button>
-          </form>
         </div>
       </li>
     </template>

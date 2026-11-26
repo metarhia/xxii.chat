@@ -1,22 +1,36 @@
 import { META_FILE, POSTER_FILE } from './recording-files.js';
 import { programFileOf, recordingUrlOf, routeOf } from './recording-files.js';
-import { stampOf, timeText, sizeText } from './recording-files.js';
+import { dateText, titleOf, timeText, sizeText } from './recording-files.js';
 import { isFolderRecording, readMeta } from './recording-files.js';
 import { recordingsOf } from './recording-files.js';
 import { exportNameOf, downloadUrlOf, exportFile } from './recording-export.js';
 import { pickExportFile, exportToFolder } from './recording-export.js';
-import { partLabel } from './recording-export.js';
 import { canPickFolder, folderHandle } from './recording-folder.js';
 import { folderRecord, folderPermission } from './recording-folder.js';
-import { cloneTemplate, optionOf } from './view.js';
+import { cloneTemplate } from './view.js';
+import { createIcon } from './icons.js';
+import { Menu, Press } from './overlays.js';
 import { RecordingWriter } from './recorder.js';
 
-const STATE_LABELS = {
-  recording: 'Recording',
-  paused: 'Recording (paused)',
-  done: 'Done',
-  interrupted: 'Interrupted',
+const CARD_ACTIONS = {
+  play: (list, card) => list.playCard(card),
+  download: (list, card) => {
+    card.row.querySelector('.recording-download').click();
+  },
+  'save-as': (list, card) => card.exports.saveAs.run(),
+  'save-folder': (list, card) => card.exports.saveFolder.run(),
+  rename: (list, card) => list.openRename(card),
+  delete: (list, card) => list.deleteEntry(card.entry),
+  part: (list, card, item) => list.selectPart(card, item.index),
 };
+const BADGES = {
+  recording: 'recording',
+  paused: 'paused',
+  interrupted: 'interrupted',
+};
+const UNEXPECTED_END = 'Recording ended unexpectedly';
+const LOST_PART = `${UNEXPECTED_END}. The last part was lost.`;
+const ICON_ACTIONS = ['play', 'download', 'save', 'delete'];
 const STORAGE_UNAVAILABLE = 'Storage usage is unavailable.';
 const REPAIR_CHANNEL = 'xxii-recording-repair';
 const DOWNLOAD_URL_MS = 30000;
@@ -28,21 +42,31 @@ const sortRecordings = (entries) =>
 
 const textOf = (value) => (typeof value === 'string' ? value.trim() : '');
 
-const labelsOf = (meta) => {
+const labelsOf = (meta, now = Date.now()) => {
   const { duration, size, started, folder } = meta;
   const state = textOf(meta.state);
   const hasDate =
     Number.isFinite(started) && Number.isFinite(new Date(started).getTime());
+  const chat = textOf(meta.chatName) || textOf(meta.chat) || 'No chat';
+  const saved = textOf(meta.title);
+  const isDefault = hasDate && saved === titleOf(chat, started);
+  const isRenamed = saved !== '' && !isDefault;
+  const date = hasDate ? dateText(started, now) : 'Unknown date';
+  const sizeLabel = Number.isFinite(size) ? sizeText(size) : 'Unknown size';
+  const parts = isRenamed ? [chat, date, sizeLabel] : [date, sizeLabel];
   return {
-    title: textOf(meta.title) || 'Untitled recording',
-    chat: textOf(meta.chatName) || textOf(meta.chat) || 'No chat',
-    date: hasDate ? stampOf(started, ':') : 'Unknown date',
+    title: isRenamed ? saved : chat,
+    chat,
+    isRenamed,
+    name: isRenamed ? saved : `${chat} ${date}`,
+    date,
     duration: Number.isFinite(duration)
       ? timeText(duration)
       : 'Unknown duration',
-    size: Number.isFinite(size) ? sizeText(size) : 'Unknown size',
-    state: Object.hasOwn(STATE_LABELS, state) ? STATE_LABELS[state] : 'Unknown',
-    location: textOf(folder) || 'Browser storage',
+    size: sizeLabel,
+    meta: parts.join(' · '),
+    badge: Object.hasOwn(BADGES, state) ? BADGES[state] : '',
+    folder: textOf(folder),
   };
 };
 
@@ -146,8 +170,44 @@ const removeRecordings = async (storage) => {
   return { removed, failed: entries.length - removed };
 };
 
+const noteOf = (isFolder) => (isFolder ? LOST_PART : UNEXPECTED_END);
+
+const paintLabels = ({ row, entry, labels }) => {
+  const { title, name, meta, badge, folder } = labels;
+  const heading = row.querySelector('.recording-title');
+  heading.textContent = title;
+  row.querySelector('.recording-meta-text').textContent = meta;
+  const mark = row.querySelector('.recording-folder');
+  mark.hidden = folder === '';
+  if (folder !== '' && mark.childElementCount === 0) {
+    mark.append(createIcon('folder'));
+  }
+  mark.title = folder;
+  mark.setAttribute('aria-label', `Saved to ${folder}`);
+  const duration = row.querySelector('.recording-duration');
+  duration.hidden = !Number.isFinite(entry.duration);
+  duration.textContent = labels.duration;
+  const state = row.querySelector('.recording-state');
+  state.hidden = badge === '';
+  state.textContent = badge;
+  const isInterrupted = entry.state === 'interrupted';
+  const isFolder = isFolderRecording(entry);
+  state.title = isInterrupted ? noteOf(isFolder) : '';
+  row
+    .querySelector('.recording-poster-play')
+    .setAttribute('aria-label', `Play ${name}`);
+};
+
+const createCardMenu = (overlay) => {
+  const element = document.createElement('div');
+  element.className = 'menu recording-menu hidden';
+  element.setAttribute('aria-label', 'Recording actions');
+  document.body.append(element);
+  return new Menu(element, overlay);
+};
+
 class Recordings {
-  constructor(root, onRepair) {
+  constructor(root, onRepair, overlay = {}) {
     this.root = root;
     this.list = root.querySelector('.recordings-list');
     this.storage = root.querySelector('.recordings-storage');
@@ -162,6 +222,14 @@ class Recordings {
     this.playRequest = 0;
     this.revision = 0;
     this.isChanging = false;
+    this.cards = new WeakMap();
+    this.parts = new Map();
+    this.partRevision = 0;
+    this.menu = createCardMenu(overlay);
+    this.press = new Press({
+      hold: (row, x, y) => this.openMenu(row, { point: { x, y } }),
+    });
+    this.setupMenuEvents();
     const canBroadcast = typeof BroadcastChannel === 'function';
     this.repairChannel = canBroadcast
       ? new BroadcastChannel(REPAIR_CHANNEL)
@@ -244,12 +312,15 @@ class Recordings {
 
   close() {
     this.revision++;
+    this.menu.close();
+    this.parts.clear();
     this.stopPlayback();
     this.list.replaceChildren();
     this.setStatus('');
   }
 
   dismiss() {
+    if (this.menu.dismiss('escape')) return true;
     if (this.selected) {
       this.stopPlayback();
       return true;
@@ -299,8 +370,7 @@ class Recordings {
         return;
       }
     }
-    const { title } = labelsOf(entry);
-    this.player.setAttribute('aria-label', title);
+    this.player.setAttribute('aria-label', labelsOf(entry).name);
     if (entry.posterUrl) this.player.poster = entry.posterUrl;
     this.player.src = url;
     this.player.classList.remove('hidden');
@@ -308,24 +378,36 @@ class Recordings {
     this.player.play().catch(() => {});
   }
 
+  setupMenuEvents() {
+    const list = this.list;
+    list.addEventListener('pointerdown', (event) => {
+      const row = event.target.closest('.recording-item');
+      if (!row || event.target.closest('form')) return;
+      this.press.start(event, row, false);
+    });
+    list.addEventListener('contextmenu', (event) => {
+      const row = event.target.closest('.recording-item');
+      if (!row || event.target.closest('form')) return;
+      event.preventDefault();
+      this.press.cancel();
+      const point = { x: event.clientX, y: event.clientY };
+      this.openMenu(row, { point });
+    });
+    document.addEventListener('pointermove', (event) => this.press.move(event));
+    document.addEventListener('pointerup', () => this.press.end());
+    document.addEventListener('pointercancel', () => this.press.abort());
+    document.addEventListener('click', (event) => this.press.suppress(event), {
+      capture: true,
+    });
+  }
+
   createRow(entry, folder) {
     const row = cloneTemplate(this.template, '.recording-item');
     row.dataset.id = entry.id;
-    const { title, chat, date, duration, size, state, location } =
-      labelsOf(entry);
-    row.querySelector('.recording-title').textContent = title;
-    row.querySelector('.recording-chat').textContent = `${chat} · ${date}`;
-    const details = row.querySelector('.recording-details');
-    details.textContent = `${duration} · ${size} · ${state} · ${location}`;
-    const isFolder = isFolderRecording(entry);
-    if (entry.state === 'interrupted') {
-      const note = row.querySelector('.recording-note');
-      if (isFolder) {
-        note.textContent =
-          'Recording ended unexpectedly. The last part was lost.';
-      }
-      note.hidden = false;
-    }
+    const labels = labelsOf(entry);
+    const card = { row, entry, labels, folder, exports: {} };
+    this.cards.set(row, card);
+    paintLabels(card);
     const poster = row.querySelector('img');
     if (entry.posterUrl) {
       poster.addEventListener('error', () => poster.remove());
@@ -333,125 +415,223 @@ class Recordings {
     } else {
       poster.remove();
     }
-    const play = row.querySelector('.recording-play');
-    const rename = row.querySelector('.recording-rename');
-    const remove = row.querySelector('.recording-delete');
+    const isFolder = isFolderRecording(entry);
     const isFinished = canChange(entry);
     const hasVideo =
       ['mp4', 'webm'].includes(entry.extension) &&
       (!isFolder || entry.segments.length > 0);
     const canWrite = globalThis.FileSystemFileHandle?.prototype.createWritable;
-    play.disabled = !isFinished || !hasVideo;
-    rename.disabled = !isFinished || !canWrite;
-    remove.disabled = !isFinished || !this.recordings.removeEntry;
-    if (isFolder) {
-      if (isFinished && hasVideo) this.addPartActions(row, entry, play);
-    } else {
-      play.onclick = () => this.play(entry);
-      if (isFinished && hasVideo) this.addExports(row, entry, chat, folder);
+    card.canPlay = isFinished && hasVideo;
+    card.canRename = Boolean(isFinished && canWrite);
+    card.canDelete = Boolean(isFinished && this.recordings.removeEntry);
+    if (card.canPlay) {
+      card.exports = isFolder
+        ? this.partExports(card)
+        : this.fileExports(card, folder);
     }
-    rename.onclick = () => this.openRename(row, entry);
-    remove.onclick = () => this.deleteEntry(entry);
+    this.bindActions(card);
     return row;
   }
 
-  addPartActions(row, entry, play) {
-    const select = row.querySelector('.recording-part');
-    select.hidden = false;
-    for (let index = 0; index < entry.segments.length; index++) {
-      const part = entry.segments[index];
-      select.append(optionOf(part.name, partLabel(index + 1)));
+  bindActions(card) {
+    const { row } = card;
+    for (const name of ICON_ACTIONS) {
+      row.querySelector(`.recording-${name}`).prepend(createIcon(name));
     }
-    if (this.selected === entry.id && this.selectedPart) {
-      select.value = this.selectedPart;
+    row.querySelector('.recording-poster-play').append(createIcon('play'));
+    const more = row.querySelector('.recording-more');
+    more.prepend(createIcon('more'));
+    card.more = more;
+    const play = row.querySelector('.recording-play');
+    const poster = row.querySelector('.recording-poster-play');
+    const save = row.querySelector('.recording-save');
+    const remove = row.querySelector('.recording-delete');
+    const download = row.querySelector('.recording-download');
+    const { exports } = card;
+    play.disabled = !card.canPlay;
+    poster.disabled = !card.canPlay;
+    remove.disabled = !card.canDelete;
+    play.onclick = () => this.playCard(card);
+    poster.onclick = () => this.playCard(card);
+    remove.onclick = () => this.deleteEntry(card.entry);
+    more.onclick = () => this.toggleMenu(card);
+    download.hidden = !exports.download;
+    if (exports.download) {
+      download.href = exports.download.href ?? '#';
+      download.onclick = exports.download.run ?? null;
     }
-    const partOf = () => entry.segments[select.selectedIndex];
-    play.onclick = () => this.play(entry, partOf());
-    let selection = 0;
-    select.onchange = () => {
-      selection++;
-      row.querySelector('progress').hidden = true;
-      if (this.selected === entry.id) this.play(entry, partOf());
-    };
+    const target = exports.saveFolder ?? exports.saveAs;
+    save.hidden = !target;
+    if (!target) return;
+    const label = exports.saveFolder
+      ? `Save to ${exports.saveFolder.name}`
+      : 'Save as…';
+    save.title = label;
+    save.setAttribute('aria-label', label);
+    save.onclick = () => target.run();
+  }
+
+  playCard({ entry }) {
+    const part = this.partOf(entry);
+    return part ? this.play(entry, part) : this.play(entry);
+  }
+
+  partOf(entry) {
+    if (!isFolderRecording(entry)) return null;
+    const index = this.parts.get(entry.id) ?? 0;
+    return entry.segments[index] ?? entry.segments[0] ?? null;
+  }
+
+  toggleMenu(card) {
+    const isOwn = this.menu.isOpen && this.menu.target === card.entry.id;
+    if (isOwn) return void this.menu.close();
+    this.openMenu(card.row, { anchor: card.more });
+  }
+
+  openMenu(row, place) {
+    const card = this.cards.get(row);
+    if (!card) return;
+    const { entry } = card;
+    const anchor = place.anchor ?? null;
+    this.menu.open({
+      id: entry.id,
+      items: this.menuItems(card),
+      anchor,
+      point: anchor ? null : place.point,
+      trigger: anchor ?? card.more,
+      label: 'Recording actions',
+      select: (item) => queueMicrotask(() => this.choose(card, item)),
+    });
+  }
+
+  menuItems(card) {
+    const { exports, entry } = card;
+    const isSaving = card.row.dataset.saving !== undefined;
+    const items = [{ action: 'play', label: 'Play', disabled: !card.canPlay }];
+    if (exports.download) items.push({ action: 'download', label: 'Download' });
+    if (exports.saveAs) {
+      items.push({ action: 'save-as', label: 'Save as…', disabled: isSaving });
+    }
+    if (exports.saveFolder) {
+      const label = `Save to ${exports.saveFolder.name}`;
+      items.push({ action: 'save-folder', label, disabled: isSaving });
+    }
+    const rename = { action: 'rename', label: 'Rename' };
+    const remove = { action: 'delete', label: 'Delete' };
+    items.push({ ...rename, disabled: !card.canRename });
+    items.push({ ...remove, disabled: !card.canDelete });
+    if (card.canPlay && entry.segments?.length > 1) {
+      items.push({ kind: 'separator' }, this.partsGroup(entry));
+    }
+    return items;
+  }
+
+  partsGroup(entry) {
+    const current = this.partOf(entry);
+    const items = entry.segments.map((part, index) => ({
+      kind: 'radio',
+      group: 'part',
+      action: 'part',
+      index,
+      label: `Part ${index + 1}`,
+      checked: part === current,
+    }));
+    return { kind: 'group', label: 'Part', items };
+  }
+
+  choose(card, item) {
+    CARD_ACTIONS[item.action]?.(this, card, item);
+  }
+
+  selectPart({ row, entry }, index) {
+    this.parts.set(entry.id, index);
+    this.partRevision++;
+    row.querySelector('progress').hidden = true;
+    if (this.selected === entry.id) this.play(entry, this.partOf(entry));
+  }
+
+  partExports(card) {
+    const { entry } = card;
+    const exports = {};
     const partAction = (action) => {
-      const { revision } = this;
-      const choice = selection;
-      const part = partOf();
+      const { revision, partRevision } = this;
+      const part = this.partOf(entry);
       const isCurrent = () =>
-        revision === this.revision && choice === selection;
+        revision === this.revision && partRevision === this.partRevision;
       return part ? action(part, isCurrent) : null;
     };
-    const download = row.querySelector('.recording-download');
-    download.href = '#';
-    download.hidden = false;
-    download.onclick = (event) => {
-      event.preventDefault();
-      return partAction(async (part, isCurrent) => {
-        this.setStatus('');
-        try {
-          const file = await partFileOf(entry, part, isCurrent);
-          if (file && isCurrent()) downloadPart(file, part.name);
-        } catch (error) {
-          if (isCurrent()) this.setStatus(error.message);
-        }
-      });
+    exports.download = {
+      run: (event) => {
+        event.preventDefault();
+        return partAction(async (part, isCurrent) => {
+          this.setStatus('');
+          try {
+            const file = await partFileOf(entry, part, isCurrent);
+            if (file && isCurrent()) downloadPart(file, part.name);
+          } catch (error) {
+            if (isCurrent()) this.setStatus(error.message);
+          }
+        });
+      },
     };
     const canWrite = globalThis.FileSystemFileHandle?.prototype.createWritable;
     const canStream = Boolean(globalThis.TransformStream);
     const canSave = typeof globalThis.showSaveFilePicker === 'function';
-    if (!canWrite || !canStream || !canSave) {
-      return;
-    }
-    const saveAs = row.querySelector('.recording-save-as');
-    saveAs.hidden = false;
-    saveAs.onclick = () =>
-      partAction((part, isCurrent) =>
-        this.save(
-          row,
-          async (progress) => {
-            const file = await partFileOf(entry, part, isCurrent);
-            if (!file || !isCurrent()) return;
-            if (navigator.userActivation?.isActive === false) {
-              throw new Error('Folder access granted. Click Save as again.');
-            }
-            const target = await pickExportFile(part.name, entry.extension);
-            if (target && isCurrent()) await exportFile(file, target, progress);
-          },
-          isCurrent,
+    if (!canWrite || !canStream || !canSave) return exports;
+    exports.saveAs = {
+      run: () =>
+        partAction((part, isCurrent) =>
+          this.save(
+            card,
+            async (progress) => {
+              const file = await partFileOf(entry, part, isCurrent);
+              if (!file || !isCurrent()) return;
+              if (navigator.userActivation?.isActive === false) {
+                throw new Error('Folder access granted. Click Save as again.');
+              }
+              const target = await pickExportFile(part.name, entry.extension);
+              if (target && isCurrent()) {
+                await exportFile(file, target, progress);
+              }
+            },
+            isCurrent,
+          ),
         ),
-      );
+    };
+    return exports;
   }
 
-  addExports(row, entry, chat, folder) {
+  fileExports(card, folder) {
+    const { entry, labels } = card;
     const { id, started, extension } = entry;
-    const name = exportNameOf(chat, started, extension);
-    const download = row.querySelector('.recording-download');
-    download.href = downloadUrlOf(id, extension, name);
-    download.hidden = false;
-
-    const saveAs = row.querySelector('.recording-save-as');
-    const saveFolder = row.querySelector('.recording-save-folder');
+    const name = exportNameOf(labels.chat, started, extension);
+    const exports = {
+      download: { href: downloadUrlOf(id, extension, name) },
+    };
     const canWrite = globalThis.FileSystemFileHandle?.prototype.createWritable;
-    if (!canWrite || !globalThis.TransformStream) return;
+    if (!canWrite || !globalThis.TransformStream) return exports;
     const sourceFile = () => this.sourceFile(entry);
     if (typeof globalThis.showSaveFilePicker === 'function') {
-      saveAs.hidden = false;
-      saveAs.onclick = () =>
-        this.save(row, async (progress) => {
-          const target = await pickExportFile(name, extension);
-          if (target) await exportFile(await sourceFile(), target, progress);
-        });
+      exports.saveAs = {
+        run: () =>
+          this.save(card, async (progress) => {
+            const target = await pickExportFile(name, extension);
+            if (target) await exportFile(await sourceFile(), target, progress);
+          }),
+      };
     }
     const handle = folder?.handle;
     const canRequest = handle?.queryPermission && handle.requestPermission;
     if (canRequest && handle.removeEntry) {
-      saveFolder.hidden = false;
-      saveFolder.title = `Save to ${folder.name}`;
-      saveFolder.onclick = () =>
-        this.save(row, (progress) =>
-          exportToFolder(handle, name, sourceFile, progress),
-        );
+      exports.saveFolder = {
+        name: folder.name,
+        run: () =>
+          this.save(card, (progress) =>
+            exportToFolder(handle, name, sourceFile, progress),
+          ),
+      };
     }
+    return exports;
   }
 
   async sourceFile(entry) {
@@ -461,13 +641,12 @@ class Recordings {
     return handle.getFile();
   }
 
-  async save(row, copy, isCurrent) {
+  async save({ row }, copy, isCurrent) {
     const progress = row.querySelector('.recording-export-progress');
-    const saveAs = row.querySelector('.recording-save-as');
-    const saveFolder = row.querySelector('.recording-save-folder');
+    const save = row.querySelector('.recording-save');
     this.setStatus('');
-    saveAs.disabled = true;
-    saveFolder.disabled = true;
+    row.dataset.saving = '';
+    save.disabled = true;
     try {
       await copy((percent) => {
         if (isCurrent && !isCurrent()) return;
@@ -481,20 +660,22 @@ class Recordings {
         isCurrent ? error.message : 'Could not save this recording.',
       );
     } finally {
-      saveAs.disabled = false;
-      saveFolder.disabled = false;
+      delete row.dataset.saving;
+      save.disabled = false;
     }
   }
 
-  openRename(row, entry) {
+  openRename(card) {
+    const { row, entry } = card;
     const form = row.querySelector('form');
     const input = form.querySelector('input');
     const heading = row.querySelector('.recording-title');
-    const button = row.querySelector('.recording-rename');
     const close = () => {
       form.classList.add('hidden');
-      button.focus();
+      heading.hidden = false;
+      card.more.focus();
     };
+    heading.hidden = true;
     form.classList.remove('hidden');
     input.value = textOf(entry.title);
     input.focus();
@@ -520,9 +701,10 @@ class Recordings {
       });
       if (!saved) return;
       entry.title = title;
-      heading.textContent = title;
+      card.labels = labelsOf(entry);
+      paintLabels(card);
       if (this.selected === entry.id) {
-        this.player.setAttribute('aria-label', title);
+        this.player.setAttribute('aria-label', card.labels.name);
       }
       close();
     };
@@ -563,11 +745,11 @@ class Recordings {
 
   async deleteEntry(entry) {
     if (this.isChanging) return;
-    const { title } = labelsOf(entry);
+    const { name } = labelsOf(entry);
     const isFolder = isFolderRecording(entry);
     const message = isFolder
-      ? `Delete “${title}” from the library? Files stay in ${entry.folder}.`
-      : `Delete “${title}” from browser storage?`;
+      ? `Delete “${name}” from the library? Files stay in ${entry.folder}.`
+      : `Delete “${name}” from browser storage?`;
     if (!window.confirm(message)) return;
     const revision = this.revision;
     const removed = await this.change(entry, 'delete', async () => {

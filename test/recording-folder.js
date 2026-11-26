@@ -13,7 +13,14 @@ const READY = `return document.readyState === 'complete' &&
   navigator.serviceWorker.controller && app.recordings && app.connected;`;
 const ROW = '.recording-item[data-id=folder-complete]';
 const HAS_PARTS = `
-  return document.querySelector('${ROW} .recording-part')?.length >= 2;
+  const row = document.querySelector('${ROW}');
+  const { entry } = app.recordings.cards.get(row);
+  return entry.segments.length >= 2 && !row.querySelector('.recording-play')
+    .disabled;
+`;
+const SELECTED_PART = `
+  const row = document.querySelector('${ROW}');
+  return app.recordings.partOf(app.recordings.cards.get(row).entry).name;
 `;
 
 const fixture = (id, occupy) => `
@@ -174,6 +181,13 @@ test(
       activated(`
     document.querySelector(${JSON.stringify(selector)}).click();
   `);
+    const choose = async (row, action, index = 0) => {
+      await click(`${row} .recording-more`);
+      await wait(`return !!document.querySelector(
+        '.recording-menu [data-action=${action}]');`);
+      await activated(`document.querySelectorAll(
+        '.recording-menu [data-action=${action}]')[${index}].click();`);
+    };
     await wait(READY);
 
     await t.test(
@@ -221,18 +235,26 @@ test(
         await run(LIBRARY_FIXTURE);
         await click('#recordings-btn');
         await wait(HAS_PARTS);
+        await click(`${ROW} .recording-more`);
         const controls = await run(`
-      const row = document.querySelector('${ROW}');
-      const options = row.querySelectorAll('select option');
+      const menu = document.querySelector('.recording-menu');
+      const radios = menu.querySelectorAll('[role=menuitemradio]');
+      const labels = Array.from(menu.querySelectorAll('.menu-label'),
+        (label) => label.textContent);
       return {
-        texts: Array.from(options).slice(0, 2).map((part) => part.textContent),
-        saveFolder: row.querySelector('.recording-save-folder').hidden,
+        texts: Array.from(radios).slice(0, 2).map((part) => part.textContent),
+        checked: Array.from(radios, (part) =>
+          part.getAttribute('aria-checked')).slice(0, 2),
+        hasFolder: labels.some((label) => label.startsWith('Save to')),
       };
     `);
         assert.deepEqual(controls, {
-          texts: ['part 01', 'part 02'],
-          saveFolder: true,
+          texts: ['Part 1', 'Part 2'],
+          checked: ['true', 'false'],
+          hasFolder: false,
         });
+        await run(`document.querySelector('.recording-menu').dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));`);
         await click(`${ROW} .recording-play`);
         const ready = `
       const video = document.querySelector('.recordings-player');
@@ -241,12 +263,9 @@ test(
     `;
         await wait(ready);
         const url = await run('return app.recordings.player.src;');
-        await activated(`
-      const select = document.querySelector('${ROW} .recording-part');
-      select.selectedIndex = 1;
-      select.dispatchEvent(new Event('change'));
-    `);
+        await choose(ROW, 'part', 1);
         await wait(ready);
+        assert.match(await run(SELECTED_PART), / part 02\.webm$/);
         assert.notEqual(await run('return app.recordings.player.src;'), url);
         const canFetch = (link) =>
           run(`
@@ -254,12 +273,14 @@ test(
     `);
         assert.equal(await canFetch(url), false);
 
-        await click(`${ROW} .recording-save-as`);
+        await choose(ROW, 'save-as');
         await wait(
           `return document.querySelector('${ROW} progress').value === 100;`,
         );
         const selected = await run(`
-      const name = document.querySelector('${ROW} select').value;
+      const row = document.querySelector('${ROW}');
+      const entry = app.recordings.cards.get(row).entry;
+      const name = app.recordings.partOf(entry).name;
       const original = await folderFixture.folder.getFileHandle(name);
       const root = await navigator.storage.getDirectory();
       const saved = await root.getFileHandle('save-as.webm');
@@ -308,8 +329,9 @@ test(
         await click('#recordings-btn');
         await wait(HAS_PARTS);
         await run(`
-      const name = document.querySelector('${ROW} select').value;
-      await folderFixture.folder.removeEntry(name);
+      const row = document.querySelector('${ROW}');
+      const entry = app.recordings.cards.get(row).entry;
+      await folderFixture.folder.removeEntry(app.recordings.partOf(entry).name);
     `);
         await click(`${ROW} .recording-play`);
         await wait(`
@@ -365,7 +387,7 @@ test(
       await click('#recordings-btn');
       await wait(`
       const row = document.querySelector('[data-id="${id}"]');
-      return row?.querySelector('.recording-note').textContent
+      return row?.querySelector('.recording-state').title
         .includes('The last part was lost.');
     `);
       await click('#recordings-close');

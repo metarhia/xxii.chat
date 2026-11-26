@@ -99,6 +99,11 @@ test('settings screen', { timeout: 240000 }, async (t) => {
     );
 
   const first = await open();
+  await browser.request(
+    'Emulation.setDeviceMetricsOverride',
+    { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false },
+    first,
+  );
   const step = (name, body) =>
     t.test(name, async () => {
       await browser.request('Page.bringToFront', {}, first);
@@ -106,8 +111,8 @@ test('settings screen', { timeout: 240000 }, async (t) => {
     });
   await run(first, `app.selectChat('general'); return true;`);
 
-  await step('the profile row opens Profile and shows the nick', async () => {
-    assert.equal(await run(first, visible('#profile-btn')), true);
+  await step('the profile row is display only and shows the nick', async () => {
+    assert.equal(await run(first, visible('#profile-main')), true);
     assert.equal(
       await run(
         first,
@@ -116,7 +121,34 @@ test('settings screen', { timeout: 240000 }, async (t) => {
       ),
       'set your nick',
     );
-    await click(first, '#profile-btn');
+    const row = await run(
+      first,
+      `const main = document.getElementById('profile-main');
+      const dot = document.getElementById('profile-dot');
+      return {
+        buttons: main.querySelectorAll('button, a, [role=button]').length,
+        tag: main.tagName,
+        titled: main.title !== '',
+        label: dot.getAttribute('aria-label') === main.title,
+        recordings: document.getElementById('recordings-btn').tagName,
+        settings: document.getElementById('settings-btn').tagName,
+      };`,
+    );
+    assert.deepEqual(row, {
+      buttons: 0,
+      tag: 'DIV',
+      titled: true,
+      label: true,
+      recordings: 'BUTTON',
+      settings: 'BUTTON',
+    });
+    for (const id of ['profile-main', 'profile-avatar', 'profile-nick']) {
+      await click(first, `#${id}`);
+    }
+    await click(first, '#profile-dot');
+    assert.equal(await run(first, 'return app.settings.isOpen;'), false);
+    assert.equal(await run(first, 'return app.layers.length;'), 0);
+    await run(first, `app.openSettings('profile'); return true;`);
     await wait(
       first,
       `return app.settings.isOpen && app.settings.section ===
@@ -164,6 +196,141 @@ test('settings screen', { timeout: 240000 }, async (t) => {
       assert.equal(shown, true, id);
     }
     await run(first, 'app.closeSettings(); return true;');
+  });
+
+  await step('the list is in the sidebar and the lists are gone', async () => {
+    await click(first, '#settings-btn');
+    await wait(first, 'return app.settings.isOpen;');
+    await click(first, '.settings-list [data-section="profile"]');
+    assert.equal(await run(first, visible('#sidebar .settings-list')), true);
+    const lists = ['contact-list', 'feed-list', 'chat-list', 'folder-list'];
+    for (const id of lists) {
+      assert.equal(await run(first, visible(`#${id}`)), false, id);
+    }
+    assert.equal(await run(first, visible('#sidebar .brand')), false);
+    assert.equal(
+      await run(first, visible('.settings-view .settings-list')),
+      false,
+    );
+    assert.equal(
+      await run(
+        first,
+        `return document.querySelectorAll('.settings-list').length;`,
+      ),
+      1,
+    );
+    assert.equal(await run(first, visible('#settings-exit')), true);
+    assert.equal(
+      await run(
+        first,
+        `return document.getElementById('settings-exit').textContent
+        .trim();`,
+      ),
+      '‹ Settings',
+    );
+    const layout = await run(
+      first,
+      `const rect = (selector) => document.querySelector(selector)
+        .getBoundingClientRect();
+      const button = document.getElementById('settings-btn');
+      return {
+        gap: Math.abs(rect('.settings-content').left - rect('#sidebar').right),
+        zones: [rect('#sidebar').width, rect('.settings-view').width],
+        row: rect('.profile-row').bottom === innerHeight,
+        title: document.getElementById('settings-section-name').textContent,
+        name: [...document.querySelectorAll('.settings-view .settings-title')]
+          .map((node) => node.textContent.trim()).join(),
+        close: document.getElementById('settings-close').offsetWidth > 0,
+        active: button.classList.contains('active'),
+        pressed: button.getAttribute('aria-pressed'),
+      };`,
+    );
+    assert.equal(layout.gap < 30, true, 'no middle column');
+    assert.equal(layout.zones[0], 288);
+    assert.equal(layout.row, true);
+    assert.equal(layout.title, 'Profile');
+    assert.equal(layout.name, 'Profile');
+    assert.equal(layout.close, true);
+    assert.equal(layout.active, true);
+    assert.equal(layout.pressed, 'true');
+    await click(first, '#settings-exit');
+    await wait(
+      first,
+      `return !app.settings.isOpen && app.layers.length === 0 &&
+      app.pops === 0;`,
+    );
+    assert.equal(await run(first, visible('#chat-list')), true);
+    assert.equal(await run(first, visible('#sidebar .settings-list')), false);
+    assert.equal(
+      await run(
+        first,
+        `const button = document.getElementById('settings-btn');
+        return button.classList.contains('active') ||
+          button.getAttribute('aria-pressed') !== 'false';`,
+      ),
+      false,
+    );
+  });
+
+  await step('a hidden sidebar shows while settings are open', async () => {
+    await run(first, 'app.toggleSidebar(); return true;');
+    assert.equal(await run(first, visible('#sidebar')), false);
+    await click(first, '#settings-btn');
+    await wait(first, 'return app.settings.isOpen;');
+    assert.equal(await run(first, visible('#sidebar .settings-list')), true);
+    assert.equal(await run(first, visible('#settings-view')), true);
+    assert.equal(
+      await run(
+        first,
+        `return document.querySelector('.settings-view')
+        .getBoundingClientRect().left;`,
+      ),
+      288,
+    );
+    await click(first, '#settings-exit');
+    await wait(first, 'return !app.settings.isOpen && app.pops === 0;');
+    assert.equal(await run(first, visible('#sidebar')), false);
+    assert.equal(
+      await run(first, `return app.app.classList.contains('sidebar-hidden');`),
+      true,
+    );
+    await run(first, 'app.toggleSidebar(); return true;');
+    assert.equal(await run(first, visible('#sidebar')), true);
+  });
+
+  await step('opening a chat with Ctrl+K closes settings', async () => {
+    await run(
+      first,
+      `const input = document.getElementById('chat-name-input');
+      input.value = 'second';
+      document.getElementById('chat-form').requestSubmit();
+      return true;`,
+    );
+    await wait(first, `return app.chat !== 'general';`);
+    const second = await run(first, 'return app.chat;');
+    await run(first, `app.selectChat('general'); return true;`);
+    await click(first, '#settings-btn');
+    await wait(first, 'return app.settings.isOpen;');
+    await press(first, 'k', 'ctrlKey: true');
+    await wait(first, 'return app.switcher.isOpen;');
+    await run(
+      first,
+      `const input = document.querySelector('#switcher input');
+      input.value = 'second';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown',
+        { key: 'Enter', bubbles: true }));
+      return true;`,
+    );
+    await wait(
+      first,
+      `return app.chat === ${JSON.stringify(second)} && !app.settings.isOpen
+      && app.pops === 0 && app.layers.length === 0;`,
+    );
+    assert.equal(await run(first, visible('#chat-list')), true);
+    assert.equal(await run(first, visible('#sidebar .settings-list')), false);
+    assert.equal(await run(first, visible('#chat-view')), true);
+    await run(first, `app.selectChat('general'); return true;`);
   });
 
   await step('a deep link opens the section and is replaced', async () => {
@@ -238,8 +405,10 @@ test('settings screen', { timeout: 240000 }, async (t) => {
       const original = devices.getUserMedia.bind(devices);
       const list = devices.enumerateDevices.bind(devices);
       window.opened = [];
+      window.calls = 0;
       window.hideNames = true;
       devices.getUserMedia = async (constraints) => {
+        window.calls++;
         const stream = await original(constraints);
         window.opened.push(...stream.getTracks());
         window.hideNames = false;
@@ -266,10 +435,12 @@ test('settings screen', { timeout: 240000 }, async (t) => {
           first,
           `const allow = document.querySelectorAll('.allow-devices');
         return [allow.length, allow[0].hidden, allow[1].hidden,
-          window.opened.length, app.preferences.preview.isOn];`,
+          window.calls, app.preferences.preview.isOn];`,
         ).then(String),
         '2,false,false,0,false',
       );
+      await run(first, 'await new Promise((r) => setTimeout(r, 500));');
+      assert.equal(await run(first, 'return window.calls;'), 0);
       await click(first, '.allow-devices');
       await wait(
         first,
@@ -680,12 +851,36 @@ test('settings screen', { timeout: 240000 }, async (t) => {
         app.settings.root.dataset.pane === 'list'
         && !app.layers.includes('sidebar');`,
       );
+      await wait(
+        phone,
+        `const box = document.querySelector('#sidebar .settings-list')
+        .getBoundingClientRect();
+        const bar = document.querySelector('.profile-row')
+        .getBoundingClientRect();
+        return box.left >= 0 && box.width === innerWidth &&
+          bar.left >= 0 && bar.bottom === innerHeight &&
+          document.querySelector('.settings-view').offsetWidth === 0 &&
+          document.getElementById('settings-btn').classList
+          .contains('active');`,
+        10000,
+      );
       await click(phone, '.settings-list [data-section="network"]');
       await wait(
         phone,
         `return app.settings.root.dataset.pane === 'section' &&
         document.getElementById('ice-url').offsetWidth > 0 &&
         app.layers.join() === 'settings,settings-section';`,
+      );
+      await wait(
+        phone,
+        `const list = document.querySelector('#sidebar .settings-list')
+        .getBoundingClientRect();
+        const view = document.querySelector('.settings-view');
+        const back = document.getElementById('settings-back');
+        return list.right <= 0 && view.offsetWidth === innerWidth &&
+          back.offsetWidth > 0 && document
+          .getElementById('settings-section-name').textContent === 'Network';`,
+        10000,
       );
       await run(phone, 'history.back(); return true;');
       await wait(
@@ -700,7 +895,7 @@ test('settings screen', { timeout: 240000 }, async (t) => {
       );
       await click(phone, '#menu-btn');
       await wait(phone, `return app.layers.includes('sidebar');`);
-      await click(phone, '#profile-btn');
+      await run(phone, `app.openSettings('profile'); return true;`);
       await wait(
         phone,
         `return app.settings.isOpen && app.settings.section === 'profile' &&

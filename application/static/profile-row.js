@@ -7,7 +7,7 @@ const STATUSES = ['online', 'away', 'offline'];
 const statusOf = (status) => (STATUSES.includes(status) ? status : 'offline');
 
 class ProfileRow {
-  #button = null;
+  #main = null;
   #avatar = null;
   #preview = null;
   #nick = null;
@@ -17,7 +17,7 @@ class ProfileRow {
 
   constructor(root = document) {
     const byId = (id) => root.getElementById(id);
-    this.#button = byId('profile-btn');
+    this.#main = byId('profile-main');
     this.#avatar = byId('profile-avatar');
     this.#preview = byId('profile-preview');
     this.#nick = byId('profile-nick');
@@ -39,8 +39,8 @@ class ProfileRow {
     this.#nick.textContent = name || NO_NICK;
     this.#nick.classList.toggle('muted', name === '');
     this.#dot.dataset.status = statusOf(status);
-    this.#button.title = text;
-    this.#button.setAttribute('aria-label', `Profile, ${text}`);
+    this.#main.title = text;
+    this.#dot.setAttribute('aria-label', text);
   }
 
   markUpdate(isReady) {

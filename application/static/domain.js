@@ -677,7 +677,18 @@ class ChatApplication extends Application {
       capture: () => this.openCapture(''),
       close: () => this.closeRecordings(),
     });
-    this.recordings = new Recordings(library, () => this.refreshRecordings());
+    const overlay = {
+      backdrop: this.backdrop,
+      layers: {
+        push: (name) => this.afterPop(() => this.pushLayer(name)),
+        pop: (name) => this.popLayer(name),
+      },
+    };
+    this.recordings = new Recordings(
+      library,
+      () => this.refreshRecordings(),
+      overlay,
+    );
     this.recordings.repair().then(() => this.refreshRecordings());
     this.renderIce();
     this.fillPalette();
@@ -698,7 +709,6 @@ class ChatApplication extends Application {
     this.menuBtn = byId('menu-btn');
     this.versionBtn = byId('version-btn');
     this.profileRow = new ProfileRow();
-    this.profileBtn = byId('profile-btn');
     this.settingsBtn = byId('settings-btn');
     this.recordingsBtn = byId('recordings-btn');
     this.directCaptureBtn = byId('direct-capture-btn');
@@ -837,10 +847,7 @@ class ChatApplication extends Application {
     };
 
     this.menuBtn.onclick = () => this.toggleSidebar();
-    this.profileBtn.onclick = () => this.openSettings('profile');
     this.settingsBtn.onclick = () => this.openSettings('');
-    document.getElementById('close-call-chat').onclick = () =>
-      this.callStage?.closeSheet();
     this.callBtn.onclick = () => beginCall(this);
     this.searchBtn.onclick = () => this.toggleSearch();
     this.pinsBtn.onclick = () => this.togglePanel('pins');
@@ -1702,7 +1709,7 @@ class ChatApplication extends Application {
     const to = recipient?.nick || root?.nick;
     const noun = isPostMode ? 'post' : 'message';
     const target = to ? `reply to ${to}` : `new ${noun} to ${this.chatName()}`;
-    this.messageInput.placeholder = `> ${target}`;
+    this.messageInput.placeholder = target;
     this.messageInput.maxLength = isPostMode ? TEXT_LENGTH : MAX_LENGTH;
     const nick = this.username ? `@${this.username}` : 'set your nick first';
     const hint = isPostMode ? ', first line is the title, Ctrl+Enter' : '';
@@ -2228,6 +2235,13 @@ class ChatApplication extends Application {
       this.viewScroll = this.chatMessages.scrollTop;
     }
     this.settings.open(section);
+    this.paintSettingsButton();
+  }
+
+  paintSettingsButton() {
+    const isOpen = this.settings.isOpen;
+    this.settingsBtn.classList.toggle('active', isOpen);
+    this.settingsBtn.setAttribute('aria-pressed', String(isOpen));
   }
 
   closeSettings() {
@@ -2237,6 +2251,7 @@ class ChatApplication extends Application {
   leaveSettings() {
     this.popLayer('settings-section');
     this.settings.hide();
+    this.paintSettingsButton();
     this.chatMessages.scrollTop = this.viewScroll;
     if (!matchMedia(COARSE).matches) this.messageInput.focus();
   }
@@ -2505,6 +2520,7 @@ class ChatApplication extends Application {
       fail: (error) => this.report(error),
       saved: (info, meta) => this.recordCapture(info, meta),
       state: () => this.renderRecordingsState(),
+      settings: () => this.changeCaptureSettings(),
     };
     this.capture = new SoloCapture(
       this.capturePanel,
@@ -2514,6 +2530,11 @@ class ChatApplication extends Application {
     );
     this.showPanel('capture');
     this.panelCloseBtn.focus();
+  }
+
+  changeCaptureSettings() {
+    this.closePanel();
+    if (this.panel === '') this.openSettings('recordings');
   }
 
   releaseCapture(confirm = true) {

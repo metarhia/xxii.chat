@@ -147,16 +147,24 @@ sync. Terminal-like UI follows the
   keyboard and offers bigger touch targets
 - Nick shared between tabs, members list, and activity log
 - Profile row at the bottom of the sidebar: your avatar, nick, and a
-  connection dot (hover for the connection, mesh role, and peers), a
-  recordings button (it turns red while a capture or call recording runs),
-  and a settings button
-- Settings screen in the main area (`?settings=<section>` opens a section,
-  `Esc` or `×` returns to the chat with its draft): Profile (nick, title for
-  lower thirds, peer id), Appearance, Notifications, Audio & video, Network,
-  Recordings defaults, Streaming destinations, Storage, Keyboard shortcuts,
-  and About (version, update, install, connection, diagnostics log). On a
-  phone the list comes first and Back closes the
-  section, then the screen
+  connection dot (display only; hover for the connection, mesh role, and
+  peers), a recordings button (it turns red while a capture or call
+  recording runs), and a settings button
+- At most three zones on screen: the sidebar, the center, and one right
+  panel (pins, members, capture, or the call tabs) that replaces the open
+  one. The profile row, the composer, the right panel's bar (its `close`),
+  and the call controls are bottom bars of one height with their own
+  slightly different backgrounds; the composer still grows upward
+- Settings (`?settings=<section>` opens a section, `Esc`, `×`, or `‹` in
+  the sidebar returns to the chat with its draft): while settings are open
+  the sidebar shows the section list under `‹ Settings` instead of contacts,
+  feeds, chats, and folders (a hidden sidebar shows for that time), and the
+  center shows the section. Sections: Profile (nick, title for lower thirds,
+  peer id), Appearance, Notifications, Audio & video, Network, Recordings
+  defaults, Streaming destinations, Storage, Keyboard shortcuts, and About
+  (version, update, install, connection, diagnostics log). Opening a chat
+  with `Ctrl+K` closes settings. On a phone the list is the sidebar sheet
+  and comes first, and Back closes the section, then the screen
 - Appearance (Settings > Appearance, saved in `xxii:settings`): theme
   `system`, `dark` (default), or `light`, message text size S, M, L, or XL
   (12, 13, 15, 17 px for messages, posts, articles, Markdown, and the
@@ -187,8 +195,8 @@ sync. Terminal-like UI follows the
   peer id, drafts, read marks, folders, and streaming destinations
 - Recordings screen in the main area (profile row button, the `Recordings`
   command, the call's `more` menu, or Settings > Recordings): a grid of cards
-  with poster, title, chat, duration, size, and actions, a full-width player,
-  and `new capture`. `Esc` or Back closes it. In Settings > Audio & video the
+  with poster, title, one line with the chat, date, and size, icon actions,
+  a full-width player, and `new capture`. `Esc` or Back closes it. In Settings > Audio & video the
   microphone shows a live level meter and the camera a small mirrored preview
   while the section is open outside a call; without permission the lists ask
   you to allow camera and microphone
@@ -234,8 +242,13 @@ record, more, people, chat, and a red leave at the end. `←`/`→`, `Home` and
 `End` move between them and `Tab` enters and leaves the bar; `↑` on mic or
 camera opens its menu. Muted mic and camera show a red slashed icon. People
 and chat are toggles with counts (`People, 1 waiting` for a knock, unread
-messages on chat) that hide and show those panels, or open them as sheets on a
-phone. As an admin, `leave` asks whether to leave or end the call for everyone.
+messages on chat) that open the right zone on that tab, or close it when the
+tab is already shown. The right zone has the tabs Chat, People, Record, and
+Studio (when available) with badges (unread, people count and waiting, a red
+dot while you record, `live`), remembers the last tab, and holds the tab's
+tools in its bottom bar (the composer on Chat, `copy link` and `opt out of
+recordings` on People, `start recording` and `pause` on Record, `go live` on
+Studio). On a phone the tabs are the header of a bottom sheet. As an admin, `leave` asks whether to leave or end the call for everyone.
 `Record` asks `Stop the recording?` before it stops, from the control, the
 Record panel, and `Ctrl+Alt+R`.
 The reactions menu has the reactions and `Raise hand`. Raised hands are
@@ -308,8 +321,8 @@ gets its duration written into the header, MP4 needs no fix. Pause leaves no
 gap in the file. The recorder asks the browser for persistent storage once,
 warns below 2 GB of free space, and stops below 500 MB. While recording the
 topbar shows `● nick recording` to everyone in the call, the recorder's own
-indicator reads `● 12:31 · 84 MB` (`● paused 12:31 · 84 MB`) and opens the record
-panel, the record control reads `stop` on red (`paused` while paused) without
+indicator reads `● 12:31 · 84 MB` (`● paused 12:31 · 84 MB`) and opens the
+Record tab, which shows the same time and size at its top, the record control reads `stop` on red (`paused` while paused) without
 time or size, and the chat gets a `● nick recorded 12
 min` note. The recorder keeps rendering when its tab is hidden: it asks other
 people for video sized to their tiles of the program, so they keep sending
@@ -370,16 +383,27 @@ Open **Recordings** from the profile row or the call's `more` menu (the
 call shrinks to its mini tile) to see local recordings and browser storage
 usage. Play and seek in the library
 using the service worker's `/recordings/<id>/<file>` route with `Range` support.
-Finished recordings can be renamed, deleted, or downloaded. In browsers that
-offer file and folder pickers, **Save as** lets you pick a file and **Save to
-folder** copies to the folder remembered in Settings > Recordings. Both show progress,
-and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate names.
+A card shows the chat name as its title until you rename the recording, and
+then the chat moves to the line below. That line reads the chat (only when
+renamed), the date (`today 14:05`, `yesterday 14:05`, `Nov 20`, or `Nov 20
+2025`), and the size, with a folder icon when the recording was saved to a
+folder. The duration sits on the poster at the bottom right, and a recording
+that is open or ended unexpectedly shows a badge at the top left. Click the
+poster, press `Enter` on it, or use the play button to play. Icon buttons play,
+download, save (to the remembered folder, else **Save as**), and delete; the
+`⋯` button, a right click, or a long press on a card opens a menu with Play,
+Download, Save as, Save to folder, Rename, Delete, and the parts of a
+multi-part recording. Rename edits the title in place. In browsers that offer
+file and folder pickers, **Save as** lets you pick a file and **Save to
+folder** copies to the folder remembered in Settings > Recordings. Both show
+progress, and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate
+names.
 
-In Chromium with a folder picker, **Save recordings to** in Settings > Recordings or
-the Record panel can send recordings straight to a chosen folder. Choose
+In Chromium with a folder picker, **Save recordings to** in Settings > Recordings
+(and in the call's Record tab) can send recordings straight to a chosen folder. Choose
 5-, 10-, 15-, or 30-minute parts, with 10 minutes by default. Paused time
 doesn't count toward the part length. Each part is a playable file. In the
-library, select a part to play, download, or save a copy. Browser storage
+library, pick a part in the card menu to play, download, or save a copy. Browser storage
 holds the library entry and its poster. Deleting that entry leaves the
 files in the folder.
 
@@ -387,9 +411,11 @@ Use **new capture** on the Recordings screen, the **New capture** command of
 `Ctrl+K`, or a direct chat to record without a call; it opens in the right
 panel.
 Select a camera, microphone, screen or window, and screen audio, and preview
-camera only, screen only, or a screen with a camera bubble. Save to browser
-storage or a chosen folder. Closing Capture while recording asks whether to
-stop. A finished capture started from a direct chat adds a **captured** card
+camera only, screen only, or a screen with a camera bubble. Quality and the
+save target come from Settings > Recordings and show as one line,
+`1080p30 · browser storage · change`; `change` opens that section. While
+recording, the panel header shows the time and size. Closing Capture while
+recording, also through `change`, asks whether to stop. A finished capture started from a direct chat adds a **captured** card
 there.
 
 On app start, a recording left open after a crash is marked **Interrupted**.

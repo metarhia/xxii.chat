@@ -7,6 +7,11 @@ const harness = require('./harness.js');
 
 const { ORIGIN, MEDIA_FLAGS, launch, startCallServer } = harness;
 const ROW = '.recordings-list .recording-item';
+const MENU_STATE = `
+  const items = document.querySelectorAll('.recording-menu .menu-item');
+  return Object.fromEntries(Array.from(items, (item) => [
+    item.textContent, item.getAttribute('aria-disabled') === 'true']));
+`;
 const READY = `return document.readyState === 'complete' &&
   navigator.serviceWorker.controller && window.repairRequest;`;
 
@@ -156,12 +161,19 @@ const assertLiveAcrossTab = async (browser, id, left) => {
   await right.click('#recordings-btn');
   await right.wait(`
     const row = document.querySelector('${ROW}');
-    const details = row?.querySelector('.recording-details').textContent;
-    return details?.includes('Recording (paused)') &&
-      row.querySelector('.recording-rename').disabled &&
+    return row?.querySelector('.recording-state').textContent === 'paused' &&
+      row.querySelector('.recording-play').disabled &&
       row.querySelector('.recording-delete').disabled &&
       row.querySelector('.recording-download').hidden;
   `);
+  await right.click(`${ROW} .recording-more`);
+  assert.deepEqual(await right.run(MENU_STATE), {
+    Play: true,
+    Rename: true,
+    Delete: true,
+  });
+  await right.run(`document.querySelector('.recording-menu').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));`);
   return right;
 };
 
@@ -245,8 +257,8 @@ for (const extension of ['webm', 'mp4']) {
         );
       }
 
-      await tab.wait(`return document.querySelector('${ROW} .recording-note')
-      ?.hidden === false;`);
+      await tab.wait(`return document.querySelector('${ROW} .recording-state')
+      ?.textContent === 'interrupted';`);
       const after = await tab.run(storedOf(id));
       assert.equal(after.meta.state, 'interrupted');
       assert.equal(after.meta.size, before.size);
@@ -257,14 +269,15 @@ for (const extension of ['webm', 'mp4']) {
       if (extension === 'webm') assert.equal(after.headerDuration, duration);
       const details = await tab.run(`
       const row = document.querySelector('${ROW}');
-      const note = row.querySelector('.recording-note');
+      const badge = row.querySelector('.recording-state');
       const enabled = (selector) => !row.querySelector(selector).disabled;
-      const actions = ['.recording-rename', '.recording-delete'].every(enabled);
-      return { note: note.textContent.trim(), actions,
+      const actions = ['.recording-play', '.recording-delete'].every(enabled);
+      return { badge: badge.textContent, note: badge.title, actions,
         download: !row.querySelector('.recording-download').hidden };
     `);
       assert.deepEqual(details, {
-        note: 'Recording ended unexpectedly.',
+        badge: 'interrupted',
+        note: 'Recording ended unexpectedly',
         actions: true,
         download: true,
       });

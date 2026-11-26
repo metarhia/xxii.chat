@@ -850,6 +850,7 @@ test('The roster menu', { timeout: 180000 }, async (t) => {
   );
   await wait(JOINED);
   await wait(`return document.querySelector('.call-roster li') !== null;`);
+  await run(`app.callStage.selectTab('people'); return true;`);
 
   const rosterButton = '.call-roster li [data-action="roster-menu"]';
   const query = `document.querySelector('${rosterButton}')`;

@@ -59,14 +59,11 @@ const createDestinationControls = () => {
   const note = document.createElement('p');
   note.className = 'call-note stream-note';
   note.setAttribute('role', 'status');
-  const live = createButton('go-live', 'Go live');
-  live.classList.add('stream-live');
   box.append(
     legend,
     list,
     createAction('add-destination', 'Add destination'),
     createEditor(),
-    live,
     note,
   );
   return box;

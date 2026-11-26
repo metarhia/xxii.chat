@@ -12,6 +12,8 @@ import { ViewHints } from './view-hints.js';
 import { CallRecording } from './call-record.js';
 import { Streaming } from './streaming.js';
 import { createRecordPanel } from './record-panel.js';
+import { createSide, createSideBar, createSideBody } from './call-side.js';
+import { nextTab, paintTabs } from './call-side.js';
 import { createButton } from './record-panel.js';
 import { PHONE, optionOf, labeled } from './view.js';
 import { Studio, createStudioPanel, createStageLists } from './studio.js';
@@ -79,8 +81,8 @@ const ACTIONS = {
   'opt-out': (stage) => stage.toggleOptOut(),
   record: (stage) => stage.toggleRecord(),
   'record-pause': (stage) => stage.recording?.togglePause(),
-  'record-panel': (stage) => stage.toggleProgramPanel('record'),
-  studio: (stage) => stage.toggleProgramPanel('studio'),
+  'record-panel': (stage) => stage.toggleTab('record'),
+  studio: (stage) => stage.toggleTab('studio'),
   'go-live': (stage) => stage.streaming?.toggle(),
   'stop-live': (stage) => stage.streaming?.stop(),
   'record-background': (stage) => stage.recording?.resetBackground(),
@@ -90,9 +92,9 @@ const ACTIONS = {
   'pip-back': (stage) => stage.closePip(true),
   expand: (stage) => stage.expand(),
   'switch-camera': (stage) => stage.media?.switchCamera(),
-  people: (stage) => stage.togglePanel('people'),
-  chat: (stage) => stage.togglePanel('chat'),
-  'close-sheet': (stage) => stage.closeSheet(),
+  people: (stage) => stage.toggleTab('people'),
+  chat: (stage) => stage.toggleTab('chat'),
+  'close-sheet': (stage) => stage.closeSide(),
   settings: (stage) => stage.hooks.settings(),
   shortcuts: (stage) => stage.controls?.showShortcuts(),
 };
@@ -279,14 +281,8 @@ const createPeople = () => {
   const optOut = createButton('opt-out', 'opt out of recordings');
   optOut.classList.add('people-opt-out');
   optOut.setAttribute('aria-pressed', 'false');
-  aside.append(
-    createButton('close-sheet', 'close people'),
-    lobby,
-    roster,
-    optOut,
-    createHostControls(),
-    copy,
-  );
+  const body = createSideBody(lobby, roster, createHostControls());
+  aside.append(body, createSideBar(copy, optOut));
   return aside;
 };
 
@@ -317,7 +313,7 @@ const createKnock = (item) => {
   return toast;
 };
 
-const createCall = (title, hasStudio, bar) => {
+const createCall = (title, bar) => {
   const section = document.createElement('section');
   section.id = 'call-view';
   const topbar = document.createElement('header');
@@ -361,15 +357,17 @@ const createCall = (title, hasStudio, bar) => {
   strip.setAttribute('role', 'region');
   strip.hidden = true;
   grid.append(strip);
-  const body = document.createElement('div');
-  body.className = 'call-body';
-  body.append(grid, createPeople(), createRecordPanel());
-  if (hasStudio) body.append(createStudioPanel());
   const note = document.createElement('p');
   note.className = 'call-note hidden';
   note.setAttribute('role', 'status');
-  section.append(topbar, note, createPrompt(), body, bar);
+  section.append(topbar, note, createPrompt(), grid, bar);
   return section;
+};
+
+const createCallSide = (hasStudio) => {
+  const panes = [createPeople(), createRecordPanel()];
+  if (hasStudio) panes.push(createStudioPanel());
+  return createSide(hasStudio, ...panes);
 };
 
 const createMini = () => {
@@ -783,7 +781,8 @@ class CallStage {
     this.volume = null;
     this.tileMenu = null;
     this.controls = null;
-    this.hiddenPanels = new Set();
+    this.tab = 'chat';
+    this.sideOpen = true;
     this.started = 0;
     this.durationTimer = null;
     this.stats = new Map();
@@ -794,7 +793,6 @@ class CallStage {
     this.recording = null;
     this.studio = null;
     this.streaming = null;
-    this.desktopPanel = '';
     this.quality = new Map();
     this.qualityNotices = [];
     this.levels = null;
@@ -920,7 +918,6 @@ class CallStage {
     this.recording = null;
     this.studio?.dispose();
     this.studio = null;
-    this.desktopPanel = '';
     this.releaseWake();
     this.closeSheet();
     this.hooks.popLayer('call');
@@ -947,8 +944,8 @@ class CallStage {
     this.controls?.stop();
     this.controls = null;
     this.stopDuration();
-    this.hiddenPanels.clear();
-    this.root.removeAttribute('data-hide');
+    this.tab = 'chat';
+    this.sideOpen = true;
     this.started = 0;
     this.volume?.stop();
     this.volume = null;
@@ -981,6 +978,7 @@ class CallStage {
     this.session = null;
     this.mode = '';
     this.joining = false;
+    this.undockChat();
     this.host?.remove();
     this.host = null;
     this.mini?.remove();
@@ -1015,7 +1013,9 @@ class CallStage {
     const view = this.viewOf(mode, title);
     this.stopLayout();
     this.stopDuration();
+    this.undockChat();
     this.host.replaceChildren(view);
+    if (mode === 'call') this.dockChat();
     this.root.dataset.call = mode;
     this.hooks.mounted?.(mode);
     this.closePip(false);
@@ -1039,6 +1039,7 @@ class CallStage {
       this.paintLive();
       this.paintBackstage();
       this.studio?.paint();
+      this.syncSide();
       this.hooks.focusChat(this.chat);
       this.hooks.changed();
     }
@@ -1065,6 +1066,7 @@ class CallStage {
     this.mode = 'mini';
     this.stopLayout();
     this.stopDuration();
+    this.undockChat();
     this.host.classList.add('hidden');
     this.host.replaceChildren();
     this.root.dataset.call = 'mini';
@@ -1087,62 +1089,138 @@ class CallStage {
       this.hooks.popLayer('call');
     }
     this.renderTiles();
-    this.recording?.paint();
-    this.controls?.paint();
+    this.syncSide();
+  }
+
+  get shownTab() {
+    if (this.mode !== 'call') return '';
+    if (this.phone?.matches) return this.sheet;
+    return this.sideOpen ? this.tab : '';
   }
 
   get programPanel() {
-    if (this.mode !== 'call') return '';
-    if (!this.phone?.matches) return this.desktopPanel;
-    if (this.sheet === 'record' || this.sheet === 'studio') return this.sheet;
-    return '';
+    const tab = this.shownTab;
+    return tab === 'record' || tab === 'studio' ? tab : '';
   }
 
-  toggleProgramPanel(name) {
-    if (this.mode !== 'call') return;
-    const open = this.programPanel === name;
+  isPanelShown(name) {
+    return this.shownTab === name;
+  }
+
+  hasTab(name) {
+    return name !== 'studio' || Boolean(this.studio);
+  }
+
+  dockChat() {
+    const side = createCallSide(Boolean(this.studio));
+    const chat = this.root.querySelector('#chat-view');
+    side.addEventListener('keydown', (event) => this.onTabKey(event));
+    this.host.append(side);
+    if (chat) side.append(chat);
+  }
+
+  undockChat() {
+    const chat = this.host?.querySelector('.call-side > #chat-view');
+    if (chat) this.host.after(chat);
+  }
+
+  selectTab(name) {
+    if (this.mode !== 'call' || !this.hasTab(name)) return;
+    this.tab = name;
     if (this.phone?.matches) {
-      if (open) this.closeSheet();
-      else this.openSheet(name);
-    } else {
-      this.desktopPanel = open ? '' : name;
-      this.recording?.paint();
+      if (this.sheet === name) return;
+      this.openSheet(name);
+      return;
     }
+    this.sideOpen = true;
+    this.syncSide();
+  }
+
+  closeSide() {
+    if (this.mode !== 'call') return;
+    if (this.phone?.matches) return void this.closeSheet();
+    this.sideOpen = false;
+    this.syncSide();
+  }
+
+  toggleTab(name) {
+    if (this.shownTab === name) this.closeSide();
+    else this.selectTab(name);
   }
 
   closeProgramPanel() {
     if (this.phone?.matches || !this.programPanel) return false;
-    this.desktopPanel = '';
-    this.recording?.paint();
+    this.closeSide();
     return true;
+  }
+
+  syncSide() {
+    const shown = this.shownTab;
+    if (shown) this.root.dataset.side = shown;
+    else this.root.removeAttribute('data-side');
+    this.recording?.paint();
+    this.controls?.paint();
+    this.paintTabs();
+  }
+
+  tabStates() {
+    const unread = this.hooks.unread?.(this.chat) ?? 0;
+    const waiting = this.isAdmin ? this.lobby.length : 0;
+    const shown = this.shownTab;
+    const unseen = shown === 'chat' || unread === 0 ? 0 : unread;
+    const note = waiting > 0 ? `${waiting} waiting` : '';
+    const isRecording = this.recording?.isActive === true;
+    const isLive = this.streaming?.isActive === true;
+    return {
+      chat: {
+        badge: unseen > 0 ? `${unseen}` : '',
+        note: `${unseen} unread`,
+        alert: true,
+      },
+      people: {
+        badge: `${this.people.length}`,
+        note,
+        alert: waiting > 0,
+      },
+      record: {
+        badge: isRecording ? '●' : '',
+        note: 'recording',
+        alert: false,
+      },
+      studio: { badge: isLive ? 'live' : '', note: 'live', alert: false },
+    };
+  }
+
+  paintTabs() {
+    const side = this.host?.querySelector('.call-side');
+    if (side) paintTabs(side, this.shownTab, this.tabStates());
+  }
+
+  onTabKey(event) {
+    const side = event.currentTarget;
+    const tab = nextTab(side, event);
+    if (!tab) return;
+    event.preventDefault();
+    tab.focus();
+    this.selectTab(tab.dataset.tab);
   }
 
   openSheet(name) {
     if (!this.phone?.matches || this.mode !== 'call') return;
     const isFirst = this.sheet === '';
     this.sheet = name;
-    this.root.dataset.callSheet = name;
+    this.tab = name;
+    this.syncSide();
     if (isFirst) this.hooks.pushLayer('callSheet');
-    const panels = {
-      people: '.call-people button',
-      record: '.call-record button',
-      studio: '.call-studio button',
-    };
-    this.recording?.paint();
-    const panel = panels[name];
-    const close = panel
-      ? this.host.querySelector(panel)
-      : this.root.querySelector('.close-call-chat');
-    close?.focus();
+    this.host.querySelector('.call-tabs-close')?.focus();
   }
 
   hideSheet() {
     if (!this.sheet) return;
     const trigger = this.host?.querySelector(MORE_BUTTON);
     this.sheet = '';
-    delete this.root.dataset.callSheet;
     trigger?.focus();
-    this.recording?.paint();
+    this.syncSide();
   }
 
   closeSheet() {
@@ -1405,26 +1483,6 @@ class CallStage {
     if (!media) return;
     if (media.screenTrack && !media.screenShared) media.stopScreen();
     else await media.openScreen(false);
-  }
-
-  isPanelShown(name) {
-    if (this.phone?.matches) return this.sheet === name;
-    return !this.hiddenPanels.has(name);
-  }
-
-  togglePanel(name) {
-    if (this.mode !== 'call') return;
-    if (this.phone?.matches) {
-      if (this.sheet === name) this.closeSheet();
-      else this.openSheet(name);
-      return;
-    }
-    if (this.hiddenPanels.has(name)) this.hiddenPanels.delete(name);
-    else this.hiddenPanels.add(name);
-    const hidden = Array.from(this.hiddenPanels).join(' ');
-    if (hidden) this.root.dataset.hide = hidden;
-    else this.root.removeAttribute('data-hide');
-    this.controls?.paint();
   }
 
   startDuration() {
@@ -1824,13 +1882,18 @@ class CallStage {
       if (!tile) return;
       this.togglePin(tile.dataset.endpoint, tile.dataset.slot ?? 'camera');
     });
-    host.addEventListener('change', (event) => this.onDevice(event));
+    host.addEventListener('change', (event) => {
+      if (!event.target.closest('#chat-view')) this.onDevice(event);
+    });
     this.host = host;
   }
 
   onClick(event) {
     const sound = event.target.closest('[data-action="enable-sound"]');
     if (this.soundBlocked && !sound) this.resumeAudio();
+    if (event.target.closest('#chat-view')) return;
+    const tab = event.target.closest('[data-tab]');
+    if (tab) return void this.selectTab(tab.dataset.tab);
     const streamAction = event.target.closest('[data-stream-action]');
     if (streamAction) {
       this.streaming?.action(streamAction);
@@ -1863,7 +1926,7 @@ class CallStage {
   viewOf(mode, title) {
     if (mode === 'prejoin') return createPrejoin(title, this.hooks.hasNick());
     if (mode === 'lobby') return createLobby();
-    return createCall(title, Boolean(this.studio), this.controls.create());
+    return createCall(title, this.controls.create());
   }
 
   onDevice(event) {
@@ -2282,6 +2345,7 @@ class CallStage {
   paintPeople() {
     const aside = this.host?.querySelector('.call-people');
     if (!aside) return;
+    this.paintTabs();
     this.paintLobby(aside);
     this.paintRoster(aside);
     this.paintHost(aside);

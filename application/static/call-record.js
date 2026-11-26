@@ -102,6 +102,7 @@ class CallRecording extends RecordingSession {
       note.textContent = this.notice;
     }
     if (panel === 'studio') stage.studio?.paint();
+    stage.paintTabs();
   }
 
   recordView() {

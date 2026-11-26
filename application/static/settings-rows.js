@@ -59,9 +59,10 @@ const createSelect = (name, values, labelOf) => {
   return control;
 };
 
-const createInput = (name, limit) => {
+const createInput = (name, limit, placeholder = '') => {
   const control = create('input');
   control.type = 'text';
+  if (placeholder) control.placeholder = placeholder;
   control.maxLength = limit;
   control.autocomplete = 'off';
   control.dataset.setting = name;

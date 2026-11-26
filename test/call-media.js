@@ -164,7 +164,7 @@ test(
     await waitFor(browser, left, linked);
     await waitFor(browser, right, linked);
     await run(left, PREPARE);
-    await gesture(browser, left, 'capture-local');
+    await gesture(browser, left, 'capture-local', '.call-stage');
     await waitFor(browser, left, CAPTURED);
     assert.equal(await run(left, LOCAL), true);
     assert.equal(await run(right, screenGone(host.endpoint)), true);
@@ -222,7 +222,7 @@ test(
     await waitFor(browser, right, screenGone(host.endpoint));
     await waitFor(browser, third, screenGone(host.endpoint));
 
-    await gesture(browser, left, 'capture-local');
+    await gesture(browser, left, 'capture-local', '.call-stage');
     await waitFor(browser, left, CAPTURED);
     const stoppedOnLeave = await run(
       left,
