@@ -1,3 +1,5 @@
+import { createIcon } from './icons.js';
+
 const TABS = ['chat', 'people', 'record', 'studio'];
 
 const LABELS = {
@@ -36,6 +38,19 @@ const createClose = () => {
   return close;
 };
 
+const SEARCH_HINT = 'Search the chat · Ctrl F';
+
+const createSearch = () => {
+  const search = createElement('button', 'call-tabs-search hidden');
+  search.type = 'button';
+  search.dataset.action = 'search-chat';
+  search.title = SEARCH_HINT;
+  search.setAttribute('aria-label', 'Search the chat');
+  search.setAttribute('aria-pressed', 'false');
+  search.append(createIcon('search'));
+  return search;
+};
+
 const createTabs = (hasStudio) => {
   const tabs = createElement('div', 'call-tabs');
   const list = createElement('div', 'call-tablist');
@@ -43,7 +58,7 @@ const createTabs = (hasStudio) => {
   list.setAttribute('aria-label', 'Call panels');
   const names = hasStudio ? TABS : TABS.filter((name) => name !== 'studio');
   list.append(...names.map(createTab));
-  tabs.append(list, createClose());
+  tabs.append(list, createSearch(), createClose());
   return tabs;
 };
 
@@ -106,10 +121,18 @@ const paintTab = (tab, shown, state) => {
   tab.setAttribute('aria-label', nameOf(name, state));
 };
 
-const paintTabs = (side, shown, states) => {
+const paintSearch = (side, shown, isSearching) => {
+  const search = side.querySelector('.call-tabs-search');
+  search.classList.toggle('hidden', shown !== 'chat');
+  search.classList.toggle('active', isSearching);
+  search.setAttribute('aria-pressed', `${isSearching}`);
+};
+
+const paintTabs = (side, shown, states, isSearching = false) => {
   for (const tab of tabsOf(side)) {
     paintTab(tab, shown, states[tab.dataset.tab]);
   }
+  paintSearch(side, shown, isSearching);
 };
 
 export { TABS, createSide, createSideBar, createSideBody, paintTabs };

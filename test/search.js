@@ -21,6 +21,10 @@ const KEYS = {
   Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
   Tab: { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 },
 };
+const CTRL = 2;
+const JOIN = `document.querySelector('#prejoin [data-action=join]').click();
+  return true;`;
+const CALL_BUTTON = '.call-tabs-search';
 
 test('search closes itself', { timeout: 280000 }, async (t) => {
   await startCallServer(t);
@@ -90,6 +94,19 @@ test('search closes itself', { timeout: 280000 }, async (t) => {
     const params = { ...KEYS[name], type: 'rawKeyDown' };
     await browser.request('Input.dispatchKeyEvent', params, session);
     const up = { ...KEYS[name], type: 'keyUp' };
+    await browser.request('Input.dispatchKeyEvent', up, session);
+  };
+  const chord = async (session, key, code, vk) => {
+    const base = {
+      key,
+      code,
+      windowsVirtualKeyCode: vk,
+      nativeVirtualKeyCode: vk,
+      modifiers: CTRL,
+    };
+    const down = { ...base, type: 'rawKeyDown' };
+    await browser.request('Input.dispatchKeyEvent', down, session);
+    const up = { ...base, type: 'keyUp' };
     await browser.request('Input.dispatchKeyEvent', up, session);
   };
   const pointOf = (session, selector) =>
@@ -388,5 +405,233 @@ test('search closes itself', { timeout: 280000 }, async (t) => {
     await run(session, `app.toggleSidebar(); return true;`);
     await run(session, `app.selectChat('random'); return true;`);
     await expectClosed(session, 'phone chat change', false);
+  });
+
+  const callState = (session) =>
+    run(
+      session,
+      `const button = document.querySelector('${CALL_BUTTON}');
+      const box = button.getBoundingClientRect();
+      const bar = document.querySelector('.call-tabs').getBoundingClientRect();
+      return {
+        open: app.isSearching(),
+        filter: app.filter,
+        rows: app.messageList.querySelectorAll('.message').length,
+        shown: app.callStage.shownTab,
+        visible: box.width > 0 && box.height > 0,
+        inBar: box.top >= bar.top && box.bottom <= bar.bottom,
+        active: button.classList.contains('active'),
+        pressed: button.getAttribute('aria-pressed'),
+        title: button.title,
+        label: button.getAttribute('aria-label'),
+        focus: document.activeElement.id,
+        topbar: getComputedStyle(
+          document.querySelector('#chat-view .topbar')).display,
+        barTop: document.querySelector('#search-bar')
+          .getBoundingClientRect().top,
+        listTop: app.messageList.getBoundingClientRect().top,
+      };`,
+    );
+  const expectCallClosed = async (session, label) => {
+    await wait(session, `return !app.isSearching();`);
+    const closed = await callState(session);
+    assert.equal(closed.filter, '', label);
+    assert.equal(closed.active, false, label);
+    assert.equal(closed.pressed, 'false', label);
+    assert.ok(closed.rows > 2, `${label}: messages are back`);
+  };
+  const callSearch = async (session, text = 'needle') => {
+    await run(session, `app.callStage.selectTab('chat'); return true;`);
+    await clickAt(session, await pointOf(session, CALL_BUTTON));
+    await wait(
+      session,
+      `return app.isSearching() && app.searchInput === document.activeElement;`,
+    );
+    await run(
+      session,
+      `app.searchInput.value = ${JSON.stringify(text)};
+      app.searchInput.dispatchEvent(new Event('input'));
+      return true;`,
+    );
+    await wait(
+      session,
+      `return app.filter === ${JSON.stringify(text)}
+        && app.messageList.querySelectorAll('.message').length === 2;`,
+    );
+  };
+
+  await t.test(
+    'call chat: the button opens search above the chat',
+    async () => {
+      await browser.request(
+        'Emulation.setDeviceMetricsOverride',
+        { ...DESKTOP, deviceScaleFactor: 1 },
+        session,
+      );
+      await run(
+        session,
+        `app.closeSearch();
+      app.selectChat('general');
+      await app.startCall('general');
+      return true;`,
+      );
+      await run(session, JOIN);
+      await wait(
+        session,
+        `app.render();
+      return app.callStage?.mode === 'call'
+        && app.callStage.shownTab === 'chat';`,
+      );
+      await delay(300);
+      const idle = await callState(session);
+      assert.equal(idle.visible, true);
+      assert.equal(idle.inBar, true);
+      assert.equal(idle.active, false);
+      assert.equal(idle.pressed, 'false');
+      assert.equal(idle.label, 'Search the chat');
+      assert.match(idle.title, /Ctrl F/);
+      assert.equal(idle.topbar, 'none');
+      await callSearch(session);
+      const opened = await callState(session);
+      assert.equal(opened.open, true);
+      assert.equal(opened.active, true);
+      assert.equal(opened.pressed, 'true');
+      assert.equal(opened.rows, 2);
+      assert.equal(opened.focus, 'search-input');
+      assert.ok(opened.barTop < opened.listTop, 'bar is above the timeline');
+    },
+  );
+
+  await t.test(
+    'call chat: the button closes it and focus loss too',
+    async () => {
+      await clickAt(session, await pointOf(session, CALL_BUTTON));
+      await expectCallClosed(session, 'button off');
+      await delay(100);
+      assert.equal((await callState(session)).open, false);
+      await callSearch(session);
+      await clickAt(session, await pointOf(session, '.call-topbar'));
+      await expectCallClosed(session, 'click outside');
+      await callSearch(session);
+      await key(session, 'Escape');
+      await expectCallClosed(session, 'escape');
+      assert.equal((await callState(session)).shown, 'chat');
+      await callSearch(session);
+      await clickAt(session, await pointOf(session, '#message-input'));
+      await expectCallClosed(session, 'composer click');
+      await callSearch(session);
+      await run(session, `app.messageInput.focus(); return true;`);
+      await expectCallClosed(session, 'composer focus');
+    },
+  );
+
+  await t.test('call chat: other tabs and panels close it', async () => {
+    await callSearch(session);
+    await clickAt(session, await pointOf(session, '.call-tab-people'));
+    await expectCallClosed(session, 'people tab');
+    const away = await callState(session);
+    assert.equal(away.shown, 'people');
+    assert.equal(away.visible, false);
+    await run(session, `app.callStage.selectTab('chat'); return true;`);
+    await callSearch(session);
+    await run(session, `app.callStage.closeSide(); return true;`);
+    await expectCallClosed(session, 'zone closed');
+    await run(session, `app.callStage.selectTab('chat'); return true;`);
+    await callSearch(session);
+    await run(session, `app.togglePanel('pins'); return true;`);
+    await expectCallClosed(session, 'pins panel');
+    await run(session, `app.closePanel(); return true;`);
+  });
+
+  await t.test('call chat: Ctrl+F switches to Chat and opens', async () => {
+    await run(session, `app.callStage.selectTab('people'); return true;`);
+    await wait(session, `return app.callStage.shownTab === 'people';`);
+    await chord(session, 'f', 'KeyF', 70);
+    await wait(session, `return app.isSearching();`);
+    const fromPeople = await callState(session);
+    assert.equal(fromPeople.shown, 'chat');
+    assert.equal(fromPeople.visible, true);
+    assert.equal(fromPeople.active, true);
+    assert.equal(fromPeople.focus, 'search-input');
+    await run(session, `app.closeSearch(); return true;`);
+    await run(session, `app.callStage.closeSide(); return true;`);
+    await wait(session, `return app.callStage.shownTab === '';`);
+    await chord(session, 'f', 'KeyF', 70);
+    await wait(session, `return app.isSearching();`);
+    const fromClosed = await callState(session);
+    assert.equal(fromClosed.shown, 'chat');
+    assert.equal(fromClosed.visible, true);
+    assert.equal(fromClosed.focus, 'search-input');
+    await chord(session, 'f', 'KeyF', 70);
+    await expectCallClosed(session, 'Ctrl+F again');
+  });
+
+  await t.test(
+    'call chat: a found message opens and stays selected',
+    async () => {
+      await callSearch(session, 'needle');
+      const point = await rowPoint(session, 'needle first');
+      await clickAt(session, point);
+      await expectCallClosed(session, 'found click');
+      const found = await run(
+        session,
+        `const row = ${rowOf('needle first')};
+      return {
+        focused: document.activeElement === row,
+        chosen: row.classList.contains('chosen'),
+        marked: row.classList.contains('found'),
+        shown: app.callStage.shownTab,
+      };`,
+      );
+      assert.equal(found.focused, true);
+      assert.equal(found.chosen, true);
+      assert.equal(found.marked, true);
+      assert.equal(found.shown, 'chat');
+    },
+  );
+
+  await t.test('call chat: collapsing the call closes it', async () => {
+    await callSearch(session);
+    await run(session, `app.callStage.collapse(); return true;`);
+    await wait(session, `return !app.isSearching() && app.filter === '';`);
+    assert.equal((await state(session)).active, false);
+    await run(session, `app.callStage.expand(); return true;`);
+    await wait(
+      session,
+      `app.render();
+      return app.callStage.mode === 'call'
+        && document.querySelector('${CALL_BUTTON}') !== null;`,
+    );
+  });
+
+  await t.test('call chat on the phone: the sheet header has it', async () => {
+    await browser.request(
+      'Emulation.setDeviceMetricsOverride',
+      { ...PHONE, deviceScaleFactor: 1 },
+      session,
+    );
+    await wait(session, `app.render(); return app.callStage.phone.matches;`);
+    await run(session, `app.callStage.selectTab('chat'); return true;`);
+    await wait(session, `return app.callStage.shownTab === 'chat';`);
+    const sheet = await callState(session);
+    assert.equal(sheet.visible, true);
+    assert.equal(sheet.inBar, true);
+    await clickAt(session, await pointOf(session, CALL_BUTTON));
+    await wait(
+      session,
+      `return app.isSearching() && app.searchInput === document.activeElement;`,
+    );
+    assert.equal((await callState(session)).active, true);
+    await key(session, 'Escape');
+    await expectCallClosed(session, 'phone escape');
+    assert.equal((await callState(session)).shown, 'chat');
+    await callSearch(session);
+    await run(session, `app.callStage.selectTab('people'); return true;`);
+    await expectCallClosed(session, 'phone people tab');
+    await run(session, `app.callStage.selectTab('chat'); return true;`);
+    await chord(session, 'f', 'KeyF', 70);
+    await wait(session, `return app.isSearching();`);
+    await run(session, `app.callStage.closeSheet(); return true;`);
+    await expectCallClosed(session, 'phone sheet closed');
   });
 });
