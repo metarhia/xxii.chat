@@ -75,37 +75,6 @@ const valueLabels = {
   recordingSegment: segmentLabel,
 };
 
-const field = (caption, control) => {
-  const label = document.createElement('label');
-  label.className = control.type === 'checkbox' ? 'check' : 'call-field';
-  if (control.type === 'checkbox') label.append(control, caption);
-  else label.append(caption, control);
-  return label;
-};
-
-const settingField = (name) => {
-  const choices = OPTIONS[name];
-  const control = document.createElement(choices ? 'select' : 'input');
-  if (choices) {
-    for (const value of choices) {
-      control.append(optionOf(value, valueLabels[name]?.(value) ?? value));
-    }
-  } else if (name === 'title') {
-    control.type = 'text';
-    control.maxLength = TITLE_LIMIT;
-  } else {
-    control.type = 'checkbox';
-  }
-  control.dataset.setting = name;
-  return field(labels[name], control);
-};
-
-const deviceField = (name) => {
-  const select = document.createElement('select');
-  select.dataset.device = name;
-  return field(name, select);
-};
-
 const fillDevice = (select, devices, selected, noun) => {
   if (!select) return;
   const options = [{ deviceId: '', label: 'default' }];
@@ -474,4 +443,4 @@ class CallPreferences {
   }
 }
 
-export { CallPreferences, syncFields, settingField, deviceField, fillDevice };
+export { CallPreferences, fillDevice, tone };

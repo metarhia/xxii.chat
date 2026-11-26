@@ -4,6 +4,7 @@ const URL_PATTERN = /\bhttps?:\/\/[^\s<>"']+/g;
 const URL_TAIL = /[.,;:!?)\]]+$/;
 const DATE_OPTIONS = { weekday: 'long', month: 'long', day: 'numeric' };
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
 
 const pad = (value) => `${value}`.padStart(2, '0');
 
@@ -182,4 +183,4 @@ export { formatSize, fitSize, readSetting, writeSetting, readMap, writeMap };
 export { readJson, writeJson };
 export { cloneTemplate, optionOf, labeled };
 export { syncChildren, setBadge, fillText };
-export { isEditable, isReducedMotion };
+export { PHONE, isEditable, isReducedMotion };

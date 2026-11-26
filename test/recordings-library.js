@@ -9,7 +9,8 @@ const { ORIGIN, MEDIA_FLAGS, launch, startCallServer } = harness;
 const READY = `document.readyState === 'complete' && app.connected &&
   app.mesh.peers.has(app.peerId) && navigator.serviceWorker.controller`;
 const LIBRARY = '.recordings-list .recording-item';
-const CONTROL = '.call-record-control';
+const CONTROL = '.call-controls';
+const MENU = '.call-bar-menu';
 const TITLE = 'Review — Київ';
 
 const acceptDelete = async (browser, sessionId, run, accept) => {
@@ -66,7 +67,8 @@ test(
     await click('#prejoin [data-action=join]');
     await wait(`return app.callStage?.mode === 'call' &&
       app.callStage.media.cameraTrack?.readyState === 'live';`);
-    await click(`${CONTROL} [data-action=record-panel]`);
+    await click(`${CONTROL} [data-action=more]`);
+    await click(`${MENU} [data-action=record-panel]`);
     await run(`
       const quality = document.querySelector('[data-record=quality]');
       quality.value = '720p30';
@@ -77,8 +79,8 @@ test(
       `return app.callStage.recording.recorder?.state === 'recording';`,
     );
 
-    await click(`${CONTROL} summary`);
-    await click(`${CONTROL} [data-action=recordings]`);
+    await click(`${CONTROL} [data-action=more]`);
+    await click(`${MENU} [data-action=recordings]`);
     await wait(`
       const row = document.querySelector('${LIBRARY}');
       const panel = row?.closest('.recordings-view');

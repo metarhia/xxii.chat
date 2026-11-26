@@ -105,11 +105,29 @@ const pressFullscreen = async (browser, session) => {
   );
 };
 
+const pickMore = (
+  selector,
+) => `const menu = document.querySelector('.call-bar-menu');
+  if (menu.classList.contains('hidden')) {
+    document.querySelector('#call-view [data-action="more"]').click();
+  }
+  const item = document.querySelector('.call-bar-menu ${selector}');
+  if (!item) throw new Error('Missing ${selector}');
+  item.click();
+  app.callStage.controls.menu.close();
+  return true;`;
+
 const setView = (
   layout,
-) => `const select = document.querySelector('#call-layout');
-  select.value = '${layout}';
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+) => `const menu = document.querySelector('.call-bar-menu');
+  if (menu.classList.contains('hidden')) {
+    document.querySelector('#call-view [data-action="more"]').click();
+  }
+  const item = [...document.querySelectorAll(
+    '.call-bar-menu [data-action="layout-choice"]')]
+    .find((node) => node.textContent === '${layout}');
+  item.click();
+  app.callStage.controls.menu.close();
   return document.querySelector('.call-grid').dataset.layout === '${layout}';`;
 
 const tileFor = (endpoint, slot = 'camera') => {
@@ -235,10 +253,7 @@ test(
     tile.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));`,
     );
     assert.equal(await run(left, `return app.callStage.pin === '';`), true);
-    await run(
-      left,
-      `document.querySelector('[data-action="hide-self"]').click();`,
-    );
+    await run(left, pickMore('[data-action="hide-self"]'));
     assert.equal(
       await run(
         left,
@@ -247,10 +262,7 @@ test(
       ),
       true,
     );
-    await run(
-      left,
-      `document.querySelector('[data-action="hide-self"]').click();`,
-    );
+    await run(left, pickMore('[data-action="hide-self"]'));
     await run(right, `await app.callStage.toggle('camera');`);
     await waitFor(
       browser,
@@ -259,18 +271,12 @@ test(
     return !tile.querySelector('.avatar-wrap').classList.contains('hidden') &&
       tile.querySelector('.call-name').textContent.includes('mic on');`,
     );
-    await run(
-      left,
-      `document.querySelector('[data-action="hide-no-video"]').click();`,
-    );
+    await run(left, pickMore('[data-action="hide-no-video"]'));
     assert.equal(
       await run(left, `${tileFor(remote)} return tile.hidden;`),
       true,
     );
-    await run(
-      left,
-      `document.querySelector('[data-action="hide-no-video"]').click();`,
-    );
+    await run(left, pickMore('[data-action="hide-no-video"]'));
     await run(left, `await app.callStage.toggle('mic');`);
     await run(
       right,
@@ -313,17 +319,13 @@ test(
       true,
     );
     await run(left, 'app.callStage.expand();');
-    await run(
-      left,
-      `const select = document.querySelector('#call-layout');
-    select.value = 'auto';
-    select.dispatchEvent(new Event('change', { bubbles: true }));`,
-    );
+    await run(left, setView('auto'));
+    assert.equal(await run(left, 'return app.callStage.layout;'), 'auto');
     await gesture(
       browser,
       left,
       `const button = document.querySelector(
-      '#call-view [data-action="share-call"]');
+      '#call-view [data-action="share"]');
       if (!button) throw new Error('Missing share to call control');
       button.click();`,
     );

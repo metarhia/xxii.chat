@@ -309,8 +309,10 @@ test(
     );
     await run(
       left,
-      `document.querySelector(
-      '[data-action="stats-overlay"]').click();`,
+      `document.querySelector('#call-view [data-action="more"]').click();
+    document.querySelector(
+      '.call-bar-menu [data-action="stats-overlay"]').click();
+    app.callStage.controls.menu.close();`,
     );
     await run(
       left,

@@ -1,4 +1,5 @@
 import { colorOf, initialsOf } from './avatar.js';
+import { createIcon } from './icons.js';
 
 const NO_NICK = 'set your nick';
 const STATUSES = ['online', 'away', 'offline'];
@@ -22,6 +23,8 @@ class ProfileRow {
     this.#nick = byId('profile-nick');
     this.#dot = byId('profile-dot');
     this.#gear = byId('settings-btn');
+    byId('recordings-btn').prepend(createIcon('recordings', root));
+    this.#gear.prepend(createIcon('settings', root));
     this.#marks = [byId('settings-dot'), byId('about-dot')];
   }
 

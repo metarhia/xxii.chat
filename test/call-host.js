@@ -162,8 +162,8 @@ const announced = (text) => `const live = document.querySelector(
 const MUTED = `const note = document.querySelector('.notification');
   const text = note ? note.textContent : '';
   const mic = document.querySelector('#call-view [data-action="mic"]');
-  const label = mic ? mic.textContent : '';
-  if (!text.includes('alex muted you') || label !== 'mic off') {
+  const label = mic ? mic.getAttribute('aria-pressed') : '';
+  if (!text.includes('alex muted you') || label !== 'false') {
     throw new Error(text + ' / ' + label);
   }
   return true;`;
@@ -192,11 +192,13 @@ const ENDED = `if (app.callSession) throw new Error(app.callSession.phase);
   }
   return true;`;
 
-const END = `const menu = document.querySelector('.leave-menu');
-  if (!menu || menu.classList.contains('hidden')) throw new Error('no end');
-  menu.open = true;
-  const button = menu.querySelector('[data-action="end"]');
-  if (!button || button.textContent !== 'End for everyone') {
+const END = `const leave = document.querySelector(
+    '.call-controls [data-action="leave"]');
+  leave.click();
+  const dialog = document.querySelector('.call-leave-dialog');
+  if (!dialog || !dialog.open) throw new Error('no dialog');
+  const button = dialog.querySelector('[data-choice="end"]');
+  if (!button || button.textContent !== 'end for everyone') {
     throw new Error(button ? button.textContent : 'missing');
   }
   button.click();

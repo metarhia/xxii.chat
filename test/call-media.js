@@ -61,10 +61,10 @@ const waitFor = async (browser, session, body) => {
   throw new Error(`Screen condition failed: ${JSON.stringify(detail)}`);
 };
 
-const gesture = async (browser, session, action) => {
+const gesture = async (browser, session, action, root = '#call-view') => {
   await browser.request('Page.bringToFront', {}, session);
   const expression = harness.script(`const button = document.querySelector(
-    '#call-view [data-action="${action}"]');
+    '${root} [data-action="${action}"]');
     if (!button) throw new Error('Missing ${action}');
     button.click();
     return true;`);
@@ -121,10 +121,12 @@ const PREPARE = `window.screenSends = [];
   return true;`;
 
 const LOCAL = `const media = app.callStage.media;
-  const button = document.querySelector('[data-action=share]');
+  const button = document.querySelector('[data-action=capture-local]');
+  const share = document.querySelector('.call-controls [data-action=share]');
   const sent = window.screenSends.some((item) => item.shared);
   return Boolean(media.screenTrack && !media.screenShared && !sent &&
-    button.textContent === 'captured, not shared');`;
+    button.textContent === 'Stop adding the screen' &&
+    share.textContent === 'share');`;
 
 const SHARED = `const person = app.callStage.people.find(
   (item) => item.endpoint === app.callSession.endpoint);
@@ -180,18 +182,19 @@ test(
     );
     assert.equal(noScreenPackets, true);
 
-    await gesture(browser, left, 'share-call');
+    await gesture(browser, left, 'share');
     await waitFor(browser, left, SHARED);
     await waitFor(browser, right, screenShown(host.endpoint));
     await waitFor(browser, right, screenSound(host.endpoint));
-    await gesture(browser, left, 'screen-motion');
+    await gesture(browser, left, 'sharing-menu');
+    await gesture(browser, left, 'screen-motion', '.call-bar-menu');
     const motion = await run(
       left,
       `const track = app.callStage.media.screenTrack;
     return track.contentHint === 'motion';`,
     );
     assert.equal(motion, true);
-    await gesture(browser, left, 'stop-screen');
+    await gesture(browser, left, 'stop-screen', '.call-bar-menu');
     await waitFor(browser, left, STOPPED);
     await waitFor(browser, right, screenGone(host.endpoint));
 

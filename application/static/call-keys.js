@@ -32,6 +32,14 @@ const SHORTCUTS = [
     label: 'share screen and stop',
   },
   {
+    letter: 'r',
+    command: true,
+    alt: true,
+    action: 'record',
+    keys: 'Ctrl Alt R',
+    label: 'start and stop recording, stop asks first',
+  },
+  {
     letter: 'l',
     command: true,
     alt: true,
@@ -46,6 +54,14 @@ const SHORTCUTS = [
     action: 'fullscreen',
     keys: 'F',
     label: 'full screen stage, outside text fields',
+  },
+  {
+    letter: '/',
+    command: true,
+    alt: false,
+    action: 'shortcuts',
+    keys: 'Ctrl /',
+    label: 'this list',
   },
 ];
 

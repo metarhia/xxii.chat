@@ -7,9 +7,10 @@ const { setTimeout: delay } = require('node:timers/promises');
 
 const harness = require('./harness.js');
 
-const STUDIO = '.call-more [data-action=studio]';
-const RECORD_PANEL = '.call-record-control [data-action=record-panel]';
-const RECORD = '.call-record-control [data-action=record]';
+const STUDIO = '.call-bar-menu [data-action=studio]';
+const MORE = '.call-controls [data-action=more]';
+const RECORD_PANEL = '.call-bar-menu [data-action=record-panel]';
+const RECORD = '.call-controls [data-action=record]';
 const STUDIO_ACTION = '[data-studio-action]';
 const COMMENT_MENU = 'button[data-action="screen-comment"]';
 const FLAGS = harness.MEDIA_FLAGS.concat([
@@ -87,7 +88,8 @@ const setup = async (t, settings = {}) => {
 };
 
 const click = (page, selector) =>
-  page.run(`document.querySelector(${quote(selector)}).click();`);
+  page.run(`${selector === RECORD ? 'window.confirm = () => true;' : ''}
+    document.querySelector(${quote(selector)}).click();`);
 
 const change = (page, selector, value) =>
   page.run(`const control = document.querySelector(${quote(selector)});
@@ -110,7 +112,7 @@ const join = async (page, token = '') => {
 };
 
 const openStudio = async (page) => {
-  await click(page, '.call-more summary');
+  await click(page, MORE);
   await click(page, STUDIO);
   await page.wait('return document.querySelector(".studio-preview canvas");');
 };
@@ -403,6 +405,7 @@ test(
     const page = await setup(t);
     const { run, wait, request, open } = page;
     await join(page);
+    await click(page, MORE);
     await click(page, RECORD_PANEL);
     await change(page, '.call-record [data-record=people]', 'grid');
     await change(page, '.call-record [data-record=quality]', '720p30');
@@ -438,6 +441,7 @@ test(
     await change(page, field('enabled'), true);
     await wait('return app.callStage.studio.enabled;');
 
+    await click(page, MORE);
     await click(page, RECORD_PANEL);
     assert.equal(
       await run(`
@@ -581,6 +585,7 @@ test(
     assert.deepEqual(await run(getRecords), saved);
     assert.equal(await run('return app.callStage.studio.enabled;'), false);
     await wait(chosen('break'));
+    await click(page, MORE);
     await click(page, RECORD_PANEL);
     await change(page, '.call-record [data-record=includeMe]', false);
     await openStudio(page);

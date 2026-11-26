@@ -14,9 +14,10 @@ const harness = require('./harness.js');
 const FLAGS = harness.MEDIA_FLAGS.concat([
   '--disable-features=WebRtcHideLocalIpsWithMdns',
 ]);
-const STUDIO = '.call-more [data-action=studio]';
+const STUDIO = '.call-bar-menu [data-action=studio]';
+const MORE = '.call-controls [data-action=more]';
 const GO_LIVE = '.call-studio [data-action=go-live]';
-const STOP_LIVE = '.call-more [data-action=stop-live]';
+const STOP_LIVE = '.call-bar-menu [data-action=stop-live]';
 const CHIP = '.call-topbar .call-live';
 const STATUS = '.call-studio .stream-status';
 const TOKEN = 'test-token';
@@ -185,7 +186,7 @@ const startEndpoint = async (t, receiver, isCors = true) => {
 };
 
 const addDestination = async (page, url) => {
-  await page.click('.call-more summary');
+  await page.click(MORE);
   await page.click(STUDIO);
   await page.wait(`return document.querySelector('.call-studio[data-open]')
     ?.checkVisibility();`);
@@ -268,8 +269,7 @@ test(
     await host.wait('return app.callStage.people.length === 2;');
     assert.equal(
       await host.run(
-        `const stop = document.querySelector(${quote(STOP_LIVE)});
-        return !stop.checkVisibility();`,
+        `return document.querySelector(${quote(STOP_LIVE)}) === null;`,
       ),
       true,
     );
@@ -345,7 +345,7 @@ test(
     );
 
     await host.front();
-    await host.click('.call-more summary');
+    await host.click(MORE);
     await host.wait(`return document.querySelector(${quote(STOP_LIVE)})
     .checkVisibility();`);
     await host.click(STOP_LIVE);
@@ -383,7 +383,7 @@ test(
       receiver.evaluate,
     );
     await host.front();
-    await host.click('.call-more summary');
+    await host.click(MORE);
     await host.click(STOP_LIVE);
     await host.wait(`return !app.callStage.streaming.isActive;`);
     await delay(300);
@@ -438,7 +438,7 @@ test(
     await guest.wait(hasChip(true, 'alex is live'));
 
     await host.front();
-    await host.click('.call-more summary');
+    await host.click(MORE);
     await host.wait(`return document.querySelector(${quote(STOP_LIVE)})
     .checkVisibility();`);
     await host.click(STOP_LIVE);

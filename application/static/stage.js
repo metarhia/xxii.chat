@@ -1,5 +1,6 @@
 import { ParticipantVolume } from './call-volume.js';
 import { TileMenu } from './call-tile-menu.js';
+import { dismissMenu, isInMenu } from './overlays.js';
 import { peerOf, colorOf, initialsOf } from './avatar.js';
 import { statsText } from './call-stats.js';
 import { liveOf, shownOf, trackOf } from './members.js';
@@ -10,28 +11,29 @@ import { notificationClient } from './notifications.js';
 import { ViewHints } from './view-hints.js';
 import { CallRecording } from './call-record.js';
 import { Streaming } from './streaming.js';
-import { createRecordPanel, createRecordControl } from './record-panel.js';
+import { createRecordPanel } from './record-panel.js';
 import { createButton } from './record-panel.js';
-import { optionOf, labeled } from './view.js';
+import { PHONE, optionOf, labeled } from './view.js';
 import { Studio, createStudioPanel, createStageLists } from './studio.js';
-import { stageMove } from './studio.js';
 import { CALL_LAYOUTS, STRIP_POSITIONS } from './call-layout.js';
 import { tileId, callLayout } from './call-layout.js';
-import { REACTIONS, REACTION_SHOW_MS, isReaction } from './call-hands.js';
+import { REACTION_SHOW_MS, isReaction } from './call-hands.js';
 import { orderOf, rosterOf, createLimiter } from './call-hands.js';
 import { takeReaction, createAutoLower, stepAutoLower } from './call-hands.js';
 import { shortcutOf, isTalkKey, createTalk, stepTalk } from './call-keys.js';
-import { helpOf } from './call-keys.js';
-import { syncFields, settingField, deviceField } from './call-preferences.js';
 import { fillDevice } from './call-preferences.js';
+import { CallControls, createSharing } from './call-controls.js';
+import { pipSupported, PIP_MISSING } from './call-controls.js';
+import { createIconButton, paintIconToggle } from './call-controls.js';
+import { paintReaction, MIC_HINT, CAMERA_HINT } from './call-controls.js';
+import { REACT_HINT } from './call-controls.js';
+import { timeText } from './recording-files.js';
 import { DEFAULTS, createToast, addToast } from './call-settings.js';
 import { showsToast, toastText, TOAST_SHOW_MS } from './call-settings.js';
 import { read, ringGainOf } from './app-settings.js';
 import { TONE_HZ, audioContext, closeContext } from './ringtone.js';
 import { shapeBeat } from './ringtone.js';
 import { titleOf } from './call-settings.js';
-
-const PHONE = '(max-width: 600px), (pointer: coarse) and (max-width: 900px)';
 
 const LEAVE_RECORDING =
   'You are recording this call. Stop the recording and leave?';
@@ -54,21 +56,15 @@ const ADMISSION = {
 const RING_MS = 1600;
 const RING_PATTERN = [280, 120, 280, 920];
 const PIP_SIZE = { width: 360, height: 300 };
-const PIP_MISSING = 'Picture-in-picture is not available in this browser';
-const HINTS = {
-  mic: 'Mute and unmute (Ctrl D, hold Space to talk)',
-  camera: 'Camera on and off (Ctrl E)',
-  share: 'Share screen and stop (Ctrl Alt S)',
-  hand: 'Raise and lower hand (Ctrl Alt H)',
-  fullscreen: 'Full screen stage (F)',
-};
+const STOP_RECORDING = 'Stop the recording?';
+const MORE_BUTTON = '.call-controls [data-action="more"]';
+const STAGE_ONLY = ['fullscreen', 'layout', 'shortcuts'];
 
 const ACTIONS = {
   mic: (stage) => stage.toggle('mic'),
   camera: (stage) => stage.toggle('camera'),
   share: (stage) => stage.share(),
-  'share-call': (stage) => stage.media?.openScreen(true),
-  'capture-local': (stage) => stage.media?.openScreen(false),
+  'capture-local': (stage) => stage.captureLocal(),
   'screen-motion': (stage) => stage.media?.toggleScreenMotion(),
   'stop-screen': (stage) => stage.media?.stopScreen(),
   join: (stage) => stage.join(),
@@ -81,29 +77,24 @@ const ACTIONS = {
   'hide-no-video': (stage) => stage.toggleView('hideNoVideo'),
   hand: (stage) => stage.toggleHand(),
   'opt-out': (stage) => stage.toggleOptOut(),
-  record: (stage) => stage.recording?.toggle(),
+  record: (stage) => stage.toggleRecord(),
   'record-pause': (stage) => stage.recording?.togglePause(),
   'record-panel': (stage) => stage.toggleProgramPanel('record'),
   studio: (stage) => stage.toggleProgramPanel('studio'),
   'go-live': (stage) => stage.streaming?.toggle(),
   'stop-live': (stage) => stage.streaming?.stop(),
   'record-background': (stage) => stage.recording?.resetBackground(),
-  recordings: (stage) => {
-    stage.closeMenus();
-    stage.hooks.recordings();
-  },
+  recordings: (stage) => stage.hooks.recordings(),
   layout: (stage) => stage.nextLayout(),
   pip: (stage) => stage.openPip(),
   'pip-back': (stage) => stage.closePip(true),
   expand: (stage) => stage.expand(),
   'switch-camera': (stage) => stage.media?.switchCamera(),
-  people: (stage) => stage.openSheet('people'),
-  chat: (stage) => stage.openSheet('chat'),
+  people: (stage) => stage.togglePanel('people'),
+  chat: (stage) => stage.togglePanel('chat'),
   'close-sheet': (stage) => stage.closeSheet(),
-  settings: (stage) => {
-    stage.closeMenus();
-    stage.hooks.settings();
-  },
+  settings: (stage) => stage.hooks.settings(),
+  shortcuts: (stage) => stage.controls?.showShortcuts(),
 };
 
 const HOST_ACTIONS = {
@@ -265,48 +256,6 @@ const createLobby = () => {
   return section;
 };
 
-const createShare = () => {
-  const wrap = document.createElement('div');
-  wrap.className = 'call-share';
-  wrap.append(createButton('share', 'share screen'));
-  const menu = document.createElement('details');
-  const summary = document.createElement('summary');
-  summary.textContent = '▾';
-  summary.setAttribute('aria-label', 'screen sharing options');
-  const choices = document.createElement('div');
-  choices.className = 'share-menu';
-  choices.append(
-    createButton('share-call', 'share to call'),
-    createButton('capture-local', 'capture without sharing'),
-    createButton('screen-motion', 'video mode off'),
-    createButton('stop-screen', 'stop capture'),
-  );
-  menu.append(summary, choices);
-  wrap.append(menu);
-  return wrap;
-};
-
-const createLayoutControls = () => {
-  const choices = document.createElement('details');
-  choices.className = 'call-layout-options';
-  const summary = document.createElement('summary');
-  summary.textContent = 'view';
-  const menu = document.createElement('div');
-  menu.className = 'share-menu';
-  const layout = createField('call-layout', 'layout', CALL_LAYOUTS);
-  const strip = createField('call-strip', 'strip position', STRIP_POSITIONS);
-  menu.append(
-    layout,
-    strip,
-    createButton('hide-self', 'hide self view'),
-    createButton('hide-no-video', 'hide tiles without video'),
-    createButton('fullscreen', 'full screen stage'),
-    createButton('stats-overlay', 'stats overlay'),
-  );
-  choices.append(summary, menu);
-  return choices;
-};
-
 const createHostControls = () => {
   const box = document.createElement('div');
   box.className = 'call-host hidden';
@@ -341,111 +290,8 @@ const createPeople = () => {
   return aside;
 };
 
-const createCaptureControl = (name) => {
-  const wrap = document.createElement('div');
-  wrap.className = 'call-device';
-  wrap.append(createButton(name, `${name} on`));
-  const menu = document.createElement('details');
-  const summary = document.createElement('summary');
-  summary.textContent = '▾';
-  summary.setAttribute('aria-label', `${name} options`);
-  const choices = document.createElement('div');
-  choices.className = 'share-menu';
-  choices.append(deviceField(name));
-  if (name === 'mic') {
-    choices.append(settingField('noise'), settingField('pushToTalk'));
-  } else {
-    choices.append(
-      settingField('mirror'),
-      createButton('switch-camera', 'switch front/back camera'),
-    );
-  }
-  menu.append(summary, choices);
-  wrap.append(menu);
-  return wrap;
-};
-
-const createHand = () => createButton('hand', 'raise hand');
-
 const isControl = (element) =>
-  Boolean(element?.closest?.('button, summary, select, input, a'));
-
-const pipSupported = () => {
-  const api = globalThis.documentPictureInPicture;
-  return typeof api?.requestWindow === 'function';
-};
-
-const createMore = (hasStudio) => {
-  const wrap = document.createElement('div');
-  wrap.className = 'call-more';
-  const menu = document.createElement('details');
-  const summary = document.createElement('summary');
-  summary.textContent = 'more';
-  summary.setAttribute('aria-label', 'more options');
-  const choices = document.createElement('div');
-  choices.className = 'share-menu';
-  const pip = createButton('pip', 'picture-in-picture');
-  const note = document.createElement('p');
-  note.className = 'call-pip-note';
-  note.setAttribute('role', 'status');
-  if (!pipSupported()) {
-    pip.disabled = true;
-    note.textContent = PIP_MISSING;
-  }
-  const keys = document.createElement('dl');
-  keys.className = 'call-keys';
-  for (const row of helpOf()) {
-    const name = document.createElement('dt');
-    name.textContent = row.keys;
-    const text = document.createElement('dd');
-    text.textContent = row.label;
-    keys.append(name, text);
-  }
-  const stopLive = createButton('stop-live', 'Stop live');
-  stopLive.hidden = true;
-  if (hasStudio) choices.append(createButton('studio', 'Studio'), stopLive);
-  choices.append(pip, createButton('settings', 'call settings'), note, keys);
-  menu.append(summary, choices);
-  wrap.append(menu);
-  return wrap;
-};
-
-const createReact = () => {
-  const wrap = document.createElement('div');
-  wrap.className = 'call-react';
-  const menu = document.createElement('details');
-  const summary = document.createElement('summary');
-  summary.textContent = 'react';
-  summary.setAttribute('aria-label', 'reactions');
-  const choices = document.createElement('div');
-  choices.className = 'share-menu react-menu';
-  for (const emoji of REACTIONS) {
-    const button = createButton('react', emoji);
-    button.dataset.emoji = emoji;
-    button.setAttribute('aria-label', `react ${emoji}`);
-    choices.append(button);
-  }
-  menu.append(summary, choices);
-  wrap.append(menu);
-  return wrap;
-};
-
-const createLeave = () => {
-  const wrap = document.createElement('div');
-  wrap.className = 'call-leave';
-  wrap.append(createButton('leave', 'leave'));
-  const menu = document.createElement('details');
-  menu.className = 'leave-menu hidden';
-  const summary = document.createElement('summary');
-  summary.textContent = '▾';
-  summary.setAttribute('aria-label', 'leave options');
-  const choices = document.createElement('div');
-  choices.className = 'share-menu';
-  choices.append(createButton('end', 'End for everyone'));
-  menu.append(summary, choices);
-  wrap.append(menu);
-  return wrap;
-};
+  Boolean(element?.closest?.('button, select, input, a'));
 
 const createPrompt = () => {
   const row = document.createElement('div');
@@ -471,18 +317,22 @@ const createKnock = (item) => {
   return toast;
 };
 
-const createCall = (title, hasStudio) => {
+const createCall = (title, hasStudio, bar) => {
   const section = document.createElement('section');
   section.id = 'call-view';
-  const bar = document.createElement('header');
-  bar.className = 'call-topbar';
+  const topbar = document.createElement('header');
+  topbar.className = 'call-topbar';
   const back = createButton('back', '‹');
   back.setAttribute('aria-label', 'back');
   const heading = document.createElement('span');
   heading.className = 'chat-title';
   heading.textContent = title;
-  const recording = document.createElement('span');
+  const duration = document.createElement('span');
+  duration.className = 'call-duration';
+  duration.setAttribute('aria-hidden', 'true');
+  const recording = createButton('record-panel', '');
   recording.className = 'call-recording hidden';
+  recording.title = 'Recording options';
   const live = document.createElement('span');
   live.className = 'call-live hidden';
   const backstage = document.createElement('span');
@@ -492,16 +342,15 @@ const createCall = (title, hasStudio) => {
   const optOut = createButton('opt-out', 'opt out');
   optOut.classList.add('call-opt-out', 'hidden');
   optOut.setAttribute('aria-pressed', 'false');
-  bar.append(
+  topbar.append(
     back,
     heading,
+    duration,
     recording,
     live,
     backstage,
     optOut,
-    createButton('people', 'people'),
-    createButton('chat', 'chat'),
-    createLayoutControls(),
+    createSharing(),
   );
   const grid = document.createElement('div');
   grid.className = 'call-grid';
@@ -516,28 +365,10 @@ const createCall = (title, hasStudio) => {
   body.className = 'call-body';
   body.append(grid, createPeople(), createRecordPanel());
   if (hasStudio) body.append(createStudioPanel());
-  const controls = document.createElement('footer');
-  controls.className = 'call-controls';
-  controls.append(
-    createCaptureControl('mic'),
-    createCaptureControl('camera'),
-    createButton('enable-sound', 'Enable sound'),
-    createLeave(),
-  );
-  const leave = controls.lastElementChild;
-  controls.insertBefore(createShare(), leave);
-  controls.insertBefore(createHand(), leave);
-  controls.insertBefore(createReact(), leave);
-  controls.insertBefore(createRecordControl(), leave);
-  controls.insertBefore(createMore(hasStudio), leave);
   const note = document.createElement('p');
   note.className = 'call-note hidden';
   note.setAttribute('role', 'status');
-  section.append(bar, note, createPrompt(), body, controls);
-  for (const action of Object.keys(HINTS)) {
-    const button = section.querySelector(`[data-action="${action}"]`);
-    if (button) button.title = HINTS[action];
-  }
+  section.append(topbar, note, createPrompt(), body, bar);
   return section;
 };
 
@@ -547,10 +378,10 @@ const createMini = () => {
   const controls = document.createElement('div');
   controls.className = 'mini-controls';
   controls.append(
-    createButton('mic', 'mic on'),
-    createButton('camera', 'camera on'),
-    createButton('leave', 'leave'),
-    createButton('expand', 'expand'),
+    createIconButton('mic', 'mic', 'Microphone', MIC_HINT),
+    createIconButton('camera', 'camera', 'Camera', CAMERA_HINT),
+    createIconButton('leave', 'leave', 'Leave call', 'Leave'),
+    createIconButton('expand', 'expand', 'Expand the call', 'Expand'),
     createButton('enable-sound', 'Enable sound'),
   );
   tile.append(createVideo(true), createAvatar(), controls);
@@ -564,15 +395,16 @@ const createPip = () => {
   name.className = 'pip-name';
   const controls = document.createElement('div');
   controls.className = 'pip-controls';
-  const back = createButton('pip-back', '‹');
-  back.setAttribute('aria-label', 'back to the call');
-  const mic = createButton('mic', 'mic on');
-  const camera = createButton('camera', 'camera on');
-  mic.title = HINTS.mic;
-  camera.title = HINTS.camera;
-  controls.append(back, mic, camera, createHand(), createReact());
+  const back = 'Back to the call';
+  const react = createIconButton('reactions', 'react', 'Reactions', REACT_HINT);
+  react.setAttribute('aria-haspopup', 'menu');
+  react.setAttribute('aria-expanded', 'false');
   controls.append(
-    createButton('leave', 'leave'),
+    createIconButton('pip-back', 'back', back, back),
+    createIconButton('mic', 'mic', 'Microphone', MIC_HINT),
+    createIconButton('camera', 'camera', 'Camera', CAMERA_HINT),
+    react,
+    createIconButton('leave', 'leave', 'Leave call', 'Leave'),
     createButton('enable-sound', 'Enable sound'),
   );
   root.append(createVideo(true), createAvatar(), name, controls);
@@ -600,7 +432,20 @@ const copyStyles = (target) => {
   }
 };
 
-const createTile = (endpoint) => {
+const createHandBadge = (isLocal) => {
+  if (!isLocal) {
+    const badge = document.createElement('span');
+    badge.className = 'call-hand-badge hidden';
+    return badge;
+  }
+  const badge = createButton('hand', '');
+  badge.className = 'call-hand-badge hidden';
+  badge.title = 'Lower hand';
+  badge.setAttribute('aria-label', 'Lower hand');
+  return badge;
+};
+
+const createTile = (endpoint, isLocal = false) => {
   const tile = document.createElement('article');
   tile.className = 'call-tile';
   tile.dataset.endpoint = endpoint;
@@ -617,8 +462,7 @@ const createTile = (endpoint) => {
   stats.className = 'tile-stats hidden';
   const poor = createButton('audio-only', 'Poor connection · try audio only');
   poor.classList.add('call-poor', 'hidden');
-  const hand = document.createElement('span');
-  hand.className = 'call-hand-badge hidden';
+  const hand = createHandBadge(isLocal);
   tile.append(createVideo(true), createAvatar(), name, bars, menu, stats, poor);
   tile.append(hand);
   return tile;
@@ -938,6 +782,10 @@ class CallStage {
     this.soundBlocked = false;
     this.volume = null;
     this.tileMenu = null;
+    this.controls = null;
+    this.hiddenPanels = new Set();
+    this.started = 0;
+    this.durationTimer = null;
     this.stats = new Map();
     this.statsShown = new Set();
     this.statsHidden = new Set();
@@ -1012,6 +860,7 @@ class CallStage {
     this.chat = session.chat;
     this.volume = new ParticipantVolume(this.#onNotice);
     this.tileMenu = new TileMenu(this);
+    this.controls = new CallControls(this);
     this.media = new MediaCapture();
     this.announcements = document.getElementById('call-announcements');
     this.phone = matchMedia(PHONE);
@@ -1095,6 +944,12 @@ class CallStage {
     this.floats.clear();
     this.tileMenu?.stop();
     this.tileMenu = null;
+    this.controls?.stop();
+    this.controls = null;
+    this.stopDuration();
+    this.hiddenPanels.clear();
+    this.root.removeAttribute('data-hide');
+    this.started = 0;
     this.volume?.stop();
     this.volume = null;
     this.stats.clear();
@@ -1159,6 +1014,7 @@ class CallStage {
     const title = this.hooks.titleOf(this.chat);
     const view = this.viewOf(mode, title);
     this.stopLayout();
+    this.stopDuration();
     this.host.replaceChildren(view);
     this.root.dataset.call = mode;
     this.hooks.mounted?.(mode);
@@ -1168,6 +1024,7 @@ class CallStage {
     this.parkAudios();
     if (mode === 'prejoin') this.onMedia();
     if (mode === 'call') {
+      this.startDuration();
       this.updatePhone();
       this.updateVisibility();
       this.fillSelects();
@@ -1207,6 +1064,7 @@ class CallStage {
     this.hooks.popLayer('call');
     this.mode = 'mini';
     this.stopLayout();
+    this.stopDuration();
     this.host.classList.add('hidden');
     this.host.replaceChildren();
     this.root.dataset.call = 'mini';
@@ -1230,6 +1088,7 @@ class CallStage {
     }
     this.renderTiles();
     this.recording?.paint();
+    this.controls?.paint();
   }
 
   get programPanel() {
@@ -1241,7 +1100,6 @@ class CallStage {
 
   toggleProgramPanel(name) {
     if (this.mode !== 'call') return;
-    this.closeMenus();
     const open = this.programPanel === name;
     if (this.phone?.matches) {
       if (open) this.closeSheet();
@@ -1280,12 +1138,7 @@ class CallStage {
 
   hideSheet() {
     if (!this.sheet) return;
-    const triggers = {
-      record: '.call-record-control [data-action="record"]',
-      studio: '.call-more summary',
-    };
-    const selector = triggers[this.sheet] ?? `[data-action="${this.sheet}"]`;
-    const trigger = this.host?.querySelector(selector);
+    const trigger = this.host?.querySelector(MORE_BUTTON);
     this.sheet = '';
     delete this.root.dataset.callSheet;
     trigger?.focus();
@@ -1350,8 +1203,11 @@ class CallStage {
   onMiniClick(event) {
     const button = event.target.closest('[data-action]');
     if (button && event.detail > 0) button.blur();
-    if (button) return void this.onAction(button.dataset.action);
-    this.expand();
+    if (!button) return void this.expand();
+    if (button.dataset.action === 'leave' && this.controls?.askLeave(button)) {
+      return;
+    }
+    this.onAction(button.dataset.action);
   }
 
   onAction(action, endpoint = '', slot = 'camera') {
@@ -1385,14 +1241,8 @@ class CallStage {
 
   onKey(event) {
     if (event.isComposing) return;
-    if (event.target.closest?.('.recordings-player')) return;
-    if (event.key === 'Escape' && this.tileMenu?.menu.isOpen) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.tileMenu.close();
-      return;
-    }
-    if (event.key === 'Escape' && this.closeMenus()) {
+    if (event.target.closest?.('.recordings-player, dialog')) return;
+    if (event.key === 'Escape' && dismissMenu('escape')) {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
@@ -1408,7 +1258,7 @@ class CallStage {
       this.closeSheet();
       return;
     }
-    if (this.tileMenu?.menu.contains(event.target)) return;
+    if (isInMenu(event.target)) return;
     if (this.mode === 'prejoin' && event.target.closest?.('#panel')) return;
     if (this.mode === 'prejoin') return void this.onPrejoinKey(event);
     if (this.mode !== 'call' && this.mode !== 'mini') return;
@@ -1423,22 +1273,6 @@ class CallStage {
       event.stopPropagation();
     }
     this.talkStep('up');
-  }
-
-  closeMenus() {
-    const roots = [this.host, ...this.miniRoots()];
-    let closed = false;
-    for (const root of roots) {
-      const open = root ? root.querySelectorAll('details[open]') : [];
-      for (const menu of open) {
-        const summary = menu.querySelector('summary');
-        const inside = menu.contains(menu.ownerDocument.activeElement);
-        menu.open = false;
-        closed = true;
-        if (inside) summary?.focus();
-      }
-    }
-    return closed;
   }
 
   onPrejoinKey(event) {
@@ -1457,10 +1291,8 @@ class CallStage {
     if (isTalkKey(event)) return void this.onTalkKey(event, typing);
     const row = shortcutOf(event);
     if (!row || (typing && !row.command)) return;
-    const stage = this.mode === 'call';
-    if (!stage && (row.action === 'fullscreen' || row.action === 'layout')) {
-      return;
-    }
+    const isStage = this.mode === 'call';
+    if (!isStage && STAGE_ONLY.includes(row.action)) return;
     event.preventDefault();
     event.stopPropagation();
     this.onAction(row.action);
@@ -1532,13 +1364,29 @@ class CallStage {
     if (leaving?.catch) leaving.catch((error) => this.hooks.fail(error));
   }
 
-  leave() {
+  isLeaveConfirmed() {
     const isRecording = this.recording?.isActive === true;
     const isLive = this.streaming?.isActive === true;
     const text = leaveText(isRecording, isLive);
     const isBusy = isRecording || isLive;
-    if (isBusy && this.hooks.confirm?.(text) === false) return;
-    this.cancel();
+    return !(isBusy && this.hooks.confirm?.(text) === false);
+  }
+
+  leave() {
+    if (this.isLeaveConfirmed()) this.cancel();
+  }
+
+  toggleRecord() {
+    const recording = this.recording;
+    const isAsking = recording?.isActive === true;
+    const isDenied = isAsking && this.hooks.confirm?.(STOP_RECORDING) === false;
+    if (!recording || isDenied) return null;
+    return recording.toggle();
+  }
+
+  endEveryone() {
+    if (!this.isLeaveConfirmed()) return;
+    this.endForAll().catch((error) => this.hooks.fail(error));
   }
 
   pagehide() {
@@ -1548,8 +1396,53 @@ class CallStage {
   async share() {
     const media = this.media;
     if (!media) return;
-    if (media.screenTrack) media.stopScreen();
+    if (media.screenShared) media.stopScreen();
     else await media.openScreen(true);
+  }
+
+  async captureLocal() {
+    const media = this.media;
+    if (!media) return;
+    if (media.screenTrack && !media.screenShared) media.stopScreen();
+    else await media.openScreen(false);
+  }
+
+  isPanelShown(name) {
+    if (this.phone?.matches) return this.sheet === name;
+    return !this.hiddenPanels.has(name);
+  }
+
+  togglePanel(name) {
+    if (this.mode !== 'call') return;
+    if (this.phone?.matches) {
+      if (this.sheet === name) this.closeSheet();
+      else this.openSheet(name);
+      return;
+    }
+    if (this.hiddenPanels.has(name)) this.hiddenPanels.delete(name);
+    else this.hiddenPanels.add(name);
+    const hidden = Array.from(this.hiddenPanels).join(' ');
+    if (hidden) this.root.dataset.hide = hidden;
+    else this.root.removeAttribute('data-hide');
+    this.controls?.paint();
+  }
+
+  startDuration() {
+    this.stopDuration();
+    this.paintDuration();
+    this.durationTimer = setInterval(() => this.paintDuration(), 1000);
+  }
+
+  stopDuration() {
+    clearInterval(this.durationTimer);
+    this.durationTimer = null;
+  }
+
+  paintDuration() {
+    const node = this.host?.querySelector('.call-duration');
+    if (!node) return;
+    const started = this.started || Date.now();
+    node.textContent = timeText(Date.now() - started);
   }
 
   async toggle(kind) {
@@ -1605,6 +1498,7 @@ class CallStage {
     this.hands = orderOf(people);
     this.isAdmin = local?.admin === true;
     this.hostPeer = textOf(state.host);
+    if (typeof state.started === 'number') this.started = state.started;
     this.policy = textOf(state.policy);
     this.locked = state.locked === true;
     this.joinBackstage = state.joinBackstage === true;
@@ -1622,9 +1516,7 @@ class CallStage {
       this.stats.delete(endpoint);
       this.statsShown.delete(endpoint);
       this.statsHidden.delete(endpoint);
-      if (this.tileMenu?.tile?.dataset.endpoint === endpoint) {
-        this.tileMenu.close(false);
-      }
+      if (this.tileMenu?.endpoint === endpoint) this.tileMenu.close(false);
       this.attachAudio(endpoint, null);
       this.attachAudio(endpoint, null, 'screenAudio');
     }
@@ -1662,8 +1554,10 @@ class CallStage {
     const recorders = this.people.filter((person) => person.recording);
     const names = recorders.map((person) => person.nick || 'guest');
     const text = names.length > 0 ? `● ${names.join(', ')} recording` : '';
-    note.textContent = text;
-    note.classList.toggle('hidden', text === '');
+    if (this.recording?.isActive !== true) {
+      note.textContent = text;
+      note.classList.toggle('hidden', text === '');
+    }
     const me = this.session?.endpoint;
     const makers = this.people.filter(
       (person) => person.recording || person.live,
@@ -1677,10 +1571,12 @@ class CallStage {
     optOut.setAttribute('aria-pressed', `${isOut}`);
   }
 
+  paintCounts() {
+    this.controls?.paintCounts();
+  }
+
   paintLive() {
     const chip = this.host?.querySelector('.call-live');
-    const stop = this.host?.querySelector('[data-action="stop-live"]');
-    if (stop) stop.hidden = this.streaming?.isActive !== true;
     if (!chip) return;
     const names = this.people
       .filter((person) => person.live)
@@ -1923,7 +1819,7 @@ class CallStage {
       this.tileMenu?.open(tile, { x: event.clientX, y: event.clientY });
     });
     host.addEventListener('dblclick', (event) => {
-      if (event.target.closest('button, select, summary')) return;
+      if (event.target.closest('button, select')) return;
       const tile = event.target.closest('.call-tile');
       if (!tile) return;
       this.togglePin(tile.dataset.endpoint, tile.dataset.slot ?? 'camera');
@@ -1952,13 +1848,13 @@ class CallStage {
       this.tileMenu?.toggle(tile, button);
       return;
     }
-    if (event.detail > 0) button.blur();
-    if (button.dataset.action === 'react') {
-      this.react(button.dataset.emoji);
-      const menu = button.closest('details');
-      if (menu) menu.open = false;
+    if (button.dataset.action === 'roster-menu') {
+      const endpoint = button.closest('[data-endpoint]')?.dataset.endpoint;
+      this.tileMenu?.toggleRoster(endpoint, button);
       return;
     }
+    if (this.controls?.handle(button)) return;
+    if (event.detail > 0) button.blur();
     const endpoint = button.closest('[data-endpoint]')?.dataset.endpoint;
     const slot = button.closest('[data-slot]')?.dataset.slot ?? 'camera';
     this.onAction(button.dataset.action, endpoint, slot);
@@ -1967,7 +1863,7 @@ class CallStage {
   viewOf(mode, title) {
     if (mode === 'prejoin') return createPrejoin(title, this.hooks.hasNick());
     if (mode === 'lobby') return createLobby();
-    return createCall(title, Boolean(this.studio));
+    return createCall(title, Boolean(this.studio), this.controls.create());
   }
 
   onDevice(event) {
@@ -1979,18 +1875,9 @@ class CallStage {
       return;
     }
     if (record || pin || volume) return void this.recording?.change(select);
-    if (select.dataset.setting || select.dataset.device) {
-      this.hooks.preferences.change(select);
-      return;
-    }
     if (select.id === 'call-policy') {
       this.command('policy', '', select.value);
       return;
-    }
-    if (select.id === 'call-layout') this.setLayout(select.value);
-    if (select.id === 'call-strip') {
-      this.strip = select.value;
-      this.renderTiles();
     }
     const media = this.media;
     if (!media) return;
@@ -2003,18 +1890,6 @@ class CallStage {
     const media = this.media;
     const host = this.host;
     if (!media || !host) return;
-    fillDevice(
-      host.querySelector('[data-device="camera"]'),
-      media.cameras,
-      media.cameraId,
-      'camera',
-    );
-    fillDevice(
-      host.querySelector('[data-device="mic"]'),
-      media.mics,
-      media.micId,
-      'mic',
-    );
     const camera = host.querySelector('#prejoin-camera');
     const mic = host.querySelector('#prejoin-mic');
     fillDevice(camera, media.cameras, media.cameraId, 'camera');
@@ -2058,59 +1933,48 @@ class CallStage {
   paintButtons(root) {
     const media = this.media;
     if (!media) return;
-    this.paintShare(root);
-    this.paintLeave(root);
-    const mics = root.querySelectorAll('[data-action="mic"]');
-    for (const button of mics) {
+    if (root === this.host) this.controls?.paint();
+    this.paintCapture(root);
+    this.paintIcons(root, media);
+    const micSelector = '[data-action="mic"]:not(.call-control, .call-icon)';
+    for (const button of root.querySelectorAll(micSelector)) {
       button.textContent = media.micOn ? 'mic on' : 'mic off';
       button.classList.toggle('off', !media.micOn);
       button.classList.toggle('warn', media.micMissing);
     }
-    const raised = this.isHandRaised();
-    for (const button of root.querySelectorAll('[data-action="hand"]')) {
-      button.textContent = raised ? 'lower hand' : 'raise hand';
-      button.classList.toggle('off', !raised);
-      button.setAttribute('aria-pressed', raised ? 'true' : 'false');
-    }
-    syncFields(root, this.preferences);
-    const cameras = root.querySelectorAll('[data-action="camera"]');
-    for (const button of cameras) {
+    const cameraSelector =
+      '[data-action="camera"]:not(.call-control, .call-icon)';
+    for (const button of root.querySelectorAll(cameraSelector)) {
       button.textContent = media.cameraOn ? 'camera on' : 'camera off';
       button.classList.toggle('off', !media.cameraOn);
       button.classList.toggle('warn', media.cameraMissing);
     }
   }
 
-  paintLeave(root) {
-    const menu = root.querySelector('.leave-menu');
-    menu?.classList.toggle('hidden', !this.isAdmin);
+  paintIcons(root, media) {
+    const mic = root.querySelector('.call-icon[data-action="mic"]');
+    const camera = root.querySelector('.call-icon[data-action="camera"]');
+    if (mic) {
+      paintIconToggle(mic, media.micOn, ['mic', 'mic-off'], media.micMissing);
+    }
+    if (camera) {
+      const icons = ['camera', 'camera-off'];
+      paintIconToggle(camera, media.cameraOn, icons, media.cameraMissing);
+    }
+    const react = root.querySelector('.call-icon[data-action="reactions"]');
+    if (react) paintReaction(react, this.isHandRaised());
   }
 
-  paintShare(root) {
+  paintCapture(root) {
     const media = this.media;
-    const controls = root.querySelector('.call-share');
-    controls?.classList.toggle('hidden', !media.canScreen);
-    const share = root.querySelector('[data-action="share"]');
-    if (share) {
-      let label = 'share screen';
-      if (media.screenTrack) {
-        label = media.screenShared ? 'stop sharing' : 'captured, not shared';
-      }
-      share.textContent = label;
-      share.disabled = media.screenPending;
-    }
-    const motion = root.querySelector('[data-action="screen-motion"]');
-    if (motion) {
-      const mode = media.screenMotion ? 'on' : 'off';
-      motion.textContent = `video mode ${mode}`;
-      motion.setAttribute('aria-pressed', `${media.screenMotion}`);
-    }
-    for (const action of ['share-call', 'capture-local']) {
-      const button = root.querySelector(`[data-action="${action}"]`);
-      if (button) button.disabled = media.screenPending;
-    }
-    const stop = root.querySelector('[data-action="stop-screen"]');
-    if (stop) stop.disabled = !media.screenTrack;
+    const button = root.querySelector('[data-action="capture-local"]');
+    if (!button) return;
+    const isLocal = Boolean(media.screenTrack) && !media.screenShared;
+    button.textContent = isLocal
+      ? 'Stop adding the screen'
+      : 'Add a screen to my recording';
+    button.disabled = media.screenPending || media.screenShared;
+    button.classList.toggle('hidden', !media.canScreen);
   }
 
   paintLevel(level) {
@@ -2516,16 +2380,12 @@ class CallStage {
       opted.textContent = 'opted out';
       item.append(opted);
     }
-    if (this.isAdmin) {
-      const menu = document.createElement('details');
-      menu.className = 'roster-menu';
-      const summary = document.createElement('summary');
-      summary.textContent = '⋯';
-      summary.setAttribute('aria-label', `Options for ${name.textContent}`);
-      const { action, label } = stageMove(person);
-      menu.append(summary, createButton(action, label));
-      item.append(menu);
-    }
+    const menu = createButton('roster-menu', '⋯');
+    menu.classList.add('roster-menu');
+    menu.setAttribute('aria-label', `Options for ${name.textContent}`);
+    menu.setAttribute('aria-haspopup', 'menu');
+    menu.setAttribute('aria-expanded', 'false');
+    item.append(menu);
     return item;
   }
 
@@ -2634,6 +2494,12 @@ class CallStage {
     this.renderTiles();
   }
 
+  setStrip(strip) {
+    if (!STRIP_POSITIONS.includes(strip)) return;
+    this.strip = strip;
+    this.renderTiles();
+  }
+
   nextLayout() {
     const index = (CALL_LAYOUTS.indexOf(this.layout) + 1) % CALL_LAYOUTS.length;
     this.setLayout(CALL_LAYOUTS[index]);
@@ -2733,18 +2599,6 @@ class CallStage {
       tile.style.width = `${position.width}px`;
       tile.style.height = `${position.height}px`;
     }
-    const select = this.host.querySelector('#call-layout');
-    if (select) select.value = this.layout;
-    const strip = this.host.querySelector('#call-strip');
-    if (strip) strip.value = this.strip;
-    const options = {
-      'hide-self': this.hideSelf,
-      'hide-no-video': this.hideNoVideo,
-    };
-    for (const action in options) {
-      const button = this.host.querySelector(`[data-action="${action}"]`);
-      button?.setAttribute('aria-pressed', `${options[action]}`);
-    }
   }
 
   paintSpeakingTile(tile, endpoint) {
@@ -2778,12 +2632,12 @@ class CallStage {
   }
 
   paintTile(grid, endpoint, found) {
+    const local = endpoint === this.session?.endpoint;
     let tile = found;
     if (!tile) {
-      tile = createTile(endpoint);
+      tile = createTile(endpoint, local);
       grid.append(tile);
     }
-    const local = endpoint === this.session?.endpoint;
     tile.classList.toggle('local', local);
     tile.dataset.slot = 'camera';
     const name = this.nameOf(endpoint);
@@ -2807,7 +2661,9 @@ class CallStage {
     const order = this.hands.get(endpoint);
     badge.classList.toggle('hidden', !order);
     badge.textContent = order ? `✋ ${order}` : '';
-    if (order) badge.setAttribute('aria-label', `hand raised, number ${order}`);
+    if (order && !local) {
+      badge.setAttribute('aria-label', `hand raised, number ${order}`);
+    }
   }
 
   peerOf(endpoint) {
@@ -2946,6 +2802,7 @@ relaying for ${from} and ${to}`;
     const root = createPip();
     copyStyles(popup.document);
     popup.document.body.append(root);
+    this.controls?.attachPip(popup.document);
     root.addEventListener('click', this.#onClick);
     popup.document.addEventListener('keydown', this.#onKey, true);
     popup.document.addEventListener('keyup', this.#onKeyUp, true);
@@ -2964,6 +2821,7 @@ relaying for ${from} and ${to}`;
     if (!pip) return;
     this.pip = null;
     this.talkStep('blur');
+    this.controls?.detachPip();
     const popup = pip.window;
     popup.removeEventListener('pagehide', this.#onPipClose);
     popup.removeEventListener('blur', this.#onBlur);

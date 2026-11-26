@@ -1,6 +1,10 @@
-import { isReducedMotion } from './view.js';
+import { PHONE, isReducedMotion } from './view.js';
+import { createIcon } from './icons.js';
 
 const MARGIN = 8;
+const GAP = 4;
+const MIN_ROOM = 120;
+const PULL_CLOSE_PX = 64;
 const SWIPE_PX = 50;
 const SWITCHER_LIMIT = 12;
 const LONG_PRESS_MS = 450;
@@ -11,7 +15,19 @@ const REPLY_PX = 56;
 const EDGE_PX = 24;
 const LIFT_MS = 160;
 
-const MENU_KEYS = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+const ITEM = '.menu-item:not([aria-disabled="true"])';
+const FIELDS = '.menu-custom :is(input, button):not(:disabled)';
+const FOCUSABLE = `${ITEM}, .menu-reactions button, ${FIELDS}`;
+const ROW = '.menu-reactions, .menu-group.menu-row';
+const KEY_STEPS = { ArrowDown: 1, ArrowUp: -1 };
+const ROW_STEPS = { ArrowRight: 1, ArrowLeft: -1 };
+const OPPOSITE = { top: 'bottom', bottom: 'top' };
+const RETURNING = ['escape', 'tab', 'select'];
+const ITEM_ROLES = {
+  action: 'menuitem',
+  checkbox: 'menuitemcheckbox',
+  radio: 'menuitemradio',
+};
 
 const LIGHTBOX_ACTIONS = {
   prev: (lightbox) => lightbox.step(-1),
@@ -19,6 +35,10 @@ const LIGHTBOX_ACTIONS = {
   close: (lightbox, handlers) => handlers.close(),
   download: (lightbox, handlers) => handlers.download(lightbox.file),
 };
+
+const inputs = new WeakMap();
+let current = null;
+let counter = 0;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
 
@@ -31,15 +51,112 @@ const markMine = (buttons, mine) => {
   }
 };
 
-const createMenuItem = ({ action, label, file, glyph }) => {
-  const button = document.createElement('button');
+const nextId = () => {
+  counter++;
+  return `menu-${counter}`;
+};
+
+const inputOf = (doc) => {
+  const known = inputs.get(doc);
+  if (known) return known;
+  const input = { isKeyboard: false };
+  const track = (isKeyboard) => (event) => {
+    if (event.isTrusted) input.isKeyboard = isKeyboard;
+  };
+  const onClick = (event) => {
+    if (event.isTrusted) input.isKeyboard = event.detail === 0;
+  };
+  doc.addEventListener('keydown', track(true), true);
+  doc.addEventListener('pointerdown', track(false), true);
+  doc.addEventListener('click', onClick, true);
+  inputs.set(doc, input);
+  return input;
+};
+
+const createNode = (doc, tag, className) => {
+  const node = doc.createElement(tag);
+  node.className = className;
+  return node;
+};
+
+const createText = (doc, item, button) => {
+  const text = createNode(doc, 'span', 'menu-text');
+  const label = createNode(doc, 'span', 'menu-label');
+  label.textContent = item.label;
+  text.append(label);
+  if (!item.disabled) return text;
+  button.setAttribute('aria-disabled', 'true');
+  if (!item.reason) return text;
+  const reason = createNode(doc, 'span', 'menu-reason');
+  reason.id = nextId();
+  reason.textContent = item.reason;
+  button.setAttribute('aria-describedby', reason.id);
+  text.append(reason);
+  return text;
+};
+
+const createMenuItem = (doc, item) => {
+  const kind = item.kind ?? 'action';
+  const button = createNode(doc, 'button', 'menu-item');
   button.type = 'button';
-  button.className = 'menu-item';
-  button.textContent = label;
-  if (glyph) button.prepend(glyph);
-  button.dataset.action = action;
-  if (file) button.dataset.file = file;
+  button.tabIndex = -1;
+  button.setAttribute('role', ITEM_ROLES[kind]);
+  if (item.action) button.dataset.action = item.action;
+  if (item.file) button.dataset.file = item.file;
+  if (kind === 'action' && item.glyph) button.append(item.glyph);
+  if (kind !== 'action') {
+    const mark = createNode(doc, 'span', 'menu-mark');
+    mark.append(createIcon('check', doc));
+    button.append(mark);
+    button.setAttribute('aria-checked', `${item.checked === true}`);
+  }
+  button.append(createText(doc, item, button));
   return button;
+};
+
+const createGroup = (doc, item) => {
+  const group = createNode(doc, 'div', 'menu-group');
+  group.setAttribute('role', 'group');
+  group.classList.toggle('menu-row', item.row === true);
+  const heading = createNode(doc, 'div', 'menu-heading');
+  heading.id = nextId();
+  heading.textContent = item.label;
+  group.setAttribute('aria-labelledby', heading.id);
+  group.append(heading);
+  return group;
+};
+
+const createCustom = (doc, item) => {
+  const custom = createNode(doc, 'div', 'menu-custom');
+  custom.append(item.element);
+  return custom;
+};
+
+const createSeparator = (doc) => {
+  const separator = createNode(doc, 'div', 'menu-separator');
+  separator.setAttribute('role', 'separator');
+  return separator;
+};
+
+const toggleChecked = (button, entry) => {
+  entry.checked = !entry.checked;
+  button.setAttribute('aria-checked', `${entry.checked}`);
+};
+
+const rowOf = (node) => node?.closest?.(ROW) ?? null;
+
+const labelOf = (node) => {
+  const label = node.querySelector('.menu-label');
+  return label ? label.textContent.trim().toLowerCase() : '';
+};
+
+const sideOf = (placement, height, above, below) => {
+  const room = { top: above, bottom: below };
+  const first = placement === 'top' ? 'top' : 'bottom';
+  const second = OPPOSITE[first];
+  if (height <= room[first]) return first;
+  if (height <= room[second]) return second;
+  return room[first] >= room[second] ? first : second;
 };
 
 const liftOf = (item) => {
@@ -146,40 +263,108 @@ class Press {
 
 class Menu {
   #element = null;
-  #createReactions = null;
+  #doc = null;
+  #win = null;
+  #options = null;
+  #items = new Map();
+  #handlers = null;
+  #anchor = null;
+  #offsets = null;
+  #trigger = null;
+  #size = null;
+  #previous = null;
+  #reason = '';
+  #pull = null;
+  #lastInRow = new WeakMap();
+  #isOpen = false;
+  #isSheet = false;
+  #hasLayer = false;
+  #onDown = null;
+  #onScroll = null;
+  #onResize = null;
+  #onFocus = null;
   target = '';
   isLifted = false;
 
-  constructor(element, createReactions) {
+  constructor(element, options = {}) {
     this.#element = element;
-    this.#createReactions = createReactions;
+    this.#doc = element.ownerDocument;
+    this.#win = this.#doc.defaultView;
+    this.#options = options;
+    this.#onDown = (event) => this.#handleDown(event);
+    this.#onScroll = (event) => this.#handleScroll(event);
+    this.#onResize = () => this.#handleResize();
+    this.#onFocus = (event) => this.#handleFocus(event);
+    inputOf(this.#doc);
+    element.setAttribute('role', 'menu');
+    element.tabIndex = -1;
+    if (!element.id) element.id = nextId();
     element.addEventListener('keydown', (event) => this.#handleKey(event));
+    element.addEventListener('click', (event) => this.#handleClick(event));
+    element.addEventListener('focusin', (event) => this.#remember(event));
+    element.addEventListener('pointerdown', (event) => this.#startPull(event));
+    element.addEventListener('pointermove', (event) => this.#movePull(event));
+    element.addEventListener('pointerup', () => this.#endPull());
+    element.addEventListener('pointercancel', () => this.#endPull());
   }
 
   get isOpen() {
-    return this.target !== '';
+    return this.#isOpen;
   }
 
-  open({ id, mine, items, point, item }) {
-    this.target = id;
+  get isModal() {
+    return this.#isOpen && (this.isLifted || this.#isSheet);
+  }
+
+  get hasFocusedItem() {
+    const active = this.#doc.activeElement;
+    return this.contains(active) && active !== this.#element;
+  }
+
+  open(options) {
+    if (current && current !== this) current.dismiss('other');
+    if (this.#isOpen) this.#teardown(false);
+    const element = this.#element;
+    const item = options.item ?? null;
+    const anchor = options.anchor ?? null;
+    const point = options.point ?? null;
+    const isSheet = item === null && this.#win.matchMedia(PHONE).matches;
+    const isKeyboard = options.keyboard ?? inputOf(this.#doc).isKeyboard;
+    const active = this.#doc.activeElement;
+    if (!this.contains(active)) this.#previous = active;
+    this.#offsets = this.#snapshot(anchor ?? this.#originOf(point));
+    this.#anchor = anchor;
+    this.#trigger = options.trigger ?? anchor;
+    this.#handlers = options;
+    this.#isSheet = isSheet;
+    this.#isOpen = true;
+    this.#size = { width: this.#win.innerWidth, height: this.#win.innerHeight };
+    this.target = options.id ?? '';
     this.isLifted = item !== null;
-    const row = document.createElement('div');
-    row.className = 'menu-reactions';
-    row.append(...this.#createReactions());
-    markMine(row.children, mine);
-    const list = document.createElement('div');
-    list.className = 'menu-items';
-    list.append(...items.map(createMenuItem));
-    const parts = item ? [row, liftOf(item), list] : [row, list];
-    this.#element.replaceChildren(...parts);
-    this.#element.classList.toggle('lifted', this.isLifted);
-    this.#element.classList.remove('hidden');
-    if (item) this.#lift(item);
-    else this.#point(point);
+    current = this;
+    this.#render(options);
+    element.style.cssText = '';
+    element.classList.toggle('lifted', this.isLifted);
+    element.classList.toggle('sheet', isSheet);
+    element.classList.remove('hidden');
+    if (options.label) element.setAttribute('aria-label', options.label);
+    this.#showBackdrop();
+    this.#syncLayer(this.isModal);
+    this.#place(options);
+    this.#markTrigger('true');
+    this.#listen(true);
+    if (isKeyboard) this.focus();
+    else element.focus({ preventScroll: true });
   }
 
   focus() {
-    this.#element.querySelector('.menu-item')?.focus();
+    const element = this.#element;
+    const checked = element.querySelector(
+      '[role="menuitemradio"][aria-checked="true"]:not([aria-disabled="true"])',
+    );
+    const target = checked ?? element.querySelector(ITEM);
+    const fallback = target ?? element.querySelector(FOCUSABLE);
+    fallback?.focus({ preventScroll: true });
   }
 
   contains(node) {
@@ -187,35 +372,227 @@ class Menu {
   }
 
   close() {
+    this.#teardown(true);
+  }
+
+  dismiss(reason) {
+    if (!this.#isOpen) return false;
+    this.#reason = reason;
+    this.#handlers.close?.(reason);
+    this.close();
+    this.#reason = '';
+    return true;
+  }
+
+  #teardown(shouldRelease) {
+    if (!this.#isOpen) return;
+    this.#returnFocus();
+    this.#markTrigger('false');
+    this.#hideBackdrop();
+    this.#isOpen = false;
+    this.#isSheet = false;
+    this.#handlers = null;
+    this.#anchor = null;
+    this.#offsets = null;
+    this.#trigger = null;
     this.target = '';
     this.isLifted = false;
     this.#element.classList.add('hidden');
+    this.#element.classList.remove('lifted', 'sheet');
+    this.#listen(false);
+    if (current === this) current = null;
+    if (shouldRelease) this.#syncLayer(false);
+  }
+
+  #returnFocus() {
+    const active = this.#doc.activeElement;
+    if (!this.contains(active)) return;
+    const isReturning = RETURNING.includes(this.#reason);
+    const isMenu = active === this.#element;
+    const home = this.#trigger ?? this.#previous;
+    const target = isReturning ? home : null;
+    const fallback = isMenu ? this.#previous : null;
+    const focused = target ?? fallback;
+    if (focused?.isConnected) focused.focus({ preventScroll: true });
+  }
+
+  #markTrigger(expanded) {
+    const trigger = this.#trigger;
+    if (!trigger) return;
+    const id = this.#element.id;
+    trigger.setAttribute('aria-expanded', expanded);
+    if (expanded === 'true') trigger.setAttribute('aria-controls', id);
+    else trigger.removeAttribute('aria-controls');
+  }
+
+  #syncLayer(isNeeded) {
+    const layers = this.#options.layers;
+    if (!layers || isNeeded === this.#hasLayer) return;
+    this.#hasLayer = isNeeded;
+    if (isNeeded) layers.push('menu');
+    else layers.pop('menu');
+  }
+
+  #showBackdrop() {
+    const backdrop = this.#options.backdrop;
+    if (!backdrop || !this.#isSheet) return;
+    backdrop.classList.add('sheet');
+    backdrop.classList.remove('hidden');
+  }
+
+  #hideBackdrop() {
+    const backdrop = this.#options.backdrop;
+    if (!backdrop || !this.#isSheet) return;
+    backdrop.classList.remove('sheet');
+    backdrop.classList.add('hidden');
+  }
+
+  #listen(isOn) {
+    const method = isOn ? 'addEventListener' : 'removeEventListener';
+    this.#doc[method]('pointerdown', this.#onDown, true);
+    this.#doc[method]('scroll', this.#onScroll, true);
+    this.#doc[method]('focusin', this.#onFocus);
+    this.#win[method]('resize', this.#onResize);
+  }
+
+  #offsetOf(node) {
+    const win = this.#win;
+    if (node === this.#doc) return { x: win.scrollX, y: win.scrollY };
+    return { x: node.scrollLeft, y: node.scrollTop };
+  }
+
+  #snapshot(origin) {
+    const offsets = new Map();
+    offsets.set(this.#doc, this.#offsetOf(this.#doc));
+    for (let node = origin; node; node = node.parentElement) {
+      offsets.set(node, this.#offsetOf(node));
+    }
+    return offsets;
+  }
+
+  #originOf(point) {
+    if (!point) return null;
+    const node = this.#doc.elementFromPoint(point.x, point.y);
+    return this.contains(node) ? null : node;
+  }
+
+  #render(options) {
+    this.#items.clear();
+    const doc = this.#doc;
+    const parts = [];
+    if (this.#isSheet) parts.push(this.#createGrabber());
+    if (options.reactions) parts.push(this.#createReactions(options));
+    if (options.item) parts.push(liftOf(options.item));
+    const list = createNode(doc, 'div', 'menu-items');
+    for (const item of options.items) list.append(this.#create(item));
+    parts.push(list);
+    this.#element.replaceChildren(...parts);
+  }
+
+  #create(item) {
+    const doc = this.#doc;
+    const kind = item.kind ?? 'action';
+    if (kind === 'separator') return createSeparator(doc);
+    if (kind === 'custom') return createCustom(doc, item);
+    if (kind === 'group') {
+      const group = createGroup(doc, item);
+      for (const child of item.items) group.append(this.#create(child));
+      return group;
+    }
+    const entry = { ...item };
+    const button = createMenuItem(doc, entry);
+    this.#items.set(button, entry);
+    return button;
+  }
+
+  #createGrabber() {
+    return createNode(this.#doc, 'div', 'menu-grabber');
+  }
+
+  #createReactions({ reactions, mine }) {
+    const row = createNode(this.#doc, 'div', 'menu-reactions');
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', 'Reactions');
+    const buttons = reactions();
+    for (const button of buttons) {
+      button.tabIndex = -1;
+      button.setAttribute('role', 'menuitem');
+      const { action, reaction } = button.dataset;
+      this.#items.set(button, { action, reaction });
+    }
+    row.append(...buttons);
+    markMine(buttons, mine ?? new Set());
+    return row;
+  }
+
+  #place(options) {
+    const item = options.item;
+    if (item) return void this.#lift(item);
+    if (this.#isSheet) return void this.#slide();
+    if (options.anchor) {
+      return void this.#anchorTo(options.anchor, options.placement);
+    }
+    const trigger = options.trigger;
+    const fallback = { x: MARGIN, y: MARGIN };
+    if (options.point || !trigger) this.#point(options.point ?? fallback);
+    else this.#anchorTo(trigger, options.placement);
+  }
+
+  #slide() {
+    const element = this.#element;
+    const isFixed = element.scrollHeight <= element.clientHeight;
+    element.style.touchAction = isFixed ? 'none' : 'auto';
+    if (isReducedMotion()) return;
+    const from = { transform: 'translateY(100%)' };
+    const to = { transform: 'none' };
+    element.animate([from, to], { duration: LIFT_MS, easing: 'ease-out' });
+  }
+
+  #anchorTo(anchor, placement) {
+    const element = this.#element;
+    const view = this.#win;
+    const rect = anchor.getBoundingClientRect();
+    const width = element.offsetWidth;
+    const height = element.offsetHeight;
+    const above = rect.top - GAP - MARGIN;
+    const below = view.innerHeight - rect.bottom - GAP - MARGIN;
+    const side = sideOf(placement, height, above, below);
+    const room = Math.max(side === 'top' ? above : below, MIN_ROOM);
+    const shown = Math.min(height, room);
+    if (height > room) element.style.maxHeight = `${Math.round(shown)}px`;
+    const near = side === 'top' ? rect.top - GAP - shown : rect.bottom + GAP;
+    const top = clamp(near, MARGIN, view.innerHeight - shown - MARGIN);
+    const left = clamp(rect.left, MARGIN, view.innerWidth - width - MARGIN);
+    element.style.left = `${Math.round(left)}px`;
+    element.style.top = `${Math.round(top)}px`;
   }
 
   #point({ x, y }) {
     const element = this.#element;
+    const view = this.#win;
     element.style.removeProperty('width');
     const width = element.offsetWidth;
     const height = element.offsetHeight;
-    const left = clamp(x, MARGIN, window.innerWidth - width - MARGIN);
-    const fits = y + height + MARGIN <= window.innerHeight;
+    const left = clamp(x, MARGIN, view.innerWidth - width - MARGIN);
+    const fits = y + height + MARGIN <= view.innerHeight;
     const near = fits ? y : y - height;
-    const top = clamp(near, MARGIN, window.innerHeight - height - MARGIN);
+    const top = clamp(near, MARGIN, view.innerHeight - height - MARGIN);
     element.style.left = `${Math.round(left)}px`;
     element.style.top = `${Math.round(top)}px`;
   }
 
   #lift(item) {
     const element = this.#element;
+    const view = this.#win;
     const rect = item.getBoundingClientRect();
-    const width = Math.min(rect.width, window.innerWidth - MARGIN * 2);
-    const left = clamp(rect.left, MARGIN, window.innerWidth - width - MARGIN);
+    const width = Math.min(rect.width, view.innerWidth - MARGIN * 2);
+    const left = clamp(rect.left, MARGIN, view.innerWidth - width - MARGIN);
     element.style.width = `${Math.round(width)}px`;
     element.style.left = `${Math.round(left)}px`;
-    const style = getComputedStyle(element);
+    const style = view.getComputedStyle(element);
     const min = MARGIN + parseFloat(style.scrollPaddingTop);
     const bottom = MARGIN + parseFloat(style.scrollPaddingBottom);
-    const max = window.innerHeight - element.offsetHeight - bottom;
+    const max = view.innerHeight - element.offsetHeight - bottom;
     const lift = element.querySelector('.lift');
     const desired = rect.top - lift.offsetTop;
     const top = clamp(desired, min, max);
@@ -227,14 +604,171 @@ class Menu {
     element.animate([from, to], { duration: LIFT_MS, easing: 'ease-out' });
   }
 
+  #handleDown(event) {
+    const target = event.target;
+    const isBackdrop = target === this.#options.backdrop;
+    const isOwn = this.contains(target) || this.#trigger?.contains(target);
+    if (isBackdrop || isOwn || this.#anchor?.contains(target)) return;
+    this.dismiss('pointer');
+  }
+
+  #handleScroll(event) {
+    if (this.isModal) return;
+    const target = event.target;
+    const before = this.#offsets.get(target);
+    if (!before) return;
+    const after = this.#offsetOf(target);
+    if (after.x !== before.x || after.y !== before.y) this.dismiss('scroll');
+  }
+
+  #handleResize() {
+    const size = this.#size;
+    const view = this.#win;
+    const isWider = view.innerWidth !== size.width;
+    const isTaller = view.innerHeight !== size.height;
+    if (isWider || (isTaller && !this.isModal)) this.dismiss('resize');
+  }
+
+  #handleFocus(event) {
+    const target = event.target;
+    const isOwn = this.contains(target) || this.#trigger?.contains(target);
+    if (this.isLifted || isOwn || this.#anchor?.contains(target)) return;
+    this.dismiss('focus');
+  }
+
+  #handleClick(event) {
+    const button = event.target.closest('button');
+    const entry = button ? this.#items.get(button) : null;
+    if (!entry) return;
+    if (entry.disabled) {
+      event.preventDefault();
+      return void event.stopImmediatePropagation();
+    }
+    if (entry.kind === 'checkbox') toggleChecked(button, entry);
+    if (entry.kind === 'radio') this.#pick(entry);
+    const isStaying = entry.kind === 'checkbox' || entry.keepOpen === true;
+    this.#reason = isStaying ? '' : 'select';
+    this.#handlers.select?.(entry, button, event);
+    if (!isStaying && this.#isOpen) this.close();
+    this.#reason = '';
+  }
+
+  #pick(entry) {
+    for (const node of this.#items.keys()) {
+      const other = this.#items.get(node);
+      const isSame = other.kind === 'radio' && other.group === entry.group;
+      if (!isSame) continue;
+      other.checked = other === entry;
+      node.setAttribute('aria-checked', `${other.checked}`);
+    }
+  }
+
   #handleKey(event) {
-    const step = MENU_KEYS[event.key];
-    if (!step) return;
-    event.preventDefault();
-    const buttons = Array.from(this.#element.querySelectorAll('button'));
-    const index = buttons.indexOf(document.activeElement);
-    const count = buttons.length;
-    buttons[(index + step + count) % count].focus();
+    event.stopPropagation();
+    const { key, target } = event;
+    if (key === 'Tab') return void this.dismiss('tab');
+    if (key === 'Escape') {
+      event.preventDefault();
+      return void this.dismiss('escape');
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const step = KEY_STEPS[key];
+    const rowStep = rowOf(target) ? ROW_STEPS[key] : 0;
+    if (step || rowStep) {
+      event.preventDefault();
+      return void (step ? this.#move(step) : this.#moveInRow(rowStep));
+    }
+    if (target.matches('input')) return;
+    if (key === 'Home' || key === 'End') {
+      event.preventDefault();
+      return void this.#jump(key === 'Home' ? 0 : -1);
+    }
+    if (key === ' ' && target === this.#element) event.preventDefault();
+    if (key.length === 1) this.#typeAhead(key);
+  }
+
+  #stops() {
+    const stops = [];
+    for (const node of this.#element.querySelectorAll(FOCUSABLE)) {
+      const stop = rowOf(node) ?? node;
+      if (!stops.includes(stop)) stops.push(stop);
+    }
+    return stops;
+  }
+
+  #stopTarget(stop) {
+    if (!stop.matches(ROW)) return stop;
+    const checked = stop.querySelector(
+      '[aria-checked="true"]:not([aria-disabled="true"])',
+    );
+    const last = this.#lastInRow.get(stop);
+    return checked ?? last ?? stop.querySelector(FOCUSABLE);
+  }
+
+  #move(step) {
+    const stops = this.#stops();
+    const count = stops.length;
+    if (count === 0) return;
+    const active = this.#doc.activeElement;
+    const index = stops.indexOf(rowOf(active) ?? active);
+    const fallback = step > 0 ? -1 : 0;
+    const from = index === -1 ? fallback : index;
+    const next = stops[(from + step + count) % count];
+    this.#stopTarget(next).focus({ preventScroll: true });
+  }
+
+  #moveInRow(step) {
+    const active = this.#doc.activeElement;
+    const nodes = Array.from(rowOf(active).querySelectorAll(FOCUSABLE));
+    const count = nodes.length;
+    const index = nodes.indexOf(active);
+    const next = nodes[(index + step + count) % count];
+    next.focus({ preventScroll: true });
+  }
+
+  #jump(index) {
+    const stops = this.#stops();
+    const stop = stops.at(index);
+    if (stop) this.#stopTarget(stop).focus({ preventScroll: true });
+  }
+
+  #typeAhead(key) {
+    const letter = key.toLowerCase();
+    const items = Array.from(this.#element.querySelectorAll(ITEM));
+    const from = items.indexOf(this.#doc.activeElement) + 1;
+    const ordered = items.slice(from).concat(items.slice(0, from));
+    const match = ordered.find((node) => labelOf(node).startsWith(letter));
+    match?.focus({ preventScroll: true });
+  }
+
+  #remember(event) {
+    const row = rowOf(event.target);
+    if (row) this.#lastInRow.set(row, event.target);
+  }
+
+  #startPull(event) {
+    if (!this.#isSheet || event.pointerType === 'mouse') return;
+    const element = this.#element;
+    const isGrabber = event.target.closest('.menu-grabber') !== null;
+    const isFixed = element.scrollHeight <= element.clientHeight;
+    const canPull = (isGrabber || isFixed) && element.scrollTop <= 0;
+    this.#pull = { y: event.clientY, offset: 0, canPull };
+  }
+
+  #movePull(event) {
+    const pull = this.#pull;
+    if (!pull?.canPull) return;
+    pull.offset = Math.max(event.clientY - pull.y, 0);
+    if (pull.offset <= MOVE_PX) return;
+    this.#element.style.transform = `translateY(${pull.offset}px)`;
+  }
+
+  #endPull() {
+    const pull = this.#pull;
+    this.#pull = null;
+    if (!pull) return;
+    this.#element.style.removeProperty('transform');
+    if (pull.canPull && pull.offset >= PULL_CLOSE_PX) this.dismiss('swipe');
   }
 }
 
@@ -426,4 +960,8 @@ class Switcher {
   }
 }
 
-export { Press, Menu, Lightbox, Switcher };
+const dismissMenu = (reason) => current?.dismiss(reason) ?? false;
+
+const isInMenu = (node) => current?.contains(node) ?? false;
+
+export { Press, Menu, Lightbox, Switcher, dismissMenu, isInMenu };

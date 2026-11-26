@@ -219,7 +219,7 @@ test(
       `const select = document.querySelector('[data-record=quality]');
       select.value = '720p30';
       select.dispatchEvent(new Event('change', { bubbles: true }));
-      document.querySelector('.call-record-control [data-action=record]')
+      document.querySelector('.call-controls [data-action=record]')
         .click();
       return true;`,
     );
@@ -254,7 +254,8 @@ test(
 
     await browser.request('Page.bringToFront', {}, left);
     await run(
-      `document.querySelector('.call-record-control [data-action=record]')
+      `window.confirm = () => true;
+      document.querySelector('.call-controls [data-action=record]')
         .click(); return true;`,
     );
     await harness.wait(

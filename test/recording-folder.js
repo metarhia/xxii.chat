@@ -402,7 +402,7 @@ test(
       await app.startCall('general');
     `);
         await click('#prejoin [data-action=join]');
-        await wait(`return app.callSession?.phase === 'joined';`);
+        await wait(`return app.callStage?.mode === 'call';`);
         await run(`app.openSettings('recordings'); return true;`);
         const choose = `
       const select = document.querySelector('[data-setting=recordingTarget]');
@@ -423,9 +423,13 @@ test(
         segment.value === '10';
     `);
         await run('app.closeSettings(); return true;');
+        await wait(`return !app.settings.isOpen &&
+          app.callStage.mode === 'mini' &&
+          document.querySelector('#mini-call')?.checkVisibility() === true;`);
         await click('#mini-call');
         await wait(`return app.callStage.mode === 'call';`);
-        await click('.call-record-control [data-action=record-panel]');
+        await click('.call-controls [data-action=more]');
+        await click('.call-bar-menu [data-action=record-panel]');
         const panel = await run(`
       const target = document.querySelector('[data-record=recordingTarget]');
       const segment = document.querySelector('[data-record=recordingSegment]');
@@ -474,6 +478,7 @@ test(
       return recorder?.state === 'recording' && recorder.activeMs >= 1200;
     `);
         const id = await run('return app.callStage.recording.recorder.id;');
+        await run('window.confirm = () => true;');
         await click('.call-record [data-action=record]');
         await wait(`${storageOf(id)} return meta.state === 'done';`);
         const direct = await run(`

@@ -10,7 +10,8 @@ const { ORIGIN, MEDIA_FLAGS, launch, startCallServer } = harness;
 const READY = `return app.connected && navigator.serviceWorker.controller &&
   app.mesh.peers.has(app.peerId);`;
 const ROW = '.recordings-list .recording-item';
-const CONTROL = '.call-record-control';
+const CONTROL = '.call-controls';
+const MENU = '.call-bar-menu';
 const PANEL = '[data-panel="capture"].panel-body';
 
 const fixture = `
@@ -291,8 +292,8 @@ test('recordings screen', { timeout: 240000 }, async (t) => {
       `return app.callStage?.mode === 'call' &&
       app.callStage.media.cameraTrack?.readyState === 'live';`,
     );
-    await click(first, `${CONTROL} summary`);
-    await click(first, `${CONTROL} [data-action=recordings]`);
+    await click(first, `${CONTROL} [data-action=more]`);
+    await click(first, `${MENU} [data-action=recordings]`);
     await wait(
       first,
       `return app.callStage.mode === 'mini' && app.recordingsView.isOpen &&

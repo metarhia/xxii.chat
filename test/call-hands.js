@@ -135,10 +135,15 @@ const tileAction = (endpoint, action) => {
     return true;`;
 };
 
-const clickHand = `const button = document.querySelector(
-  '#call-view [data-action="hand"]');
-  if (!button) throw new Error('no hand button');
-  button.click();
+const openReactions = `const control = document.querySelector(
+  '#call-view .call-controls [data-action="reactions"]');
+  if (!control) throw new Error('no reactions control');
+  control.click();`;
+
+const clickHand = `${openReactions}
+  const item = document.querySelector('.call-bar-menu [data-action="hand"]');
+  if (!item) throw new Error('no raise hand item');
+  item.click();
   return true;`;
 
 const rosterIs = (endpoints) => {
@@ -166,11 +171,14 @@ const badgeIs = (endpoint, text) => {
     return true;`;
 };
 
-const handLabel = (label) => `const button = document.querySelector(
-  '#call-view [data-action="hand"]');
-  const text = button ? button.textContent : '';
-  if (text !== ${JSON.stringify(label)}) throw new Error(text);
-  return true;`;
+const handLabel = (isRaised) => {
+  const name = isRaised ? 'Reactions, hand raised' : 'Reactions';
+  return `const button = document.querySelector(
+    '#call-view .call-controls [data-action="reactions"]');
+    const text = button ? button.getAttribute('aria-label') : '';
+    if (text !== ${JSON.stringify(name)}) throw new Error(text);
+    return true;`;
+};
 
 const floats = (endpoint, count, emoji = '') => {
   const remote = JSON.stringify(endpoint);
@@ -284,22 +292,23 @@ test(
       await wait(person, badgeIs(sam.endpoint, '✋ 2'));
       await wait(person, badgeIs(hostId, '✋ 3'));
     }
-    await wait(sam, handLabel('lower hand'));
+    await wait(sam, handLabel(true));
 
     await click(host, tileAction(sam.endpoint, 'lower-hand'));
     for (const person of all) {
       await wait(person, rosterIs([kim.endpoint, hostId]));
       await wait(person, badgeIs(hostId, '✋ 2'));
     }
-    await wait(sam, handLabel('raise hand'));
+    await wait(sam, handLabel(false));
     await click(kim, clickHand);
     await wait(host, rosterIs([hostId]));
-    await wait(kim, handLabel('raise hand'));
+    await wait(kim, handLabel(false));
 
     await click(
       kim,
-      `document.querySelector(
-      '#call-view [data-action="react"][data-emoji="🎉"]').click();
+      `${openReactions}
+      document.querySelector(
+      '.call-bar-menu [data-action="react"][data-reaction="🎉"]').click();
       return true;`,
     );
     await wait(kim, floats(kim.endpoint, 1, '🎉'));
