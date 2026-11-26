@@ -205,6 +205,8 @@ test(
     assert.deepEqual(await run('return menuLabels;'), [
       'Play',
       'Edit',
+      'Properties',
+      'Attach to chat',
       'Download',
       'Save as…',
       'Rename',

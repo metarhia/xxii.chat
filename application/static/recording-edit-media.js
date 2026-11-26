@@ -43,7 +43,12 @@ class PartPlayer {
   }
 
   async open(part, signal) {
-    if (this.part?.index === part.index) return;
+    if (
+      this.part &&
+      (this.part.key ?? this.part.index) === (part.key ?? part.index)
+    ) {
+      return;
+    }
     const source = await this.source(part, signal);
     signal.throwIfAborted();
     const video = this.video;
@@ -138,16 +143,22 @@ const playUntil = async (video, end, signal, onStart, onTime) => {
   }
 };
 
-const readPart = async (player, part, signal) => {
+const readPart = async (player, part, signal, allowAudio = false) => {
   await player.open(part, signal);
   const video = player.video;
   const { videoWidth: width, videoHeight: height } = video;
   const duration = Math.round(video.duration * 1000);
-  if (!width || !height || !Number.isSafeInteger(duration) || duration <= 0) {
+  if (
+    (!allowAudio && (!width || !height)) ||
+    !Number.isSafeInteger(duration) ||
+    duration <= 0
+  ) {
     throw new Error(`${part.name || 'The video'} has no playable duration.`);
   }
   const stream = video.captureStream?.();
-  const audio = stream ? stream.getAudioTracks().length > 0 : true;
+  const audio = stream
+    ? stream.getAudioTracks().length > 0
+    : (video.audioTracks?.length ?? 1) > 0;
   for (const track of stream?.getTracks() ?? []) track.stop();
   return { ...part, duration, width, height, audio };
 };

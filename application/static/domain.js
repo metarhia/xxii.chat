@@ -17,6 +17,7 @@ import { rootOf, threadOf, threadRootOf } from './replies.js';
 import { colorOf, repliesToMe } from './replies.js';
 import { isImage, storeFile, readFile, saveFile } from './files.js';
 import { readBlob, onFileStored } from './files.js';
+import { isVideoFile, importVideo } from './video-library.js';
 import { timeOf, dateOf, dayKey, dayOf, dayLabel, plural } from './view.js';
 import { formatSize, fitSize, readSetting, writeSetting } from './view.js';
 import { readMap, writeMap, cloneTemplate, setBadge } from './view.js';
@@ -200,6 +201,7 @@ const MESSAGE_ACTIONS = {
   origin: (app, id) => app.openOrigin(id),
   view: (app, id, { dataset }) => app.viewImage(dataset.file),
   download: (app, id, { dataset }) => app.downloadFile(dataset.file),
+  'save-video': (app, id, { dataset }) => app.saveIncomingVideo(dataset.file),
   heading: (app, id, { dataset }) => app.scrollToHeading(dataset.heading),
   'join-call': beginCall,
   'call-back': beginCall,
@@ -248,6 +250,7 @@ const LAYERS = {
   settings: (app) => app.leaveSettings(),
   recordings: (app) => app.leaveRecordings(),
   'recording-editor': (app) => app.recordings.requestEditorClose(),
+  'recording-properties': (app) => app.recordings.closeProperties(),
   'settings-section': (app) => app.settings.showList(),
 };
 
@@ -762,6 +765,7 @@ class ChatApplication extends Application {
       () => this.refreshRecordings(),
       overlay,
       (ids) => this.setLocalRecordings(new Set(ids)),
+      (read) => this.attachRecording(read),
     );
     this.recordings.repair().then(() => this.refreshRecordings());
     this.renderIce();
@@ -1999,6 +2003,9 @@ class ChatApplication extends Application {
     element.querySelector('.file-name').textContent = file.name;
     element.querySelector('.file-size').textContent = formatSize(file.size);
     element.querySelector('.download-btn').dataset.file = file.id;
+    const save = element.querySelector('[data-action="save-video"]');
+    if (isVideoFile(file)) save.dataset.file = file.id;
+    else save.remove();
     return element;
   }
 
@@ -2265,6 +2272,10 @@ class ChatApplication extends Application {
     for (const file of this.view.attachments.get(id) ?? []) {
       const label = `Download ${file.name}`;
       items.push({ action: 'download', label, file: file.id });
+      if (isVideoFile(file)) {
+        const label = `Save ${file.name} to Recordings`;
+        items.push({ action: 'save-video', label, file: file.id });
+      }
     }
     for (const entry of items) {
       const action = entry.action === 'reply' ? 'reply-hover' : entry.action;
@@ -3951,8 +3962,8 @@ class ChatApplication extends Application {
     }
   }
 
-  addFiles(files) {
-    const pending = this.pendingOf(this.chat).slice();
+  addFiles(files, chat = this.chat) {
+    const pending = this.pendingOf(chat).slice();
     for (const file of files) {
       const isAllowed = file.size > 0 && file.size <= MAX_FILE_SIZE;
       if (isAllowed) {
@@ -3962,7 +3973,8 @@ class ChatApplication extends Application {
       const text = `${file.name}: files from 1 byte to ${MAX_FILE_MB} MB`;
       this.showNotification(text, 'warning');
     }
-    this.pending.set(this.chat, pending);
+    this.pending.set(chat, pending);
+    if (chat !== this.chat) return;
     this.renderPending();
     this.messageInput.focus();
   }
@@ -4073,6 +4085,49 @@ class ChatApplication extends Application {
 
   downloadFile(id) {
     this.exportFile(id).catch((error) => this.report(error));
+  }
+
+  async attachRecording(read) {
+    const chat = this.chat;
+    try {
+      const file = await read();
+      if (file.size > MAX_FILE_SIZE) {
+        const size = `This file exceeds ${MAX_FILE_MB} MB.`;
+        const tip = 'Set a size limit in Edit to attach a smaller copy.';
+        const message = `${size} ${tip}`;
+        this.showNotification(message, 'warning');
+        return;
+      }
+      if (chat === this.chat) this.closeRecordings();
+      this.afterPop(() => this.addFiles([file], chat));
+    } catch (error) {
+      this.showNotification(error.message, 'warning');
+    }
+  }
+
+  async saveIncomingVideo(id) {
+    const record = this.recordOf(id);
+    if (!record || !isVideoFile(record)) return;
+    this.videoSaves ??= new Set();
+    const saving = this.videoSaves;
+    if (saving.has(id)) return;
+    saving.add(id);
+    try {
+      const blob = await this.loadFile(record);
+      if (!blob) {
+        throw new Error('The video is not available yet. Try again shortly.');
+      }
+      const file = new File([blob], record.name, { type: record.mime });
+      const signal = new AbortController().signal;
+      const chat = record.chat;
+      await importVideo(file, signal, { chat, chatName: this.chatName(chat) });
+      this.refreshRecordings();
+      this.showNotification('Video saved to Recordings');
+    } catch (error) {
+      this.showNotification(error.message, 'warning');
+    } finally {
+      saving.delete(id);
+    }
   }
 
   async exportFile(id) {

@@ -17,7 +17,8 @@ const isPublished = async (id) => {
   }
 };
 
-const verifyEdit = async (id, { format, parts, timeline, signal }) => {
+const verifyEdit = async (id, config) => {
+  const { format, parts, timeline, signal, options } = config;
   const recordings = await recordingsOf(navigator.storage);
   const directory = await recordings.getDirectoryHandle(id);
   const name = programFileOf(format.extension);
@@ -25,9 +26,14 @@ const verifyEdit = async (id, { format, parts, timeline, signal }) => {
   const video = document.createElement('video');
   const player = new PartPlayer(video, () => handle.getFile());
   try {
-    const output = await readPart(player, { index: 0 }, signal);
+    const audioOnly = options?.output === 'audio';
+    const output = await readPart(player, { index: 0 }, signal, audioOnly);
     const segments = segmentsOf(parts, timeline.kept);
-    if (!output.audio && segments.some(({ part }) => part.audio)) {
+    if (
+      options?.output !== 'mute' &&
+      !output.audio &&
+      segments.some(({ part }) => part.audio)
+    ) {
       throw new Error('The encoder did not preserve the audio in this edit.');
     }
     return output.duration;
@@ -61,7 +67,7 @@ const saveEdit = async (options) => {
     const write = (chunk, duration) => writer.write(id, chunk, duration);
     const { poster, mime } = await renderEdit({ ...options, write });
     signal.throwIfAborted();
-    await writer.poster(id, await poster.arrayBuffer());
+    if (poster) await writer.poster(id, await poster.arrayBuffer());
     await writer.finishEdit(id, timeline.duration);
     const duration = await verifyEdit(id, options);
     signal.throwIfAborted();

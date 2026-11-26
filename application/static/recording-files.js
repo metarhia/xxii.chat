@@ -44,6 +44,9 @@ const QUOTE = /"/g;
 const TYPES = {
   mp4: 'video/mp4',
   webm: 'video/webm',
+  m4a: 'audio/mp4',
+  mov: 'video/quicktime',
+  ogv: 'video/ogg',
   jpg: 'image/jpeg',
   json: 'application/json',
 };
@@ -285,3 +288,4 @@ export { typeOf, extensionOf, routeOf, rangeOf };
 export { createMeta, nextMeta, isOpen, scheduleOf, markedOf, spaceOf };
 export { isFolderRecording, readMeta, recordingsOf };
 export { EDIT_PREFIX, isPendingEdit, recordingLockOf };
+export { safeChar };
