@@ -116,7 +116,7 @@ const createCodeHead = (text, lang) => {
 
 const BLOCKS = {};
 
-const renderBlock = (block) => BLOCKS[block.type](block);
+const renderBlock = (block, tasks) => BLOCKS[block.type](block, tasks);
 
 const blockCode = ({ text, lang }) => {
   const wrapper = createNode('div', 'code-block');
@@ -142,39 +142,46 @@ const blockHeading = ({ level, children }) => {
 
 const blockQuote = ({ children }) => {
   const quote = createNode('blockquote');
-  quote.append(...children.map(renderBlock));
+  quote.append(...children.map((child) => renderBlock(child)));
   return quote;
 };
 
 const blockRule = () => createNode('hr');
 
-const renderTight = (child) => {
+const renderTight = (child, tasks) => {
   if (child.type === 'paragraph') return renderInline(child.children);
-  return [renderBlock(child)];
+  return [renderBlock(child, tasks)];
 };
 
-const createItem = (item, isLoose) => {
+const createItem = (item, isLoose, tasks) => {
   const node = createNode('li');
   const isTask = item.checked !== null;
+  let result;
   if (isTask) {
     const box = createNode('input');
     box.type = 'checkbox';
     box.disabled = true;
     box.checked = item.checked;
     node.className = 'task';
+    result = tasks?.get(item)?.(box);
     node.append(box);
   }
   const nodes = isLoose
-    ? item.children.map(renderBlock)
-    : item.children.flatMap(renderTight);
+    ? item.children.map((child) => renderBlock(child, tasks))
+    : item.children.flatMap((child) => renderTight(child, tasks));
+  if (result && !isLoose && item.children[0]?.type === 'paragraph') {
+    nodes.splice(item.children[0].children.length, 0, result);
+  } else if (result) {
+    nodes[0]?.append(result);
+  }
   node.append(...nodes);
   return node;
 };
 
-const blockList = ({ ordered, start, loose, items }) => {
+const blockList = ({ ordered, start, loose, items }, tasks) => {
   const list = createNode(ordered ? 'ol' : 'ul');
   if (ordered && start !== 1) list.start = start;
-  list.append(...items.map((item) => createItem(item, loose)));
+  list.append(...items.map((item) => createItem(item, loose, tasks)));
   return list;
 };
 
@@ -217,7 +224,7 @@ Object.assign(BLOCKS, {
 const isSingleParagraph = (blocks) =>
   blocks.length === 1 && blocks[0].type === 'paragraph';
 
-const renderMarkdown = (element, source) => {
+const renderMarkdown = (element, source, decorateTasks) => {
   element.classList.remove('md');
   if (!hasMarkdown(source)) return void fillText(element, source);
   const blocks = parseMarkdown(source);
@@ -225,7 +232,8 @@ const renderMarkdown = (element, source) => {
     return void element.replaceChildren(...renderInline(blocks[0].children));
   }
   element.classList.add('md');
-  element.replaceChildren(...blocks.map(renderBlock));
+  const tasks = decorateTasks?.(blocks);
+  element.replaceChildren(...blocks.map((block) => renderBlock(block, tasks)));
 };
 
 const FORMAT_MARKS = { b: '**', i: '_' };

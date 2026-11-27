@@ -902,9 +902,16 @@ const readList = (state) => {
     if (!isNext) break;
     if (after > next) isLoose = true;
   }
-  const { isOrdered, start } = first;
+  const { isOrdered, sign, start } = first;
   const loose = isLoose;
-  addBlock(state, { type: 'list', ordered: isOrdered, start, loose, items });
+  addBlock(state, {
+    type: 'list',
+    ordered: isOrdered,
+    sign,
+    start,
+    loose,
+    items,
+  });
   state.i = i;
   return true;
 };
@@ -1020,9 +1027,9 @@ const finishItem = (item, refs) => ({
 });
 
 const finishList = (block, refs) => {
-  const { ordered, start, loose } = block;
+  const { ordered, sign, start, loose } = block;
   const items = block.items.map((item) => finishItem(item, refs));
-  return { type: 'list', ordered, start, loose, items };
+  return { type: 'list', ordered, sign, start, loose, items };
 };
 
 const finishTable = (block, refs) => {

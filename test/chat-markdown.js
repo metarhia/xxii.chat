@@ -214,7 +214,7 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
     assert.equal(found.nested, 'nested');
     assert.deepEqual(found.boxes, [
       [true, true],
-      [false, true],
+      [false, false],
     ]);
     assert.equal(found.quote, 'quoted');
     assert.equal(found.rule, true);
@@ -235,6 +235,87 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
     assert.equal(found.comment, '// note');
     assert.equal(found.raw, RICH);
   });
+
+  await t.test(
+    'checklist votes sync and stay with their option text',
+    async () => {
+      const source = [
+        'What should we make?',
+        '',
+        '- [ ] **Apple**',
+        '- [ ] Pear',
+        '- [x] Already planned',
+        '',
+        '> - [ ] Quoted choice',
+        '',
+        '```md',
+        '- [ ] Code example',
+        '```',
+      ].join('\n');
+      await write(ada, 'ada', source);
+      const id = await waitMessage(bob, source);
+      await waitMessage(ada, source);
+      const choices = `[...${rowOf(id)}.querySelectorAll('.vote-choice')]`;
+      const tallies = `[...${rowOf(id)}.querySelectorAll('.vote-tally')]`;
+      const read = `return ${tallies}.map((count) => count.textContent);`;
+      const select = (session, index) =>
+        run(session, `${choices}[${index}].click();`);
+      assert.deepEqual(await run(bob, read), ['0 votes', '0 votes']);
+      assert.equal(await run(bob, `return ${choices}.length;`), 2);
+      await select(ada, 0);
+      await select(bob, 0);
+      await select(bob, 1);
+      await wait(
+        ada,
+        `return ${tallies}[0].textContent === '2 votes' &&
+      ${tallies}[1].textContent === '1 vote';`,
+      );
+      assert.deepEqual(
+        await run(ada, `return ${choices}.map(({ checked }) => checked);`),
+        [true, false],
+      );
+      const edited = 'Updated question\n\n- [ ] **Pear**\n- [ ] Plum';
+      await run(
+        ada,
+        `
+      app.startEdit(${JSON.stringify(id)});
+      app.editInput.value = ${JSON.stringify(edited)};
+      app.saveEdit();
+    `,
+      );
+      await waitMessage(bob, edited);
+      assert.deepEqual(await run(bob, read), ['1 vote', '0 votes']);
+      assert.match(
+        await run(
+          bob,
+          `return ${rowOf(id)}.querySelector(
+        '.previous-votes li').textContent;`,
+        ),
+        /Apple · 2 votes/,
+      );
+      await select(bob, 0);
+      await wait(ada, `return ${tallies}[0].textContent === '0 votes';`);
+      const stripped = 'The vote is over.';
+      await run(
+        ada,
+        `
+      app.startEdit(${JSON.stringify(id)});
+      app.editInput.value = ${JSON.stringify(stripped)};
+      app.saveEdit();
+    `,
+      );
+      await waitMessage(bob, stripped);
+      assert.equal(await run(bob, `return ${choices}.length;`), 0);
+      assert.match(
+        await run(
+          bob,
+          `return ${rowOf(id)}.querySelector(
+        '.previous-votes li').textContent;`,
+        ),
+        /Apple · 2 votes/,
+      );
+    },
+  );
 
   await t.test('unsafe links and raw HTML render as text', async () => {
     const source = [
@@ -646,5 +727,63 @@ test('Markdown in Chrome', { timeout: 180000 }, async (t) => {
     assert.deepEqual(article.outline, ['→ Intro', '→ Deep']);
     assert.equal(article.skipped, false);
     await run(ada, `app.closeArticle(); return true;`);
+  });
+
+  await t.test('a feed author can edit a vote in the article', async () => {
+    const id = await run(
+      ada,
+      `
+      return app.writePost(app.chat, 'Lunch\\n- [ ] Soup\\n- [ ] Salad', []);
+    `,
+    );
+    await wait(ada, `return app.view.records.has(${JSON.stringify(id)});`);
+    await run(
+      ada,
+      `
+      const id = ${JSON.stringify(id)};
+      app.openArticle(id);
+      document.querySelector('.post-article .vote-choice').click();
+    `,
+    );
+    await wait(
+      ada,
+      `
+      return document.querySelector('.post-article .vote-tally')
+        ?.textContent === '1 vote';
+    `,
+    );
+    await run(
+      ada,
+      `
+      app.startEdit(${JSON.stringify(id)});
+      app.editInput.value = 'Dinner\\n- [ ] Salad\\n- [ ] Soup';
+      app.saveEdit();
+    `,
+    );
+    await wait(
+      ada,
+      `
+      return document.querySelector('.post-article .title')
+        ?.textContent === 'Dinner';
+    `,
+    );
+    assert.deepEqual(
+      await run(
+        ada,
+        `
+        return [...document.querySelectorAll('.post-article .vote-tally')]
+          .map(({ textContent }) => textContent);
+      `,
+      ),
+      ['0 votes', '1 vote'],
+    );
+    await run(
+      ada,
+      `
+      app.startEdit(${JSON.stringify(id)});
+      app.closeArticle();
+    `,
+    );
+    await wait(ada, 'return !app.article && !app.editing;');
   });
 });

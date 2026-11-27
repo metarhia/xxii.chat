@@ -496,6 +496,7 @@ class RecordingEditor {
   }
 
   newCut(range) {
+    this.resetCutInputs();
     const start = range?.start ?? Math.min(this.time, this.duration - 1);
     const end = range?.end ?? Math.min(this.duration, start + DEFAULT_CUT_MS);
     this.cutIndex = this.draft.cuts.length;
@@ -527,9 +528,7 @@ class RecordingEditor {
     const cut = this.draft.cuts[index];
     this.pendingCut = cut ?? null;
     if (cut) this.tab = 'cuts';
-    this.invalid.delete('cut-start');
-    this.invalid.delete('cut-end');
-    this.setStatus('');
+    this.resetCutInputs();
     this.paint();
     if (cut) {
       this.seek(cut.start);
@@ -539,6 +538,12 @@ class RecordingEditor {
       if (this.playing) this.seek(this.time);
       this.nodes['new-cut'].focus();
     }
+  }
+
+  resetCutInputs() {
+    this.invalid.delete('cut-start');
+    this.invalid.delete('cut-end');
+    this.setStatus('');
   }
 
   applyCut() {
@@ -776,7 +781,6 @@ class RecordingEditor {
     this.paintTabs();
     nodes['cut-fields'].hidden = !this.pendingCut;
     nodes['remove-cut'].hidden = this.cutIndex >= draft.cuts.length;
-    nodes['new-cut'].disabled = Boolean(this.pendingCut);
     nodes.undo.disabled = !this.history.canUndo;
     nodes.redo.disabled = !this.history.canRedo;
     nodes.discard.disabled = !this.dirty;

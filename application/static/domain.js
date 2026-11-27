@@ -5,7 +5,8 @@ import { pairOf, isPair, directUnit } from './chat.js';
 import { isFeed, isPost, labelOf, parseTitle } from './chat.js';
 import { saveAuthor, createChannel, describe } from './chat.js';
 import { createMessage, createPost, setReaction, pin } from './chat.js';
-import { editMessage, deleteMessage, isDeleted } from './chat.js';
+import { editMessage, editPost, deleteMessage, isDeleted } from './chat.js';
+import { setVote, containerOf } from './chat.js';
 import { startCall as saveCall, endCall as saveCallEnd } from './chat.js';
 import { startRecording as saveRecording } from './chat.js';
 import { stopRecording as saveRecordingStop } from './chat.js';
@@ -26,6 +27,8 @@ import { isEditable, isReducedMotion } from './view.js';
 import { parseMarkdown, plainOf, plainInline } from './markdown.js';
 import { hasOpenFence } from './markdown.js';
 import { renderMarkdown, renderBlock, formatKey } from './markdown-view.js';
+import { choicesOf, voteIdOf, votesOf } from './voting.js';
+import { voteControls, showPreviousVotes } from './voting.js';
 import { CallPreferences } from './call-preferences.js';
 import { ICE_KEY, isIceUrl, readIce, writeIce, buildIce } from './ice.js';
 import { Press, Menu, Lightbox, Switcher } from './overlays.js';
@@ -1769,6 +1772,7 @@ class ChatApplication extends Application {
         replica,
         attachments: new Map(),
         reactions: new Map(),
+        votes: new Map(),
         nicks: new Map(),
         ...threadsOf(replica, ''),
       };
@@ -1776,7 +1780,8 @@ class ChatApplication extends Application {
     const reactions = reactionsOf(replica, chat);
     const nicks = this.nickMap();
     const threads = threadsOf(replica, chat);
-    return { replica, attachments, reactions, nicks, ...threads };
+    const votes = votesOf(replica, chat, this.peerId);
+    return { replica, attachments, reactions, votes, nicks, ...threads };
   }
 
   isAtBottom() {
@@ -1797,6 +1802,7 @@ class ChatApplication extends Application {
     const files = isGone ? [] : attached;
     const byReaction = isGone ? null : view.reactions.get(id);
     const reactions = this.summarize(byReaction, view.nicks);
+    const votes = isGone ? null : view.votes.get(id);
     const isContinued = false;
     const isThreadContinued = false;
     return {
@@ -1806,6 +1812,7 @@ class ChatApplication extends Application {
       quote,
       files,
       reactions,
+      votes: votes ?? [],
       isContinued,
       isThreadContinued,
     };
@@ -1827,6 +1834,9 @@ class ChatApplication extends Application {
     const visible = view.shown.slice(-limit);
     const active = document.activeElement;
     const focused = isItem(active) ? active.dataset.id : '';
+    const voteFocus = active.matches('.vote-choice')
+      ? { id: active.closest(ITEMS)?.dataset.id, choice: active.dataset.choice }
+      : null;
     const editorFocused = this.editForm.contains(active);
     const cache = new Map();
     const links = linksOf(view.items, this.localRecordings);
@@ -1893,6 +1903,14 @@ class ChatApplication extends Application {
     this.renderPicked();
     this.updateJump();
     if (focused) this.selectById(focused, false);
+    if (voteFocus && !active.isConnected) {
+      const row = voteFocus.id ? this.itemOf(voteFocus.id) : null;
+      const boxes = row?.querySelectorAll('.vote-choice') ?? [];
+      const box = Array.from(boxes).find(
+        (input) => input.dataset.choice === voteFocus.choice,
+      );
+      box?.focus({ preventScroll: true });
+    }
     this.revealLinked();
   }
 
@@ -2115,7 +2133,13 @@ class ChatApplication extends Application {
     fillTime(element, message);
     element.querySelector('.author').textContent = message.nick;
     const content = element.querySelector('.content');
-    renderMarkdown(content, videoContent(message));
+    let previous = details.votes;
+    renderMarkdown(content, videoContent(message), (blocks) => {
+      const voting = this.votingFor(message, blocks, details.votes);
+      previous = voting.previous;
+      return voting.tasks;
+    });
+    showPreviousVotes(content, previous);
     addVideoCard(content, message);
     element.classList.toggle(
       'mentioned',
@@ -2156,7 +2180,8 @@ class ChatApplication extends Application {
     const element = cloneTemplate(this.articleTemplate, '.post-article');
     fillPostHeader(element, post);
     const blocks = parseMarkdown(videoContent(post));
-    const nodes = blocks.map(renderBlock);
+    const { tasks, previous } = this.votingFor(post, blocks, details.votes);
+    const nodes = blocks.map((block) => renderBlock(block, tasks));
     const links = [];
     for (let i = 0; i < blocks.length; i++) {
       const { type, level, children } = blocks[i];
@@ -2167,6 +2192,7 @@ class ChatApplication extends Application {
     const text = element.querySelector('.post-text');
     text.classList.add('md');
     text.replaceChildren(...nodes);
+    showPreviousVotes(text, previous);
     addVideoCard(text, post);
     const outline = element.querySelector('.outline');
     outline.replaceChildren(...links);
@@ -2174,6 +2200,29 @@ class ChatApplication extends Application {
     this.fillFiles(element.querySelector('.attachments'), details.files);
     this.fillReactions(element.querySelector('.reactions'), details.reactions);
     return element;
+  }
+
+  votingFor(record, blocks, results) {
+    const chat = containerOf(record);
+    const cast = (choice, active) =>
+      this.castVote(chat, record.id, choice, active).catch((error) =>
+        this.report(error),
+      );
+    return voteControls(blocks, results, cast);
+  }
+
+  async castVote(chat, message, choice, active) {
+    const author = this.peerId;
+    const id = await voteIdOf(message, author, choice);
+    if (this.contactState(chat)) return;
+    const replica = this.replicaOf(chat);
+    const record = replica.get(message);
+    if (!record || isDeleted(record) || containerOf(record) !== chat) return;
+    const choices = choicesOf(parseMarkdown(videoContent(record)));
+    if (![...choices.values()].some(({ key }) => key === choice.key)) return;
+    if ((replica.get(id)?.active === true) === active) return;
+    const { label, occurrence } = choice;
+    setVote(replica, id, { chat, message, author, label, occurrence, active });
   }
 
   fillFiles(container, files) {
@@ -2455,6 +2504,9 @@ class ChatApplication extends Application {
     } else {
       items.push({ action: 'reply', label: 'Reply' });
       items.push({ action: 'reply-quote', label: 'Quote' });
+    }
+    if (record?.author === this.peerId && isPost(record)) {
+      items.push({ action: 'edit', label: 'Edit' });
     }
     if (kind === 'message') {
       items.push({ action: 'selection', label: 'Thread' });
@@ -4721,14 +4773,29 @@ class ChatApplication extends Application {
     return true;
   }
 
+  editableRecord(id) {
+    const record = this.recordOf(id);
+    if (record?.author !== this.peerId || isDeleted(record)) return null;
+    return record;
+  }
+
   startEdit(id) {
-    const record = this.ownRecords([id])[0];
+    const record = this.editableRecord(id);
     if (!record || !this.itemOf(id)) return;
+    if (isPost(record) && this.article !== id) {
+      this.afterPop(() => {
+        this.openArticle(id);
+        this.startEdit(id);
+      });
+      return;
+    }
     const input = this.editInput;
     if (this.editing === id) return void input.focus();
     this.dropEdit();
     this.editing = id;
-    input.value = record.content;
+    const post = isPost(record);
+    input.maxLength = post ? MAX_LENGTH + 1 + TEXT_LENGTH : MAX_LENGTH;
+    input.value = post ? `${record.title}\n${record.content}` : record.content;
     this.placeEditor();
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
@@ -4736,10 +4803,10 @@ class ChatApplication extends Application {
 
   placeEditor() {
     const row = this.itemOf(this.editing);
-    if (!row || row.classList.contains('deleted')) return void this.dropEdit();
-    this.editForm.closest('.message')?.classList.remove('editing');
+    const line = row?.querySelector('.line, .post-text');
+    if (!line || row.classList.contains('deleted')) return void this.dropEdit();
+    this.editForm.closest(ITEMS)?.classList.remove('editing');
     row.classList.add('editing');
-    const line = row.querySelector('.line');
     if (this.editForm.parentElement !== line) line.append(this.editForm);
     resizeInput(this.editInput);
   }
@@ -4753,16 +4820,17 @@ class ChatApplication extends Application {
 
   dropEdit() {
     if (!this.editing) return;
-    this.editForm.closest('.message')?.classList.remove('editing');
+    this.editForm.closest(ITEMS)?.classList.remove('editing');
     this.editForm.remove();
     this.editing = '';
   }
 
   saveEdit() {
     const id = this.editing;
-    const record = this.ownRecords([id])[0];
+    const record = this.editableRecord(id);
     if (!record) return void this.cancelEdit();
     const content = this.editInput.value.trim();
+    if (isPost(record)) return void this.savePostEdit(record, content);
     const hasFiles = (this.view?.attachments.get(id) ?? []).length > 0;
     if (content === '' && !hasFiles) {
       const text = 'A message needs text or files, use Delete to remove it';
@@ -4773,6 +4841,21 @@ class ChatApplication extends Application {
     const replica = this.replicaOf(this.chat);
     editMessage(replica, id, { content, edited: Date.now() });
     this.logger.log('Edited message:', content);
+  }
+
+  savePostEdit(record, text) {
+    const [line, ...body] = text.split('\n');
+    const title = line.trim();
+    const content = body.join('\n').trim();
+    if (!title || title.length > MAX_LENGTH || content.length > TEXT_LENGTH) {
+      return void this.showNotification(
+        'A post needs a title and text within the length limit',
+        'warning',
+      );
+    }
+    this.cancelEdit();
+    if (title === record.title && content === record.content) return;
+    editPost(this.replica, record.id, { title, content, edited: Date.now() });
   }
 
   forwardMessages(ids) {
