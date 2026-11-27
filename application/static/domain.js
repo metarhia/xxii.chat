@@ -46,6 +46,8 @@ import { SettingsView } from './settings.js';
 import { MessageNotices } from './message-notice.js';
 import { RecordingsScreen } from './recordings-screen.js';
 import { ProfileRow } from './profile-row.js';
+import { AVATAR_KEY, showPhoto } from './avatar.js';
+import { isAvatar } from './chat.js';
 import { linkOf, summaryOf } from './settings-about.js';
 import { Folders, FOLDERS_KEY } from './folders.js';
 import { Hidden, HIDDEN_KEY, isReturning } from './hidden.js';
@@ -117,6 +119,11 @@ const NAV_MENU_ACTIONS = {
   'folder-new': (app, entry, target) => app.startNaming('', target.id),
   'folder-rename': (app, entry, target) => app.startNaming(target.id, ''),
   'folder-delete': (app, entry, target) => app.deleteFolder(target.id),
+};
+
+const readAvatar = () => {
+  const avatar = readSetting(AVATAR_KEY, '');
+  return isAvatar(avatar) ? avatar : '';
 };
 
 const beginCall = (app) => {
@@ -251,6 +258,7 @@ const LAYERS = {
   recordings: (app) => app.leaveRecordings(),
   'recording-editor': (app) => app.recordings.requestEditorClose(),
   'recording-properties': (app) => app.recordings.closeProperties(),
+  'video-share': (app) => app.recordings.shares.closeDialog(),
   'settings-section': (app) => app.settings.showList(),
 };
 
@@ -633,6 +641,7 @@ class ChatApplication extends Application {
     super(config);
     this.peerId = loadPeerId();
     this.username = readSetting(NICK_KEY, '');
+    this.avatar = readAvatar();
     this.syncTimeout = null;
     this.since = loadSince();
     this.chat = readSetting(CHAT_KEY, GENERAL);
@@ -786,7 +795,8 @@ class ChatApplication extends Application {
     this.sidebar = byId('sidebar');
     this.menuBtn = byId('menu-btn');
     this.versionBtn = byId('version-btn');
-    this.profileRow = new ProfileRow();
+    this.profileVersionBtn = byId('profile-version');
+    this.profileRow = new ProfileRow((avatar) => this.setAvatar(avatar));
     this.settingsBtn = byId('settings-btn');
     this.recordingsBtn = byId('recordings-btn');
     this.directCaptureBtn = byId('direct-capture-btn');
@@ -939,6 +949,7 @@ class ChatApplication extends Application {
     };
 
     this.menuBtn.onclick = () => this.toggleSidebar();
+    this.profileVersionBtn.onclick = () => this.handleVersionClick();
     this.settingsBtn.onclick = () => this.openSettings('');
     this.callBtn.onclick = () => beginCall(this);
     this.searchBtn.onclick = () => this.toggleSearch();
@@ -1237,10 +1248,18 @@ class ChatApplication extends Application {
   }
 
   saveAuthor() {
-    if (!this.username) return;
-    const author = this.replica.get(this.peerId);
-    if (author?.nick === this.username) return;
-    saveAuthor(this.replica, this.peerId, this.username);
+    if (!this.replica || !this.username) return;
+    saveAuthor(this.replica, this.peerId, this.username, this.avatar);
+  }
+
+  setAvatar(avatar) {
+    if (!writeSetting(AVATAR_KEY, avatar)) {
+      throw new Error('Could not save your profile photo in this browser.');
+    }
+    this.avatar = avatar;
+    this.saveAuthor();
+    this.updateInterface();
+    this.scheduleRender();
   }
 
   showChanges({ deltas, origin }) {
@@ -1363,6 +1382,11 @@ class ChatApplication extends Application {
 
   handleStorage({ key }) {
     if (this.settings.isOpen) this.settings.sync(key);
+    if (key === null || key === AVATAR_KEY) {
+      this.avatar = readAvatar();
+      this.updateInterface();
+      this.scheduleRender();
+    }
     if (key === ICE_KEY) {
       this.iceCache = null;
       this.renderIce();
@@ -1440,7 +1464,9 @@ class ChatApplication extends Application {
       return contact;
     };
     for (const author of listAuthors(this.replica)) {
-      contactOf(author.id).nick = author.nick;
+      const contact = contactOf(author.id);
+      contact.nick = author.nick;
+      contact.avatar = author.avatar;
     }
     for (const entry of this.mesh.peers.values()) {
       const contact = contactOf(entry.peer);
@@ -1497,6 +1523,7 @@ class ChatApplication extends Application {
     item.classList.toggle('active', pair === this.chat);
     item.querySelector('.dot').dataset.status = contact.status;
     item.querySelector('.dot').title = STATES[contact.status];
+    showPhoto(item.querySelector('.icon'), contact.avatar);
     item.querySelector('.name').textContent = contact.nick;
     item.querySelector('.time').textContent = dayOf(contact.time);
     setBadge(item.querySelector('.badge'), this.unreadOf(pair));
@@ -2656,6 +2683,7 @@ class ChatApplication extends Application {
   renderMembers() {
     const self = createContact(this.peerId);
     self.nick = this.username || 'you';
+    self.avatar = this.avatar;
     self.status = this.connected || this.mesh.linked > 0 ? 'online' : 'offline';
     const role = this.mesh.isLeader ? 'mesh tab' : 'follower tab';
     const items = [this.createMember(self, `you, ${role}`)];
@@ -2669,6 +2697,8 @@ class ChatApplication extends Application {
 
   createMember(contact, state) {
     const item = cloneTemplate(this.memberTemplate, '.member');
+    const photo = item.querySelector('.member-photo');
+    photo.hidden = !showPhoto(photo, contact.avatar);
     if (contact.peer !== this.peerId) item.dataset.peer = contact.peer;
     item.querySelector('.dot').dataset.status = contact.status;
     item.querySelector('.name').textContent = contact.nick;
@@ -4507,6 +4537,7 @@ class ChatApplication extends Application {
     const nick = this.username;
     this.profileRow.paint({
       nick,
+      photo: this.avatar,
       peer: this.peerId,
       link: linkOf(info),
       isLeader: info.leader,
@@ -4531,8 +4562,9 @@ class ChatApplication extends Application {
     this.showNotification('Request failed', 'error');
   }
 
-  showVersion({ next }) {
+  showVersion({ version, next }) {
     this.profileRow.markUpdate(next !== '');
+    this.profileRow.paintVersion({ version, next });
     this.settings?.refresh();
     if (!next || next === this.notified) return;
     this.notified = next;
@@ -4546,6 +4578,7 @@ class ChatApplication extends Application {
 
   async checkNow() {
     this.versionBtn.disabled = true;
+    this.profileVersionBtn.disabled = true;
     try {
       const next = await this.checkUpdate(true);
       const text = next
@@ -4554,6 +4587,7 @@ class ChatApplication extends Application {
       this.showNotification(text);
     } finally {
       this.versionBtn.disabled = false;
+      this.profileVersionBtn.disabled = false;
       this.settings.refresh();
     }
   }
@@ -4565,7 +4599,12 @@ class ChatApplication extends Application {
     const isBusy = this.lightbox.isOpen || this.menu.isOpen;
     const isFree = !hasFiles && !isBusy && !this.switcher.isOpen;
     return (
-      isFree && !this.editing && !this.capture?.isActive && super.canRestart()
+      isFree &&
+      !this.editing &&
+      !this.recordings?.editor &&
+      !this.recordings?.shares.active &&
+      !this.capture?.isActive &&
+      super.canRestart()
     );
   }
 

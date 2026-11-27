@@ -146,21 +146,18 @@ test('scenario 18: export recordings through the library', async (t) => {
       const link = row.querySelector('.recording-download');
       const url = new URL(link.href);
       const paused = document.querySelector('[data-id=paused]');
-      const pausedActions = paused.querySelectorAll(
-        '.recording-download, .recording-save',
-      );
       return {
         path: url.pathname,
         name: url.searchParams.get('name'),
         download: url.searchParams.get('download'),
-        save: row.querySelector('.recording-save').title,
-        pausedCanExport: [...pausedActions].some((action) => !action.hidden),
+        hasSaveButton: !!row.querySelector('.recording-save'),
+        pausedCanDownload: !paused.querySelector('.recording-download').hidden,
       };`);
     assert.equal(behavior.path, '/recordings/fixture/program.webm');
     assert.equal(behavior.name, NAME);
     assert.equal(behavior.download, '1');
-    assert.equal(behavior.save, 'Save as…');
-    assert.equal(behavior.pausedCanExport, false);
+    assert.equal(behavior.hasSaveButton, false);
+    assert.equal(behavior.pausedCanDownload, false);
     await checkDownload(t, browser, () =>
       activate(`${SELECTOR} .recording-download`),
     );
@@ -203,11 +200,11 @@ test('scenario 18: export recordings through the library', async (t) => {
     });
     await run('app.closeSettings(); return true;');
     await click('#recordings-btn');
-    await wait(`return document.querySelector(
-      '${SELECTOR} .recording-save',
-    ).title === 'Save to exported';`);
-    await activate(`${SELECTOR} .recording-save`);
-    await click(`${SECOND} .recording-save`);
+    await wait(
+      `return !!document.querySelector('${SELECTOR} .recording-more');`,
+    );
+    await choose(SELECTOR, 'save-folder');
+    await choose(SECOND, 'save-folder');
     await wait(`
       const bars = document.querySelectorAll(
         '${SELECTOR} progress, ${SECOND} progress',
@@ -253,7 +250,7 @@ test('scenario 18: export recordings through the library', async (t) => {
         throw new DOMException('Write failed', 'QuotaExceededError');
       };
     `);
-    await activate(`${SELECTOR} .recording-save`);
+    await choose(SELECTOR, 'save-folder');
     await wait(`return document.querySelector('.recordings-status').textContent
       === 'Could not save this recording.';`);
     const readRetry = () =>

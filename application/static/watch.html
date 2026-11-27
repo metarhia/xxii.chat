@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Watch · xxii.chat</title>
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/default.css" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  </head>
+  <body class="watch-page">
+    <main class="watch-content">
+      <header>
+        <a class="link-btn" href="/">xxii.chat</a>
+        <h1 id="watch-title">Shared video</h1>
+      </header>
+      <video id="watch-player" controls playsinline hidden></video>
+      <p id="watch-status" role="status">Connecting to peers…</p>
+      <div class="watch-actions">
+        <button id="watch-keep" class="link-btn" type="button" hidden>
+          keep a copy
+        </button>
+        <button id="watch-retry" class="link-btn" type="button" hidden>
+          retry playback
+        </button>
+      </div>
+      <p class="muted">This tab shares verified video pieces while open.</p>
+    </main>
+    <script type="module" src="/watch.js"></script>
+  </body>
+</html>

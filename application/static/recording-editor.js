@@ -1,11 +1,11 @@
 import { askConfirm } from './confirm-dialog.js';
 import { cloneTemplate } from './view.js';
+import { createIcon } from './icons.js';
 import {
   initialEdit,
   timelineOf,
   partsOf,
   segmentsOf,
-  segmentTimeOf,
   remapEdit,
 } from './recording-edit-logic.js';
 import {
@@ -30,12 +30,23 @@ import { findSilentCuts } from './video-edit-silence.js';
 import { isVideoFile } from './video-library.js';
 import { pickExportFile, mediaNameOf } from './recording-export.js';
 import { sizeText } from './recording-files.js';
+import { RecordingTimeline } from './recording-timeline.js';
 
 const TIME_KEYS = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 };
 const HANDLES = ['start', 'end', 'cut-start', 'cut-end'];
 const DEFAULT_CUT_MS = 1000;
 const KEY_STEP_MS = 100;
 const RANGE_ERROR = 'Enter a time within the recording, with start before end.';
+const PICTURE_OPTIONS = [
+  'aspect',
+  'rotation',
+  'mirror',
+  'resolution',
+  'cropLeft',
+  'cropRight',
+  'cropTop',
+  'cropBottom',
+];
 
 const selectedCutOf = (draft, index, cut) => {
   const cuts = draft.cuts.slice();
@@ -96,13 +107,22 @@ class RecordingEditor {
     this.nodes['copy-title'].value = `${hooks.name} (edited)`;
     this.lifetime = new AbortController();
     this.work = Promise.resolve();
-    this.preview = false;
+    this.tab = 'cuts';
     this.time = 0;
     this.cutIndex = -1;
     this.pendingCut = null;
     this.saving = null;
     this.finalizing = false;
     this.asking = false;
+    this.timelineView = new RecordingTimeline(
+      this.nodes,
+      {
+        seek: (time) => this.seek(time),
+        canDraw: () => !this.pendingCut,
+        range: (range, commit) => this.drawCut(range, commit),
+      },
+      this.lifetime.signal,
+    );
     this.retry = () => this.load();
     this.setStatus('Loading recording…');
     this.bind();
@@ -193,7 +213,6 @@ class RecordingEditor {
       undo: () => this.restore('undo'),
       redo: () => this.restore('redo'),
       discard: () => this.discard(),
-      preview: () => this.togglePreview(),
       save: () => this.save(),
       'save-as': () => this.save(true),
       'add-videos': () => nodes['video-files'].click(),
@@ -204,8 +223,17 @@ class RecordingEditor {
     for (const [name, action] of Object.entries(actions)) {
       nodes[name].onclick = action;
     }
-    nodes.scrub.oninput = () => this.seek(Number(nodes.scrub.value));
+    this.setPlaying(false);
+    nodes.undo.append(createIcon('undo'));
+    nodes.redo.append(createIcon('redo'));
+    nodes['zoom-fit'].append(createIcon('fit'));
+    nodes.scrub.oninput = () => {
+      const time = Number(nodes.scrub.value);
+      this.seek(time);
+      this.timelineView.reveal(time);
+    };
     nodes['copy-title'].oninput = () => this.paintSave();
+    nodes.speed.oninput = () => this.paintSpeed();
     nodes['video-files'].onchange = () => {
       const files = Array.from(nodes['video-files'].files);
       nodes['video-files'].value = '';
@@ -227,6 +255,7 @@ class RecordingEditor {
     );
     nodes['add-recording'].disabled = !sources.length;
     for (const name of HANDLES) this.bindHandle(name);
+    this.bindTabs();
     dialog.addEventListener('keydown', (event) => event.stopPropagation());
     dialog.addEventListener('cancel', (event) => {
       event.preventDefault();
@@ -243,6 +272,45 @@ class RecordingEditor {
     );
   }
 
+  bindTabs() {
+    const list = this.dialog.querySelector('[role="tablist"]');
+    this.tabs = [...list.querySelectorAll('[role="tab"]')];
+    for (const tab of this.tabs) {
+      tab.onclick = () => {
+        this.tab = tab.dataset.editorTab;
+        this.paintTabs();
+      };
+    }
+    list.onkeydown = (event) => {
+      const tabs = this.tabs;
+      const index = tabs.indexOf(event.target);
+      if (index === -1) return;
+      const destinations = {
+        ArrowLeft: (index - 1 + tabs.length) % tabs.length,
+        ArrowRight: (index + 1) % tabs.length,
+        Home: 0,
+        End: tabs.length - 1,
+      };
+      const target = tabs[destinations[event.key]];
+      if (!target) return;
+      event.preventDefault();
+      target.click();
+      target.focus();
+    };
+  }
+
+  paintTabs() {
+    for (const tab of this.tabs) {
+      const name = tab.dataset.editorTab;
+      const selected = name === this.tab;
+      const panel = this.dialog.querySelector(`#recording-panel-${name}`);
+      tab.classList.toggle('open', selected);
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      panel.hidden = !selected;
+    }
+  }
+
   updateOption(input) {
     const options = {
       ...editOptionsOf(this.draft),
@@ -250,7 +318,18 @@ class RecordingEditor {
     };
     this.history.apply({ ...this.draft, options });
     this.paint();
-    if (this.preview && !this.timeline.error) this.seek(this.time);
+    this.seek(this.time);
+  }
+
+  paintSpeed() {
+    const { speed } = this.nodes;
+    const value = Number(speed.value);
+    const min = Number(speed.min);
+    const max = Number(speed.max);
+    const percent = (100 * (value - min)) / (max - min);
+    speed.style.setProperty('--played', `${percent}%`);
+    speed.setAttribute('aria-valuetext', `${value} times normal speed`);
+    this.nodes['speed-value'].value = `${value}×`;
   }
 
   addRecording() {
@@ -265,7 +344,7 @@ class RecordingEditor {
     const signal = AbortSignal.any([control.signal, this.lifetime.signal]);
     this.tool = control;
     this.playback?.abort();
-    this.nodes.play.textContent = 'play';
+    this.setPlaying(false);
     this.nodes.body.disabled = true;
     this.nodes['save-status'].hidden = false;
     this.nodes['cancel-save'].disabled = false;
@@ -305,7 +384,6 @@ class RecordingEditor {
     this.history.apply({ ...draft, sourceParts: parts });
     this.parts = parts;
     this.duration = parts.at(-1).end;
-    this.preview = false;
     this.invalid.clear();
     this.selectCut(-1);
     this.seek(0);
@@ -362,32 +440,22 @@ class RecordingEditor {
       const time = direct ? move : edge;
       this.applyTime(name, this.clampTime(name, time));
     };
-    handle.onpointerdown = (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      handle.focus();
-      handle.setPointerCapture(event.pointerId);
-      this.drag = { name, time: this.timeOf(name), pointer: event.pointerId };
-    };
-    handle.onpointermove = (event) => {
-      if (this.drag?.pointer !== event.pointerId) return;
-      const track = this.nodes.track.getBoundingClientRect();
-      const time = Math.round(
-        ((event.clientX - track.left) / track.width) * this.duration,
-      );
-      this.drag.time = this.clampTime(name, time);
-      this.paintRanges();
-      this.seek(this.drag.time);
-    };
-    const finish = (event, commit) => {
-      if (this.drag?.pointer !== event.pointerId) return;
-      const { time } = this.drag;
-      this.drag = null;
-      if (commit) this.applyTime(name, time);
-      else this.paint();
-    };
-    handle.onpointerup = (event) => finish(event, true);
-    handle.onlostpointercapture = (event) => finish(event, false);
+    this.timelineView.bindDrag(handle, () => {
+      handle.focus({ preventScroll: true });
+      this.drag = { name, time: this.timeOf(name) };
+      const move = (time) => {
+        this.drag.time = this.clampTime(name, time);
+        this.paintRanges();
+        this.seek(this.drag.time);
+      };
+      const end = (time, commit) => {
+        const current = this.drag.time;
+        this.drag = null;
+        if (commit) this.applyTime(name, current);
+        else this.paint();
+      };
+      return { move, end };
+    });
   }
 
   timeOf(name) {
@@ -404,6 +472,7 @@ class RecordingEditor {
 
   applyTime(name, time, input) {
     if (!Number.isSafeInteger(time) || time !== this.clampTime(name, time)) {
+      if (this.playing) this.seek(this.time);
       this.invalid.add(name);
       this.setStatus(RANGE_ERROR);
       input?.setAttribute('aria-invalid', 'true');
@@ -419,29 +488,51 @@ class RecordingEditor {
     this.setStatus('');
     this.paint();
     this.seek(time);
+    this.timelineView.reveal(time);
   }
 
-  newCut() {
-    const start = Math.min(this.time, this.duration - 1);
-    const end = Math.min(this.duration, start + DEFAULT_CUT_MS);
+  newCut(range) {
+    const start = range?.start ?? Math.min(this.time, this.duration - 1);
+    const end = range?.end ?? Math.min(this.duration, start + DEFAULT_CUT_MS);
     this.cutIndex = this.draft.cuts.length;
     this.pendingCut = { start, end };
+    this.tab = 'cuts';
     this.paint();
-    this.fields.get('cut-start').input.focus();
+    this.seek(range ? start : this.time);
+    this.timelineView.reveal(start);
+    this.fields.get('cut-start').input.focus({ preventScroll: true });
+  }
+
+  drawCut(range, commit) {
+    this.drawnCut = commit ? null : range;
+    if (commit && range && range.end > range.start) this.newCut(range);
+    else this.paintRanges();
+  }
+
+  openCut(index) {
+    if (index === this.cutIndex) return;
+    if (this.pendingCut && this.pendingCut !== this.draft.cuts[this.cutIndex]) {
+      this.setStatus('Apply or cancel the current cut first.');
+      return;
+    }
+    this.selectCut(index);
   }
 
   selectCut(index) {
     this.cutIndex = index;
     const cut = this.draft.cuts[index];
     this.pendingCut = cut ?? null;
+    if (cut) this.tab = 'cuts';
     this.invalid.delete('cut-start');
     this.invalid.delete('cut-end');
     this.setStatus('');
     this.paint();
     if (cut) {
       this.seek(cut.start);
-      this.fields.get('cut-start').input.focus();
+      this.timelineView.reveal(cut.start);
+      this.fields.get('cut-start').input.focus({ preventScroll: true });
     } else {
+      if (this.playing) this.seek(this.time);
       this.nodes['new-cut'].focus();
     }
   }
@@ -473,7 +564,6 @@ class RecordingEditor {
   async discard() {
     const confirmed = await this.confirmDiscard(false);
     if (!confirmed) return;
-    this.preview = false;
     this.time = 0;
     this.invalid.clear();
     this.parts = this.original;
@@ -481,20 +571,6 @@ class RecordingEditor {
     this.history = new EditHistory(initialEdit(this.duration));
     this.selectCut(-1);
     this.seek(0);
-  }
-
-  togglePreview() {
-    this.preview = !this.preview;
-    this.time = 0;
-    this.paint();
-    this.seek(0);
-  }
-
-  get segments() {
-    const kept = this.preview
-      ? this.timeline.kept
-      : [{ start: 0, end: this.duration, output: 0 }];
-    return segmentsOf(this.parts, kept, this.preview ? this.options.speed : 1);
   }
 
   runPlayback(run) {
@@ -520,59 +596,80 @@ class RecordingEditor {
 
   seek(time) {
     this.paintTime(time);
-    const position = segmentTimeOf(this.segments, this.time);
+    const part =
+      this.parts.find(({ end }) => this.time < end) ?? this.parts.at(-1);
+    const offset = this.time - part.start;
     this.runPlayback(async (signal) => {
-      await this.player.seek(position.segment.part, position.time, signal);
+      await this.player.seek(part, offset, signal);
       this.paintFrame();
     });
-    this.nodes.play.textContent = 'play';
+    this.setPlaying(false);
+  }
+
+  setPlaying(playing) {
+    if (this.playing === playing) return;
+    this.playing = playing;
+    const button = this.nodes.play;
+    const label = playing ? 'Pause' : 'Play';
+    button.replaceChildren(createIcon(playing ? 'pause' : 'play'));
+    button.setAttribute('aria-label', label);
+    button.title = label;
   }
 
   play() {
-    if (this.nodes.play.textContent === 'pause') {
+    if (this.playing) {
       return void this.seek(this.time);
     }
-    const segments = this.segments;
-    const elapsed = this.time < Number(this.nodes.scrub.max) ? this.time : 0;
-    const first = segmentTimeOf(segments, elapsed);
+    if (this.nodes.play.disabled) return;
+    const segments = segmentsOf(this.parts, this.playTimeline.kept);
+    const first = segments.findIndex(
+      ({ part, end }) => part.start + end > this.time,
+    );
+    const elapsed = first < 0 ? 0 : this.time;
+    const { speed, output } = this.options;
+    this.setPlaying(true);
     this.runPlayback(async (signal) => {
-      this.nodes.play.textContent = 'pause';
-      this.video.playbackRate = this.preview ? this.options.speed : 1;
-      this.video.muted = this.preview && this.options.output === 'mute';
+      this.setPlaying(true);
+      this.video.muted = output === 'mute';
       let callback = null;
       const frame = () => {
         this.paintFrame();
         callback = this.video.requestVideoFrameCallback(frame);
       };
-      if (this.preview && this.video.requestVideoFrameCallback) frame();
+      if (this.video.requestVideoFrameCallback) frame();
       try {
-        for (const segment of segments.slice(segments.indexOf(first.segment))) {
-          const { part, start, end, output, speed = 1 } = segment;
-          const from = segment === first.segment ? first.time : start;
+        for (const { part, start, end } of segments.slice(Math.max(0, first))) {
+          const from = Math.max(start, elapsed - part.start);
           await this.player.seek(part, from, signal);
+          this.video.playbackRate = speed;
+          this.paintTime(part.start + from, true);
+          this.paintFrame();
           await playUntil(this.video, end, signal, null, (time) => {
-            this.paintTime(output + Math.max(0, time - start) / speed);
+            this.paintTime(part.start + time, true);
           });
         }
       } finally {
         if (callback !== null) this.video.cancelVideoFrameCallback(callback);
-        if (!signal.aborted) this.nodes.play.textContent = 'play';
+        if (!signal.aborted) this.setPlaying(false);
       }
     });
   }
 
-  paintTime(value) {
-    const duration = this.preview ? this.timeline.duration : this.duration;
+  paintTime(value, follow = false) {
+    const duration = this.duration;
     this.time = Math.min(duration, Math.max(0, Math.round(value)));
     this.nodes.scrub.value = this.time;
+    const percent = (100 * this.time) / Math.max(1, duration);
+    this.nodes.scrub.style.setProperty('--played', `${percent}%`);
     const time = timeInputOf(this.time);
     this.nodes.time.textContent = `${time} / ${timeInputOf(duration)}`;
     this.nodes.scrub.setAttribute('aria-valuetext', time);
+    this.timelineView.setTime(this.time, follow);
   }
 
   paintRanges() {
     const draft = this.draft;
-    const { track, removals, boundaries } = this.nodes;
+    const { removals, boundaries } = this.nodes;
     const drag = this.drag;
     const start = drag?.name === 'start' ? drag.time : draft.start;
     const end = drag?.name === 'end' ? drag.time : draft.end;
@@ -586,7 +683,6 @@ class RecordingEditor {
       if (drag?.name.startsWith('cut-')) cut[drag.name.slice(4)] = drag.time;
       cuts[this.cutIndex] = cut;
     }
-    for (const cut of cuts) ranges.push([cut.start, cut.end]);
     removals.replaceChildren(
       ...ranges
         .filter(([a, b]) => a < b)
@@ -606,7 +702,7 @@ class RecordingEditor {
         return mark;
       }),
     );
-    track.hidden = this.preview;
+    this.paintCutLane(cuts);
     for (const [name, { input, handle }] of this.fields) {
       const time =
         this.drag?.name === name ? this.drag.time : this.timeOf(name);
@@ -624,10 +720,42 @@ class RecordingEditor {
     }
   }
 
+  paintCutLane(cuts) {
+    const lane = this.nodes['cut-lane'];
+    const markers = cuts.map(({ start, end }, index) => {
+      const marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className = 'recording-edit-cut-range';
+      marker.textContent = `Cut ${index + 1}`;
+      const range = `${timeInputOf(start)}–${timeInputOf(end)}`;
+      const selected = this.cutIndex === index;
+      marker.title = `${marker.textContent} · ${range}`;
+      marker.setAttribute('aria-pressed', String(selected));
+      marker.classList.toggle('pending', selected && !this.draft.cuts[index]);
+      marker.onclick = () => this.openCut(index);
+      positioned(marker, start, end, this.duration);
+      return marker;
+    });
+    if (this.drawnCut) {
+      const marker = document.createElement('span');
+      marker.className = 'recording-edit-cut-range pending';
+      const { start, end } = this.drawnCut;
+      positioned(marker, start, end, this.duration);
+      markers.push(marker);
+    }
+    lane.replaceChildren(...markers);
+  }
+
   paint() {
     const { nodes, draft } = this;
     this.options = editOptionsOf(draft);
     this.timeline = timelineOf(this.duration, draft);
+    this.playTimeline = this.pendingCut
+      ? timelineOf(
+          this.duration,
+          selectedCutOf(draft, this.cutIndex, this.pendingCut),
+        )
+      : this.timeline;
     if (!this.timeline.error) {
       this.timeline.duration = Math.max(
         1,
@@ -636,28 +764,24 @@ class RecordingEditor {
       this.timeline.changed ||=
         this.clipsChanged || changedOptions(this.options);
     }
-    if (this.timeline.error) this.preview = false;
     this.paintRanges();
-    nodes.scrub.max = this.preview ? this.timeline.duration : this.duration;
+    nodes.scrub.max = this.duration;
+    this.timelineView.setDuration(this.duration);
     this.paintTime(this.time);
-    nodes['source-controls'].hidden = this.preview;
+    this.paintTabs();
     nodes['cut-fields'].hidden = !this.pendingCut;
     nodes['remove-cut'].hidden = this.cutIndex >= draft.cuts.length;
     nodes['new-cut'].disabled = Boolean(this.pendingCut);
     nodes.undo.disabled = !this.history.canUndo;
     nodes.redo.disabled = !this.history.canRedo;
     nodes.discard.disabled = !this.dirty;
-    nodes.preview.textContent = this.preview ? 'back to edit' : 'preview edit';
     this.paintClips();
     for (const input of this.optionInputs) {
       const value = this.options[input.dataset.option];
       if (input.type === 'checkbox') input.checked = value;
       else if (input.value !== String(value)) input.value = value;
     }
-    nodes.scrub.setAttribute(
-      'aria-label',
-      this.preview ? 'Edited playhead' : 'Source playhead',
-    );
+    this.paintSpeed();
     nodes.cuts.replaceChildren(
       ...draft.cuts.map(({ start, end }, index) => {
         const item = document.createElement('li');
@@ -667,7 +791,7 @@ class RecordingEditor {
         const range = `${timeInputOf(start)}–${timeInputOf(end)}`;
         button.textContent = `Cut ${index + 1} · ${range}`;
         button.setAttribute('aria-pressed', String(this.cutIndex === index));
-        button.onclick = () => this.selectCut(index);
+        button.onclick = () => this.openCut(index);
         item.append(button);
         return item;
       }),
@@ -715,19 +839,15 @@ class RecordingEditor {
 
   paintFrame() {
     const canvas = this.nodes.frame;
-    const audioOnly = this.preview && this.options.output === 'audio';
     const visual = this.video.parentElement;
-    visual.hidden = audioOnly;
-    visual.dataset.edited = String(this.preview && !audioOnly);
-    canvas.hidden = !this.preview || audioOnly;
-    if (
-      canvas.hidden ||
-      !this.frame ||
-      !this.video.videoWidth ||
-      optionsError(this.options)
-    ) {
-      return;
-    }
+    const edited =
+      this.frame &&
+      this.video.videoWidth &&
+      this.options.output !== 'audio' &&
+      PICTURE_OPTIONS.some((key) => this.options[key]);
+    canvas.hidden = !edited;
+    visual.dataset.edited = String(Boolean(edited));
+    if (!edited) return;
     const { width, height } = this.frame;
     const scale = Math.min(1, 960 / Math.max(width, height));
     const w = Math.max(2, Math.round(width * scale));
@@ -765,14 +885,13 @@ class RecordingEditor {
       this.format,
     );
     const error =
+      this.playTimeline.error ||
       timeline.error ||
       validation ||
       encoding?.error ||
       (audioOnly && !audio && 'There is no audio in the kept clips.') ||
       (!canRender && 'This browser cannot render an edited recording.');
-    nodes.preview.disabled = Boolean(
-      timeline.error || this.pendingCut || this.invalid.size,
-    );
+    nodes.play.disabled = Boolean(this.playTimeline.error || this.invalid.size);
     nodes['apply-cut'].disabled =
       this.invalid.has('cut-start') || this.invalid.has('cut-end');
     nodes.validation.textContent = error || '';
@@ -803,7 +922,7 @@ class RecordingEditor {
     const title = nodes['copy-title'].value.trim();
     const name = mediaNameOf(title, format.extension);
     this.playback?.abort();
-    nodes.play.textContent = 'play';
+    this.setPlaying(false);
     const control = new AbortController();
     this.saving = control;
     nodes.body.disabled = true;

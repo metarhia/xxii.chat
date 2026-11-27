@@ -15,10 +15,12 @@ import { Menu, Press } from './overlays.js';
 import { RecordingWriter } from './recorder.js';
 import { RecordingEditor } from './recording-editor.js';
 import { importVideo, videoProperties } from './video-library.js';
+import { VideoShares } from './video-share.js';
 
 const CARD_ACTIONS = {
   play: (list, card) => list.playCard(card),
   edit: (list, card) => list.openEditor(card),
+  share: (list, card) => list.shareVideo(card),
   properties: (list, card) => list.showProperties(card.entry),
   attach: (list, card) => list.attachToChat(card),
   download: (list, card) => {
@@ -37,7 +39,7 @@ const BADGES = {
 };
 const UNEXPECTED_END = 'Recording ended unexpectedly';
 const LOST_PART = `${UNEXPECTED_END}. The last part was lost.`;
-const ICON_ACTIONS = ['play', 'download', 'save', 'delete'];
+const ICON_ACTIONS = ['play', 'edit', 'download', 'delete'];
 const STORAGE_UNAVAILABLE = 'Storage usage is unavailable.';
 const REPAIR_CHANNEL = 'xxii-recording-repair';
 const DOWNLOAD_URL_MS = 30000;
@@ -252,6 +254,7 @@ class Recordings {
     this.partRevision = 0;
     this.editor = null;
     this.editorLayers = overlay.layers;
+    this.shares = new VideoShares(overlay.layers);
     this.menu = createCardMenu(overlay);
     const picker = root.querySelector('#recordings-files');
     const importer = root.querySelector('#recordings-import');
@@ -369,6 +372,7 @@ class Recordings {
   close() {
     this.closeEditor();
     this.closeProperties();
+    this.shares.closeDialog();
     this.revision++;
     this.linked = null;
     this.menu.close();
@@ -511,15 +515,17 @@ class Recordings {
     more.prepend(createIcon('more'));
     card.more = more;
     const play = row.querySelector('.recording-play');
+    const edit = row.querySelector('.recording-edit');
     const poster = row.querySelector('.recording-poster-play');
-    const save = row.querySelector('.recording-save');
     const remove = row.querySelector('.recording-delete');
     const download = row.querySelector('.recording-download');
     const { exports } = card;
     play.disabled = !card.canPlay;
+    edit.hidden = !card.canEdit;
     poster.disabled = !card.canPlay;
     remove.disabled = !card.canDelete;
     play.onclick = () => this.playCard(card);
+    edit.onclick = () => this.openEditor(card);
     poster.onclick = () => this.playCard(card);
     remove.onclick = () => this.deleteEntry(card.entry);
     more.onclick = () => this.toggleMenu(card);
@@ -528,15 +534,6 @@ class Recordings {
       download.href = exports.download.href ?? '#';
       download.onclick = exports.download.run ?? null;
     }
-    const target = exports.saveFolder ?? exports.saveAs;
-    save.hidden = !target;
-    if (!target) return;
-    const label = exports.saveFolder
-      ? `Save to ${exports.saveFolder.name}`
-      : 'Save as…';
-    save.title = label;
-    save.setAttribute('aria-label', label);
-    save.onclick = () => target.run();
   }
 
   playCard({ entry }) {
@@ -673,11 +670,23 @@ class Recordings {
     });
   }
 
+  shareVideo({ entry, labels }) {
+    const part = this.partOf(entry);
+    const key = part ? `${entry.id}/${part.name}` : entry.id;
+    const name = part?.name ?? labels.name;
+    const mime = typeOf(entry.mime) || TYPES[entry.extension];
+    const source = (signal) =>
+      this.editSource({ ...part, entry }, signal, true);
+    this.shares.open({ key, name, mime, source });
+  }
+
   async showProperties(entry) {
     if (this.propertyDialog) return;
     const dialog = document.createElement('dialog');
+    const header = document.createElement('header');
     const heading = document.createElement('h2');
     const body = document.createElement('dl');
+    const status = document.createElement('p');
     const close = document.createElement('button');
     const control = new AbortController();
     const { signal } = control;
@@ -685,12 +694,31 @@ class Recordings {
     dialog.className = 'confirm recording-properties';
     dialog.setAttribute('aria-label', 'Media properties');
     heading.textContent = 'Media properties';
-    body.textContent = 'Reading media…';
-    close.className = 'link-btn';
+    status.textContent = 'Reading media…';
+    status.setAttribute('role', 'status');
+    close.className = 'icon-btn';
     close.type = 'button';
-    close.textContent = 'close';
+    close.title = 'Close media properties';
+    close.setAttribute('aria-label', close.title);
+    close.append(createIcon('close'));
     close.onclick = () => dialog.close();
-    dialog.append(heading, body, close);
+    header.append(heading, close);
+    dialog.append(header, status, body);
+    const outside = ({ target, clientX, clientY }) => {
+      if (target !== dialog) return false;
+      const { left, top, right, bottom } = dialog.getBoundingClientRect();
+      return (
+        clientX < left || clientX >= right || clientY < top || clientY >= bottom
+      );
+    };
+    let fromBackdrop = false;
+    dialog.addEventListener('pointerdown', (event) => {
+      fromBackdrop = outside(event);
+    });
+    dialog.addEventListener('click', (event) => {
+      if (fromBackdrop && outside(event)) dialog.close();
+      fromBackdrop = false;
+    });
     dialog.addEventListener('keydown', (event) => event.stopPropagation());
     dialog.addEventListener(
       'close',
@@ -725,17 +753,20 @@ class Recordings {
         ['Average bitrate', bitrate ? `${bitrate} kbps` : 'Unknown'],
         ['Sound', media.audio ? 'Audio track' : 'Silent'],
       ];
+      status.hidden = true;
       body.replaceChildren(
-        ...rows.flatMap(([key, value]) => {
+        ...rows.map(([key, value]) => {
+          const tile = document.createElement('div');
           const term = document.createElement('dt');
           const detail = document.createElement('dd');
           term.textContent = key;
           detail.textContent = value;
-          return [term, detail];
+          tile.append(term, detail);
+          return tile;
         }),
       );
     } catch (error) {
-      if (!signal.aborted) body.textContent = error.message;
+      if (!signal.aborted) status.textContent = error.message;
     }
   }
 
@@ -790,6 +821,7 @@ class Recordings {
     const items = [{ action: 'play', label: 'Play', disabled: !card.canPlay }];
     if (card.canEdit) {
       items.push({ action: 'edit', label: 'Edit' });
+      items.push({ action: 'share', label: 'Share video' });
     }
     if (card.canPlay) {
       items.push({ action: 'properties', label: 'Properties' });
@@ -933,11 +965,10 @@ class Recordings {
   }
 
   async save({ row }, copy, isCurrent) {
+    if (row.dataset.saving !== undefined) return;
     const progress = row.querySelector('.recording-export-progress');
-    const save = row.querySelector('.recording-save');
     this.setStatus('');
     row.dataset.saving = '';
-    save.disabled = true;
     try {
       await copy((percent) => {
         if (isCurrent && !isCurrent()) return;
@@ -952,7 +983,6 @@ class Recordings {
       );
     } finally {
       delete row.dataset.saving;
-      save.disabled = false;
     }
   }
 
@@ -998,10 +1028,6 @@ class Recordings {
         card.exports = this.fileExports(card, card.folder);
         const download = row.querySelector('.recording-download');
         download.href = card.exports.download.href;
-        const target = card.exports.saveFolder ?? card.exports.saveAs;
-        if (target) {
-          row.querySelector('.recording-save').onclick = () => target.run();
-        }
       }
       if (this.selected === entry.id) {
         this.player.setAttribute('aria-label', card.labels.name);
