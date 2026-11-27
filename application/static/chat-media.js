@@ -1,5 +1,6 @@
 import { MAX_FILE_SIZE } from './chat.js';
 import { durationBytesOf, durationSlotOf } from './recording-webm.js';
+import { createIcon } from './icons.js';
 import { button, element, openCollection } from './collection-dialog.js';
 
 const FORMATS = {
@@ -200,8 +201,25 @@ const isNote = ({ presentation, mime }) =>
 
 class ChatMedia {
   #active = null;
+  #playing = null;
+  #circles = new Map();
+
+  #observer = new IntersectionObserver(
+    (entries) => {
+      for (const { target, isIntersecting } of entries) {
+        const circle = this.#circles.get(target);
+        if (!circle) continue;
+        circle.visible = isIntersecting;
+        if (isIntersecting) this.loadCircle(circle);
+        else clearTimeout(circle.timer);
+      }
+    },
+    { rootMargin: '160px' },
+  );
 
   close() {
+    this.#playing?.pause();
+    this.#playing = null;
     const active = this.#active;
     this.#active = null;
     if (!active) return;
@@ -213,49 +231,133 @@ class ChatMedia {
     if (active.url) URL.revokeObjectURL(active.url);
   }
 
+  forget(row) {
+    if (this.#active && row.contains(this.#active.player)) this.close();
+    for (const player of row.querySelectorAll('.circle-note video')) {
+      const circle = this.#circles.get(player);
+      if (!circle) continue;
+      this.#circles.delete(player);
+      this.#observer.unobserve(player);
+      clearTimeout(circle.timer);
+      player.pause();
+      if (this.#playing === player) this.#playing = null;
+      if (circle.url) URL.revokeObjectURL(circle.url);
+    }
+  }
+
+  fileStored(checksum) {
+    for (const circle of this.#circles.values()) {
+      if (circle.file.checksum === checksum) this.loadCircle(circle);
+    }
+  }
+
+  async loadCircle(circle) {
+    const { file, load, player, status } = circle;
+    if (!circle.visible || circle.loading || circle.url) return;
+    clearTimeout(circle.timer);
+    circle.loading = true;
+    try {
+      const blob = await load(file);
+      if (!this.#circles.has(player)) return;
+      if (blob) {
+        circle.url = URL.createObjectURL(new Blob([blob], { type: file.mime }));
+        player.src = circle.url;
+        return;
+      }
+      status.textContent = 'Waiting for video…';
+    } catch {
+      status.textContent = 'Waiting for video…';
+    } finally {
+      circle.loading = false;
+      if (!circle.url && circle.visible && this.#circles.has(player)) {
+        circle.timer = setTimeout(() => this.loadCircle(circle), 1800);
+      }
+    }
+  }
+
+  createCircle(file, load) {
+    const box = element('div', 'circle-note');
+    const frame = element('div', 'circle-frame');
+    const player = element('video');
+    player.playsInline = true;
+    player.preload = 'auto';
+    player.setAttribute('aria-label', file.name);
+    const status = element('span', 'muted', 'Loading video…');
+    status.setAttribute('role', 'status');
+    const play = button('', () => {
+      if (!player.paused) return void player.pause();
+      this.close();
+      this.#playing = player;
+      player.play().catch(() => {
+        status.hidden = false;
+        status.textContent = 'Could not play this video.';
+      });
+    });
+    play.className = 'circle-toggle';
+    play.disabled = true;
+    const paint = () => {
+      const paused = player.paused;
+      const label = paused ? 'Play video message' : 'Pause video message';
+      play.setAttribute('aria-label', label);
+      play.title = label;
+      play.replaceChildren(createIcon(paused ? 'play' : 'pause'));
+      frame.classList.toggle('playing', !paused);
+    };
+    paint();
+    player.onloadedmetadata = () => {
+      play.disabled = false;
+    };
+    player.onloadeddata = () => {
+      status.hidden = true;
+    };
+    player.onerror = () => {
+      play.disabled = true;
+      status.hidden = false;
+      status.textContent = 'Could not open this video.';
+    };
+    player.onplay = player.onpause = player.onended = paint;
+    frame.append(player, play);
+    box.append(frame, status);
+    this.#circles.set(player, { player, file, load, status });
+    this.#observer.observe(player);
+    return box;
+  }
+
   create(file, load) {
-    const circle = file.presentation === 'circle';
-    const box = element(
-      'div',
-      circle ? 'chat-note circle-note' : 'chat-note voice-note',
-    );
-    const player = element(circle ? 'video' : 'audio');
+    if (file.presentation === 'circle') return this.createCircle(file, load);
+    const box = element('div', 'chat-note voice-note');
+    const player = element('audio');
     player.controls = true;
     player.playsInline = true;
     player.hidden = true;
     player.setAttribute('aria-label', file.name);
     const status = element('span', 'muted');
     status.setAttribute('role', 'status');
-    const play = button(
-      circle ? '▶ Video message' : '▶ Voice message',
-      async () => {
-        this.close();
-        play.disabled = true;
-        status.textContent = '';
-        const active = { player, play, url: '' };
-        this.#active = active;
-        try {
-          const blob = await load(file);
-          if (this.#active !== active || !box.isConnected) return;
-          if (!blob) {
-            throw new Error('Waiting for the file. Try again shortly.');
-          }
-          active.url = URL.createObjectURL(
-            new Blob([blob], { type: file.mime }),
-          );
-          player.src = active.url;
-          player.hidden = false;
-          play.hidden = true;
-          player.play().catch(() => {});
-        } catch (error) {
-          status.textContent = error.message;
-        } finally {
-          play.disabled = false;
+    const play = button('▶ Voice message', async () => {
+      this.close();
+      play.disabled = true;
+      status.textContent = '';
+      const active = { player, play, url: '' };
+      this.#active = active;
+      try {
+        const blob = await load(file);
+        if (this.#active !== active || !box.isConnected) return;
+        if (!blob) {
+          throw new Error('Waiting for the file. Try again shortly.');
         }
-      },
-    );
+        active.url = URL.createObjectURL(new Blob([blob], { type: file.mime }));
+        player.src = active.url;
+        player.hidden = false;
+        play.hidden = true;
+        player.play().catch(() => {});
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        play.disabled = false;
+      }
+    });
     box.append(play, player);
-    if (!circle && file.waveform) {
+    if (file.waveform) {
       const wave = element('span', 'note-wave');
       wave.setAttribute('aria-hidden', 'true');
       for (const peak of file.waveform.slice(0, 48)) {
@@ -272,20 +374,18 @@ class ChatMedia {
         }
       });
     }
-    if (!circle) {
-      const speed = element('select');
-      speed.setAttribute('aria-label', 'Playback speed');
-      for (const rate of [1, 1.25, 1.5, 2]) {
-        const option = element('option', '', `${rate}×`);
-        option.value = rate;
-        speed.append(option);
-      }
-      speed.onchange = () => {
-        player.playbackRate = Number(speed.value);
-      };
-      player.addEventListener('loadedmetadata', speed.onchange);
-      box.append(speed);
+    const speed = element('select');
+    speed.setAttribute('aria-label', 'Playback speed');
+    for (const rate of [1, 1.25, 1.5, 2]) {
+      const option = element('option', '', `${rate}×`);
+      option.value = rate;
+      speed.append(option);
     }
+    speed.onchange = () => {
+      player.playbackRate = Number(speed.value);
+    };
+    player.addEventListener('loadedmetadata', speed.onchange);
+    box.append(speed);
     box.append(status);
     return box;
   }

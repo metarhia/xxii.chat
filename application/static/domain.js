@@ -50,7 +50,7 @@ import { MessageNotices } from './message-notice.js';
 import { RecordingsScreen } from './recordings-screen.js';
 import { ProfileRow } from './profile-row.js';
 import { AVATAR_KEY, showPhoto } from './avatar.js';
-import { isAvatar } from './chat.js';
+import { isAvatar, readMentionTargets } from './chat.js';
 import { linkOf, summaryOf } from './settings-about.js';
 import { Folders, FOLDERS_KEY } from './folders.js';
 import { Hidden, HIDDEN_KEY, isReturning } from './hidden.js';
@@ -64,6 +64,9 @@ import {
   inviteUrl,
   contactLink,
   mentions,
+  markMentions,
+  mentionTags,
+  resolveMentions,
   chooseMention,
   setRequest,
   requestState,
@@ -418,6 +421,7 @@ const PEER_KEY = 'xxii:peer';
 const SINCE_KEY = 'xxii:since';
 const READ_KEY = 'xxii:read';
 const DRAFTS_KEY = 'xxii:drafts';
+const MENTION_DRAFTS_KEY = 'xxii:mention-drafts';
 const COLLAPSED_KEY = 'xxii:collapsed';
 const SIDEBAR_KEY = 'xxii:sidebar';
 const TAB_KEY = 'xxii:tab';
@@ -766,6 +770,7 @@ class ChatApplication extends Application {
     this.view = null;
     this.readAt = readMap(READ_KEY);
     this.drafts = readDrafts();
+    this.mentionDrafts = readMap(MENTION_DRAFTS_KEY);
     this.pending = new Map();
     this.noteInfo = new WeakMap();
     this.media = new ChatMedia();
@@ -837,7 +842,7 @@ class ChatApplication extends Application {
         chat: (chat) => this.chatName(chat),
       },
       isHidden: (chat, record) => this.isHiddenFor(chat, record),
-      isMention: (record) => mentions(record.content).has(this.peerId),
+      isMention: (record) => mentions(record).has(this.peerId),
       isFollowed: (chat, id) => this.collections.isFollowing(chat, id),
       canDirect: (chat) => !this.contactState(chat),
     });
@@ -1553,6 +1558,7 @@ class ChatApplication extends Application {
     this.dropArticle();
     this.quotes.clear();
     this.fragments.clear();
+    this.forget(new Map());
     this.cache.clear();
     for (const url of this.previews.values()) URL.revokeObjectURL(url);
     this.previews.clear();
@@ -1950,9 +1956,9 @@ class ChatApplication extends Application {
   }
 
   forget(cache) {
-    for (const id of this.cache.keys()) {
-      if (cache.has(id)) continue;
-      const { element } = this.cache.get(id);
+    for (const [id, { element }] of this.cache) {
+      if (cache.get(id)?.element === element) continue;
+      this.media.forget(element);
       for (const image of element.querySelectorAll('.image')) {
         this.observer.unobserve(image);
       }
@@ -2135,16 +2141,14 @@ class ChatApplication extends Application {
     const content = element.querySelector('.content');
     let previous = details.votes;
     renderMarkdown(content, videoContent(message), (blocks) => {
+      markMentions(blocks, message.mentions);
       const voting = this.votingFor(message, blocks, details.votes);
       previous = voting.previous;
       return voting.tasks;
     });
     showPreviousVotes(content, previous);
     addVideoCard(content, message);
-    element.classList.toggle(
-      'mentioned',
-      mentions(message.content).has(this.peerId),
-    );
+    element.classList.toggle('mentioned', mentions(message).has(this.peerId));
     element.querySelector('.note').textContent = noteOf(message);
     const origin = originOf(message);
     const forwarded = element.querySelector('.forwarded');
@@ -2180,6 +2184,7 @@ class ChatApplication extends Application {
     const element = cloneTemplate(this.articleTemplate, '.post-article');
     fillPostHeader(element, post);
     const blocks = parseMarkdown(videoContent(post));
+    markMentions(blocks, post.mentions);
     const { tasks, previous } = this.votingFor(post, blocks, details.votes);
     const nodes = blocks.map((block) => renderBlock(block, tasks));
     const links = [];
@@ -2366,6 +2371,7 @@ class ChatApplication extends Application {
   }
 
   fileStored(checksum) {
+    this.media.fileStored(checksum);
     if (!this.waiting.has(checksum)) return;
     for (const files of this.view?.attachments.values() ?? []) {
       const file = files.find((item) => item.checksum === checksum);
@@ -4198,6 +4204,14 @@ class ChatApplication extends Application {
     if (text) this.drafts.set(this.chat, text);
     else this.drafts.delete(this.chat);
     writeMap(DRAFTS_KEY, this.drafts);
+    const previous = this.mentionDrafts.get(this.chat);
+    if (previous) {
+      const tags = mentionTags(text);
+      const retained = previous.filter(([tag]) => tags.has(tag));
+      if (retained.length > 0) this.mentionDrafts.set(this.chat, retained);
+      else this.mentionDrafts.delete(this.chat);
+      writeMap(MENTION_DRAFTS_KEY, this.mentionDrafts);
+    }
     resizeInput(this.messageInput);
   }
 
@@ -4211,7 +4225,12 @@ class ChatApplication extends Application {
     return this.pending.get(key) ?? [];
   }
 
-  writePost(feed, text, files) {
+  mentionTargets(text, selected) {
+    if (!text.includes('#')) return '[]';
+    return resolveMentions(text, this.listContacts(), selected);
+  }
+
+  writePost(feed, text, files, targets = this.mentionTargets(text)) {
     const lines = text.split('\n');
     const id = generateUUID();
     this.attachFiles(this.replica, feed, id, files);
@@ -4220,19 +4239,44 @@ class ChatApplication extends Application {
     const title = lines[0].trim() || files[0].name;
     const content = lines.slice(1).join('\n').trim();
     const timestamp = Date.now();
-    const post = { id, feed, author, nick, title, content, timestamp };
+    const post = {
+      id,
+      feed,
+      author,
+      nick,
+      title,
+      content,
+      timestamp,
+      mentions: targets,
+    };
     createPost(this.replica, post);
     return id;
   }
 
-  writeMessage(chat, content, replyTo, files, quote = '') {
+  writeMessage(
+    chat,
+    content,
+    replyTo,
+    files,
+    quote = '',
+    targets = this.mentionTargets(content),
+  ) {
     const replica = this.replicaOf(chat);
     const id = generateUUID();
     this.attachFiles(replica, chat, id, files);
     const author = this.peerId;
     const nick = this.username;
     const timestamp = Date.now();
-    const message = { id, chat, author, nick, content, timestamp, replyTo };
+    const message = {
+      id,
+      chat,
+      author,
+      nick,
+      content,
+      timestamp,
+      replyTo,
+      mentions: targets,
+    };
     if (quote) message.quote = quote;
     createMessage(replica, message);
     return id;
@@ -4298,6 +4342,8 @@ class ChatApplication extends Application {
     const isPostMode = this.isPostMode();
     const replyTo = this.targetId() || this.article;
     const quote = this.fragments.get(chat) ?? '';
+    const selected = new Map(this.mentionDrafts.get(chat));
+    const targets = this.mentionTargets(content, selected);
     const isInside = this.threadItems().includes(replyTo);
     const isEnding = selection?.cleared ?? false;
     this.threadTarget = '';
@@ -4315,8 +4361,8 @@ class ChatApplication extends Application {
       }),
     );
     const id = isPostMode
-      ? this.writePost(chat, content, files)
-      : this.writeMessage(chat, content, replyTo, files, quote);
+      ? this.writePost(chat, content, files, targets)
+      : this.writeMessage(chat, content, replyTo, files, quote, targets);
     if (selection && selection === this.selection) {
       if (isEnding && selection.cleared) this.closeThread();
       else if (isInside) selection.chosen = id;
@@ -4634,8 +4680,20 @@ class ChatApplication extends Application {
   pickMention() {
     const input = this.messageInput;
     const { selectionStart, selectionEnd } = input;
-    chooseMention(this.listContacts(), (mention) => {
-      input.setRangeText(`${mention} `, selectionStart, selectionEnd, 'end');
+    const { chat } = this;
+    chooseMention(this.listContacts(), (tag, peer) => {
+      if (this.chat !== chat) return;
+      const selected = new Map(this.mentionDrafts.get(chat));
+      selected.set(tag.toLowerCase(), peer);
+      this.mentionDrafts.set(chat, [...selected]);
+      const previous = input.value[selectionStart - 1] ?? '';
+      const prefix = /[\p{L}\p{M}\p{N}_#-]/u.test(previous) ? ' ' : '';
+      input.setRangeText(
+        `${prefix}${tag} `,
+        selectionStart,
+        selectionEnd,
+        'end',
+      );
       this.saveDraft();
       input.focus();
     });
@@ -4839,7 +4897,11 @@ class ChatApplication extends Application {
     this.cancelEdit();
     if (content === record.content) return;
     const replica = this.replicaOf(this.chat);
-    editMessage(replica, id, { content, edited: Date.now() });
+    const mentions = this.mentionTargets(
+      content,
+      readMentionTargets(record.mentions) ?? undefined,
+    );
+    editMessage(replica, id, { content, edited: Date.now(), mentions });
     this.logger.log('Edited message:', content);
   }
 
@@ -4855,7 +4917,16 @@ class ChatApplication extends Application {
     }
     this.cancelEdit();
     if (title === record.title && content === record.content) return;
-    editPost(this.replica, record.id, { title, content, edited: Date.now() });
+    const mentions = this.mentionTargets(
+      text,
+      readMentionTargets(record.mentions) ?? undefined,
+    );
+    editPost(this.replica, record.id, {
+      title,
+      content,
+      edited: Date.now(),
+      mentions,
+    });
   }
 
   forwardMessages(ids) {
@@ -4910,6 +4981,7 @@ class ChatApplication extends Application {
       author: this.peerId,
       nick: this.username,
       content: record.content,
+      mentions: record.mentions,
       video: record.video,
       videoTitle: record.videoTitle,
       videoPoster: record.videoPoster,

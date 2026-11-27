@@ -554,6 +554,17 @@ test(
       );
     });
 
+    await t.test('a plain hashtag mention notifies its contact', async () => {
+      const id = await send('Look here #ann');
+      const title = 'bob mentioned you in !general';
+      await waitNote(annTab, title);
+      const notice = (await notesIn(annTab)).find(
+        (note) => note.title === title,
+      );
+      assert.equal(notice.body, 'Look here #ann');
+      assert.equal(notice.data.message, id);
+    });
+
     await t.test(
       'opening a notification route reveals the message',
       async () => {

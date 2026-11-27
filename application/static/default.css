@@ -5713,16 +5713,70 @@ select:not([multiple], [size]):dir(rtl) {
 }
 
 .circle-preview,
-.circle-note video {
+.circle-note {
   width: min(220px, 100%);
+}
+
+.circle-preview,
+.circle-frame {
   aspect-ratio: 1;
   border-radius: 50%;
-  object-fit: cover;
+  overflow: hidden;
   background: #000;
 }
 
-.circle-note > .link-btn {
-  border-radius: 100px;
+.circle-preview,
+.circle-frame video {
+  object-fit: cover;
+}
+
+.circle-note {
+  margin-block: 4px;
+}
+
+.circle-frame {
+  position: relative;
+}
+
+.circle-frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.circle-toggle {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.circle-toggle:disabled {
+  visibility: hidden;
+}
+
+.circle-toggle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+}
+
+.circle-toggle svg {
+  width: 42px;
+  height: 42px;
+  padding: 10px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 60%);
+}
+
+.circle-frame.playing:not(:hover) .circle-toggle:not(:focus-visible) svg {
+  opacity: 0;
 }
 
 .note-wave {
