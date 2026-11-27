@@ -23,6 +23,7 @@ const ASSETS = [
   '/markdown.js',
   '/syntax.js',
   '/markdown-view.js',
+  '/voting.js',
   '/ice.js',
   '/chat.js',
   '/collection-dialog.js',

@@ -130,6 +130,12 @@ sync. Terminal-like UI follows the
   lists, quotes, tables, links, and fenced code with syntax highlighting.
   The composer, the editor, and `Copy text` keep the raw text, and images
   never load
+- Write `- [ ] Option` in a message or feed article to add a vote choice.
+  Readers can select or clear multiple choices, with one vote per peer per
+  choice. The app calculates the totals from votes. Editing the surrounding
+  text or changing the order keeps the totals with their original choices.
+  Renamed or removed choices with votes appear under **Votes for previous
+  options**. Checked tasks, quoted text and code keep their normal display.
 - Call records in the chat are compact cards: the host nick, duration, and
   people, or a live call with a join button
 - Replies to me: `↩ N` next to the unread count in the chat header and the
@@ -463,7 +469,9 @@ duplicate names.
 
 Open the **Edit** icon beside **Play** for the full-screen editor. Drag an
 empty range on the timeline, adjust either edge, and choose **Apply cut**.
-**Play** skips the marked ranges, including the cut you are adjusting.
+**New cut** starts a fresh range at the playhead, replacing the draft while
+keeping applied cuts. **Play** skips the marked ranges, including the cut
+you are adjusting.
 Select any marked range to move its edges or remove the cut. Drag the ruler
 to seek. Use **+**, **−**, and **Fit timeline** to change zoom, and scroll
 horizontally to reach later sections. Trim and cut times also accept

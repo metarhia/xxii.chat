@@ -24,6 +24,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_AVATAR = 24 * 1024;
 const PHOTO = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
 const CHECKSUM = /^[0-9a-f]{64}$/;
+const VOTE_ID = /^vote-[0-9a-f]{64}$/;
 const PAIR = /^[\w-]{1,64}_[\w-]{1,64}$/;
 const ICON_PREFIX = /^(\p{Extended_Pictographic}\S*)\s+(.+)$/u;
 
@@ -37,6 +38,8 @@ const TYPES = {
   text: (value) => typeof value === 'string' && value.length <= TEXT_LENGTH,
   quote: (value) => typeof value === 'string' && value.length <= QUOTE_LENGTH,
   number: (value) => typeof value === 'number',
+  occurrence: (value) =>
+    Number.isSafeInteger(value) && value >= 0 && value <= TEXT_LENGTH,
   boolean: (value) => typeof value === 'boolean',
   video: (value) =>
     typeof value === 'string' && /^[0-9a-f]{64}\.[0-9a-f]{64}$/.test(value),
@@ -93,6 +96,7 @@ const FIELDS = {
     title: 'string',
     content: 'text',
     timestamp: 'number',
+    edited: 'number',
     pinned: 'boolean',
   },
   call: {
@@ -133,6 +137,14 @@ const FIELDS = {
     height: 'number',
     created: 'number',
   },
+  vote: {
+    chat: 'string',
+    message: 'string',
+    author: 'string',
+    label: 'text',
+    occurrence: 'occurrence',
+    active: 'boolean',
+  },
   reaction: {
     chat: 'string',
     message: 'string',
@@ -170,8 +182,15 @@ const isReactions = (reactions) => {
 };
 
 const validate = (delta) => {
-  const { entity, data } = delta;
+  const { entity, target, data } = delta;
   if (!Object.hasOwn(FIELDS, entity)) return false;
+  if (
+    entity === 'vote' &&
+    (!VOTE_ID.test(target) ||
+      Object.keys(data).length !== Object.keys(FIELDS.vote).length)
+  ) {
+    return false;
+  }
   const fields = FIELDS[entity];
   const hasReactions = TIMELINE.includes(entity);
   if (Object.hasOwn(data, 'quote') && !Object.hasOwn(data, 'replyTo')) {
@@ -274,6 +293,14 @@ const createPost = (replica, post) => {
   const change = replica.assign('post', id, fields);
   return attachVideoPost(replica, 'post', post) ?? change;
 };
+
+const editPost = (replica, id, { title, content, edited }) => {
+  const fields = { title, content };
+  replica.assign('post', id, fields);
+  return replica.assign('post', id, { edited });
+};
+
+const setVote = (replica, id, vote) => replica.assign('vote', id, vote);
 
 const startCall = (replica, record) => {
   const { id, chat, host, nick, title, timestamp } = record;
@@ -531,7 +558,7 @@ export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
 export { isAvatar };
 export { createMessage, editMessage, deleteMessage, isDeleted };
-export { createPost, startCall, endCall };
+export { createPost, editPost, setVote, startCall, endCall };
 export { startRecording, stopRecording };
 export { attachFile, setReaction, pin };
 export { listChannels, listAuthors, activityOf };

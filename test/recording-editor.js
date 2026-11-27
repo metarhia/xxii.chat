@@ -289,6 +289,41 @@ test(
       },
     );
     await t.test(
+      'New cut replaces the draft and keeps applied cuts',
+      async () => {
+        await cut(tab, '00:00:01.000', '00:00:01.500');
+        await click(tab, `${control('cuts')} li:first-child button`);
+        await time(tab, 'cut-end', '00:00:01.700');
+        await time(tab, 'cut-start', 'invalid');
+        await waitStatus(tab, 'start before end');
+        const state = await tab.run(`
+        const editor = app.recordings.editor;
+        const button = editor.nodes['new-cut'];
+        const enabled = !button.disabled;
+        button.click();
+        const fromApplied = editor.pendingCut;
+        editor.seek(2400);
+        button.click();
+        return {
+          enabled, enabledAgain: !button.disabled, fromApplied,
+          fresh: editor.pendingCut, index: editor.cutIndex,
+          applied: editor.draft.cuts, invalid: editor.invalid.size,
+        };
+      `);
+        assert.deepEqual(state, {
+          enabled: true,
+          enabledAgain: true,
+          fromApplied: { start: 1700, end: 2700 },
+          fresh: { start: 2400, end: 3400 },
+          index: 1,
+          applied: [{ start: 1000, end: 1500 }],
+          invalid: 0,
+        });
+        await clickEdit(tab, 'cancel-cut');
+        await clickEdit(tab, 'undo');
+      },
+    );
+    await t.test(
       'play skips applied cuts and the selected cut being adjusted',
       async () => {
         assert.equal(

@@ -323,3 +323,30 @@
   background: var(--tok-deleted-bg);
   color: var(--tok-deleted);
 }
+
+.md .vote-choice {
+  cursor: pointer;
+}
+
+.vote-tally {
+  display: inline-block;
+  margin-inline-start: 0.6em;
+  color: var(--muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.previous-votes {
+  margin-block: 6px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.previous-votes summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.post-article.editing .post-text > :not(.message-editor) {
+  display: none;
+}
