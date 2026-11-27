@@ -164,10 +164,31 @@ test(
       await ada.wait(modalText('useful link'));
       await ada.run('document.querySelector("dialog[open]").close();');
       await lin.run(`
-      app.writeMessage("general", "A reply for [@Ada](/?mention=${adaId})",
-        ${q(id)}, []);
-    `);
-      await ada.wait('return document.querySelector(".message.mentioned a");');
+        app.startReply(${q(id)});
+        const input = app.messageInput;
+        input.value = 'A reply for ';
+        input.setSelectionRange(input.value.length, input.value.length);
+        app.mentionBtn.click();
+        document.querySelector('dialog[open] select').value = ${q(adaId)};
+      `);
+      await lin.run(choose('Insert mention'));
+      assert.equal(
+        await lin.run('return app.messageInput.value;'),
+        'A reply for #Ada ',
+      );
+      await lin.run('await app.sendMessage();');
+      await ada.wait(`
+        const link = document.querySelector('.message.mentioned .content a');
+        return link?.textContent === '#Ada';
+      `);
+      assert.equal(
+        await ada.run(`
+          const link = document.querySelector('.message.mentioned .content a');
+          const id = link.closest('.message').dataset.id;
+          return app.replica.get(id).content;
+        `),
+        'A reply for #Ada',
+      );
       await ada.run('app.collections.openFollowed();');
       await ada.wait(modalText('1 new'));
       await ada.run('document.querySelector("dialog[open]").close();');
@@ -182,6 +203,35 @@ test(
       );
       await ada.run('document.querySelector("dialog[open]").close();');
     });
+
+    await t.test(
+      'typed mentions and legacy links display as hashtags',
+      async () => {
+        const [typed, legacy] = await lin.run(`
+        const text = 'Hello #Ada and \`#Ada\`';
+        const plain = app.writeMessage('general', text, '', []);
+        const old = app.writeMessage('general',
+          'Legacy [@Ada](/?mention=${adaId})', '', []);
+        return [plain, old];
+      `);
+        await ada.wait(`
+        const row = app.itemOf(${q(typed)});
+        return row?.classList.contains('mentioned') &&
+          row.querySelectorAll('.content a').length === 1;
+      `);
+        const tags = await ada.run(`
+        return [${q(typed)}, ${q(legacy)}].map((id) =>
+          app.itemOf(id).querySelector('.content a').textContent);
+      `);
+        assert.deepEqual(tags, ['#Ada', '#Ada']);
+        assert.equal(
+          await ada.run(
+            `return app.itemOf(${q(typed)}).querySelector('code').textContent;`,
+          ),
+          '#Ada',
+        );
+      },
+    );
 
     await t.test(
       'voice and circle recordings arrive as playable chat media',
@@ -203,12 +253,34 @@ test(
           .find((button) => button.textContent === 'Use recording').click();
         await app.sendMessage();
       `);
-          await lin.wait(
-            `return document.querySelector(".${kind}-note button");`,
-          );
-          await lin.run(
-            `document.querySelector(".${kind}-note button").click();`,
-          );
+          if (kind === 'voice') {
+            await lin.wait(
+              'return document.querySelector(".voice-note button");',
+            );
+            await lin.run(
+              'document.querySelector(".voice-note button").click();',
+            );
+          } else {
+            await lin.wait(`
+              const player = document.querySelector('.circle-note video');
+              return player?.readyState >= 2 && player.videoWidth > 0;
+            `);
+            assert.equal(
+              await lin.run(`
+                const box = document.querySelector('.circle-note');
+                const player = box.querySelector('video');
+                const { width, height } = player.getBoundingClientRect();
+                return player.paused && player.checkVisibility() &&
+                  width === height && width > 0 &&
+                  box.querySelector('button').textContent === '';
+              `),
+              true,
+            );
+            await lin.run('document.querySelector(".circle-toggle").click();');
+            await lin.wait(
+              'return !document.querySelector(".circle-note video").paused;',
+            );
+          }
           await lin.wait(
             `const media = document.querySelector('.${kind}-note ${selector}');
              return media.readyState > 0;`,

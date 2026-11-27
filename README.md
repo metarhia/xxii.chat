@@ -155,11 +155,12 @@ sync. Terminal-like UI follows the
 - Use the microphone or circle in the composer to record a voice or video
   message up to 60 seconds. Stop to preview it, then use the recording and
   send it from the composer. Voice messages play inline with a waveform and
-  playback speed. Video messages appear in a circular player.
+  playback speed. Circular video messages show their first frame inline.
+  Tap the video to play or pause it.
 - Use **Follow thread** in a message's menu to track replies in
-  **Collections > Followed threads**. Choose a contact with **@** in the
-  composer to mention them. The reply notification setting also covers
-  followed threads and mentions.
+  **Collections > Followed threads**. Type a contact's nickname with `#`
+  or choose the contact from the **#** button in the composer. The reply
+  notification setting also covers followed threads and mentions.
 - **Invite contact** copies a profile link. Opening it lets the other person
   send a message request. Accept or decline in the direct chat. Blocking
   hides the direct conversation, unread counts and call rings in this browser.

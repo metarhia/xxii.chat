@@ -33,11 +33,44 @@ const isAvatar = (value) =>
   value.length <= MAX_AVATAR &&
   (value === '' || PHOTO.test(value));
 
+const MAX_MENTION_TARGETS = 128;
+const MENTION_TAG = /^#[\p{L}\p{M}\p{N}_-]{1,100}$/u;
+const MENTION_PEER = /^[a-z0-9-]{1,64}$/i;
+
+const readMentionTargets = (value) => {
+  if (typeof value !== 'string' || value.length > TEXT_LENGTH) return null;
+  try {
+    const entries = JSON.parse(value);
+    if (!Array.isArray(entries) || entries.length > MAX_MENTION_TARGETS) {
+      return null;
+    }
+    const targets = new Map();
+    for (const entry of entries) {
+      if (!Array.isArray(entry) || entry.length !== 2) return null;
+      const [tag, peer] = entry;
+      if (
+        typeof tag !== 'string' ||
+        !MENTION_TAG.test(tag) ||
+        typeof peer !== 'string' ||
+        !MENTION_PEER.test(peer) ||
+        targets.has(tag)
+      ) {
+        return null;
+      }
+      targets.set(tag, peer);
+    }
+    return targets;
+  } catch {
+    return null;
+  }
+};
+
 const TYPES = {
   string: (value) => typeof value === 'string' && value.length <= MAX_LENGTH,
   text: (value) => typeof value === 'string' && value.length <= TEXT_LENGTH,
   quote: (value) => typeof value === 'string' && value.length <= QUOTE_LENGTH,
   number: (value) => typeof value === 'number',
+  mentions: (value) => readMentionTargets(value) !== null,
   occurrence: (value) =>
     Number.isSafeInteger(value) && value >= 0 && value <= TEXT_LENGTH,
   boolean: (value) => typeof value === 'boolean',
@@ -79,6 +112,7 @@ const FIELDS = {
     author: 'string',
     nick: 'string',
     content: 'string',
+    mentions: 'mentions',
     timestamp: 'number',
     replyTo: 'string',
     quote: 'quote',
@@ -95,6 +129,7 @@ const FIELDS = {
     nick: 'string',
     title: 'string',
     content: 'text',
+    mentions: 'mentions',
     timestamp: 'number',
     edited: 'number',
     pinned: 'boolean',
@@ -265,6 +300,15 @@ const attachVideoPost = (replica, entity, record) => {
   });
 };
 
+const assignMentionTargets = (replica, entity, id, mentions) => {
+  if (
+    mentions !== undefined &&
+    (mentions !== '[]' || replica.get(id)?.mentions)
+  ) {
+    replica.assign(entity, id, { mentions });
+  }
+};
+
 const createMessage = (replica, message) => {
   const { id, chat, author, nick, content, timestamp } = message;
   const fields = { chat, author, nick, content, timestamp };
@@ -274,12 +318,15 @@ const createMessage = (replica, message) => {
     fields.forwarded = message.forwarded;
     fields.origin = message.origin ?? '';
   }
+  assignMentionTargets(replica, 'message', id, message.mentions);
   const change = replica.assign('message', id, fields);
   return attachVideoPost(replica, 'message', message) ?? change;
 };
 
-const editMessage = (replica, id, { content, edited }) =>
-  replica.assign('message', id, { content, edited });
+const editMessage = (replica, id, { content, edited, mentions }) => {
+  assignMentionTargets(replica, 'message', id, mentions);
+  return replica.assign('message', id, { content, edited });
+};
 
 const deleteMessage = (replica, record, deleted) => {
   const fields = { content: '', deleted };
@@ -290,11 +337,13 @@ const deleteMessage = (replica, record, deleted) => {
 const createPost = (replica, post) => {
   const { id, feed, author, nick, title, content, timestamp } = post;
   const fields = { feed, author, nick, title, content, timestamp };
+  assignMentionTargets(replica, 'post', id, post.mentions);
   const change = replica.assign('post', id, fields);
   return attachVideoPost(replica, 'post', post) ?? change;
 };
 
-const editPost = (replica, id, { title, content, edited }) => {
+const editPost = (replica, id, { title, content, edited, mentions }) => {
+  assignMentionTargets(replica, 'post', id, mentions);
   const fields = { title, content };
   replica.assign('post', id, fields);
   return replica.assign('post', id, { edited });
@@ -564,3 +613,4 @@ export { attachFile, setReaction, pin };
 export { listChannels, listAuthors, activityOf };
 export { threadsOf, lineageOf };
 export { attachmentsOf, reactionsOf, unreadOf, filesOf };
+export { MAX_MENTION_TARGETS, readMentionTargets };

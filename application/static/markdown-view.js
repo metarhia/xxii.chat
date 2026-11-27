@@ -1,4 +1,4 @@
-import { parseMarkdown, hasMarkdown } from './markdown.js';
+import { parseMarkdown, hasMarkdown, plainInline } from './markdown.js';
 import { highlight } from './syntax.js';
 import { fillText } from './view.js';
 
@@ -43,7 +43,9 @@ const inlineWrap = ({ type, children }) => {
 
 const inlineLink = ({ href, title, children }) => {
   const link = createAnchor(href, title);
-  link.append(...renderInline(children));
+  const label = href.startsWith('/?mention=') ? plainInline(children) : '';
+  if (label.startsWith('@')) link.textContent = `#${label.slice(1)}`;
+  else link.append(...renderInline(children));
   return link;
 };
 
@@ -228,11 +230,11 @@ const renderMarkdown = (element, source, decorateTasks) => {
   element.classList.remove('md');
   if (!hasMarkdown(source)) return void fillText(element, source);
   const blocks = parseMarkdown(source);
+  const tasks = decorateTasks?.(blocks);
   if (isSingleParagraph(blocks)) {
     return void element.replaceChildren(...renderInline(blocks[0].children));
   }
   element.classList.add('md');
-  const tasks = decorateTasks?.(blocks);
   element.replaceChildren(...blocks.map((block) => renderBlock(block, tasks)));
 };
 
