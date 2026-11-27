@@ -639,7 +639,8 @@ const convertWrap = (token, isInLink) => {
 const convertLink = (token, isInLink) => {
   const { href, title } = token;
   const children = convertNodes(token.kids, true);
-  if (isInLink || !SAFE_URL.test(href)) return children;
+  const mention = /^\/\?mention=[a-z0-9-]{1,64}$/i.test(href);
+  if (isInLink || (!mention && !SAFE_URL.test(href))) return children;
   return { type: 'link', href, title, children };
 };
 
@@ -1077,6 +1078,19 @@ Object.assign(PLAIN, {
   rule: () => '',
 });
 
+const markdownLinks = (source = '') => {
+  const links = [];
+  const visit = (node) => {
+    if (Array.isArray(node)) return void node.forEach(visit);
+    if (node.type === 'link') links.push(node.href);
+    for (const key of ['children', 'items', 'head', 'rows']) {
+      if (node[key]) visit(node[key]);
+    }
+  };
+  visit(parseMarkdown(source));
+  return links;
+};
+
 const plainOf = (source = '') => {
   if (!MARKDOWN_CHARS.test(source)) return source;
   return plainBlocks(parseMarkdown(source));
@@ -1090,5 +1104,5 @@ const hasOpenFence = (text) => {
   return fence !== null;
 };
 
-export { parseMarkdown, plainOf, plainInline };
+export { parseMarkdown, plainOf, plainInline, markdownLinks };
 export { hasMarkdown, hasOpenFence };

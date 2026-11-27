@@ -1,6 +1,7 @@
 import { Metacom, RtcConnection, RtcChannelEndpoint } from './metacom.js';
 import { VideoPieces, checkedManifest, validIndex } from './video-pieces.js';
-import { PIECE_BYTES, MAX_PIECES } from './video-pieces.js';
+import { MAX_PIECES } from './video-pieces.js';
+import { MAX_DETAILS } from './video-metadata.js';
 
 const HEARTBEAT_MS = 8000;
 const REQUEST_MS = 9000;
@@ -49,7 +50,7 @@ class VideoLink {
     const maxMessageSize = this.connection.peerConnection?.sctp?.maxMessageSize;
     const endpoint = new RtcChannelEndpoint(channel, {
       maxMessageSize,
-      maxMessageBytes: PIECE_BYTES + 40000,
+      maxMessageBytes: MAX_PIECES * 77 + MAX_DETAILS,
     });
     this.endpoint = endpoint;
     endpoint.on('close', () => this.close());

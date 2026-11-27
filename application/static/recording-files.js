@@ -172,6 +172,7 @@ const createMeta = (input) => {
     state: 'recording',
     options: input.options,
     people: input.people,
+    videoDetails: input.videoDetails,
     folder: input.folder || '',
   };
   return meta.folder ? { ...meta, segments: [] } : meta;

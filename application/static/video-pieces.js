@@ -1,3 +1,5 @@
+import { MAX_DETAILS, detailsOf } from './video-metadata.js';
+
 const PIECE_BYTES = 256 * 1024;
 const MAX_PIECES = 4096;
 const MAX_VIDEO_BYTES = PIECE_BYTES * MAX_PIECES;
@@ -16,8 +18,16 @@ const hashOf = async (bytes) =>
 
 const newRoom = () => hex(crypto.getRandomValues(new Uint8Array(32)));
 
-const shareUrlOf = (room, id) => {
+const shareUrlOf = (room, id, options = {}) => {
   const url = new URL('/watch.html', location.origin);
+  const { time, chat, message } = options;
+  if (Number.isFinite(time) && time >= 0) {
+    url.searchParams.set('t', String(time));
+  }
+  if (chat && message) {
+    url.searchParams.set('chat', chat);
+    url.searchParams.set('message', message);
+  }
   url.hash = `${room}.${id}`;
   return url.href;
 };
@@ -29,6 +39,11 @@ const readShare = (fragment) => {
     : null;
 };
 
+const videoUrlOf = (video, options) => {
+  const share = readShare(`#${video}`);
+  return share ? shareUrlOf(share.room, share.id, options) : '';
+};
+
 const validIndex = (manifest, index) =>
   Number.isInteger(index) && index >= 0 && index < manifest?.hashes.length;
 
@@ -36,10 +51,10 @@ const pieceSize = (manifest, index) =>
   Math.min(PIECE_BYTES, manifest.size - index * PIECE_BYTES);
 
 const sealManifest = (manifest) => {
-  const { name, mime, size, hashes } = manifest;
-  return hashOf(
-    new TextEncoder().encode(JSON.stringify([name, mime, size, hashes])),
-  );
+  const { name, mime, size, hashes, details } = manifest;
+  const fields = [name, mime, size, hashes];
+  if (details) fields.push(details);
+  return hashOf(new TextEncoder().encode(JSON.stringify(fields)));
 };
 
 const checkedManifest = async (id, value) => {
@@ -58,11 +73,23 @@ const checkedManifest = async (id, value) => {
     hashes.every(isHash);
   if (!valid) return null;
   const manifest = { name, mime, size, hashes };
+  if (value.details !== undefined) {
+    const details = detailsOf(value.details);
+    if (!details) return null;
+    manifest.details = details;
+  }
   const seal = await sealManifest(manifest);
   return seal === id ? manifest : null;
 };
 
-const describeVideo = async (file, title, mime, progress, signal) => {
+const describeVideo = async (
+  file,
+  title,
+  mime,
+  progress,
+  signal,
+  details = null,
+) => {
   const { size } = file;
   if (!size || size > MAX_VIDEO_BYTES) {
     throw new Error('Share a video between 1 byte and 1 GB.');
@@ -80,6 +107,11 @@ const describeVideo = async (file, title, mime, progress, signal) => {
   }
   signal.throwIfAborted();
   const manifest = { name, mime, size, hashes };
+  if (details) {
+    const checked = detailsOf(details);
+    if (!checked) throw new Error('Invalid video details.');
+    manifest.details = checked;
+  }
   const id = await sealManifest(manifest);
   return { id, manifest };
 };
@@ -122,7 +154,7 @@ class VideoPieces {
     const file = await read(await this.directory, 'manifest.json').catch(
       () => null,
     );
-    if (!file || file.size > MAX_PIECES * 70) return null;
+    if (!file || file.size > MAX_PIECES * 70 + MAX_DETAILS) return null;
     const manifest = await checkedManifest(
       this.id,
       JSON.parse(await file.text()),
@@ -210,3 +242,4 @@ class VideoPieces {
 
 export { PIECE_BYTES, MAX_PIECES, checkedManifest, validIndex, pieceSize };
 export { isHash, newRoom, shareUrlOf, readShare, describeVideo, VideoPieces };
+export { videoUrlOf };

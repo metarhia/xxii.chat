@@ -290,6 +290,8 @@ test('Message actions in Chrome', { timeout: 120000 }, async (t) => {
       'Delete',
       'Select',
       'Pin',
+      'Save message',
+      'Follow thread',
       'Copy text',
     ]);
     assert.equal(menu.icons, true);

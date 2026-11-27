@@ -1,6 +1,17 @@
 import { sizeText } from './recording-files.js';
 import { VideoSwarm } from './video-swarm.js';
-import { readShare } from './video-pieces.js';
+import { readShare, shareUrlOf } from './video-pieces.js';
+import { renderTracks } from './video-metadata.js';
+import {
+  LATER,
+  videoOf,
+  historyOf,
+  rememberPosition,
+  inList,
+  toggleVideo,
+  addToPlaylist,
+  openWatchLibrary,
+} from './watch-library.js';
 import { videoPath } from './video-range.js';
 
 const KEEP_BATCH = 4;
@@ -11,11 +22,34 @@ const status = byId('watch-status');
 const keep = byId('watch-keep');
 const retry = byId('watch-retry');
 const share = readShare(location.hash);
+const params = new URLSearchParams(location.search);
+const chat = params.get('chat');
+const message = params.get('message');
+const tools = byId('watch-tools');
+const discuss = byId('watch-discuss');
+const atButton = byId('watch-time');
+const later = byId('watch-later');
+const playlist = byId('watch-playlist');
+let tracksId = '';
+let releaseTracks = null;
+let lastSaved = 0;
+let watched = false;
+const fromUrl = params.get('t');
+let initialTime =
+  fromUrl !== null && /^\d+(?:\.\d{1,3})?$/.test(fromUrl)
+    ? Number(fromUrl)
+    : null;
 let swarm = null;
 let controlled = false;
 let saving = false;
 let notice = '';
 let workerReady = null;
+
+const paintLater = () => {
+  const saved = inList(LATER, share.id);
+  later.textContent = saved ? 'Remove from Watch Later' : 'Watch Later';
+  later.setAttribute('aria-pressed', String(saved));
+};
 
 const paint = (session) => {
   const { pieces, links, received, uploaded } = session;
@@ -32,13 +66,29 @@ const paint = (session) => {
   const total = manifest.hashes.length;
   const progress = `${copies} / ${total} pieces saved`;
   const transfer = `↓ ${sizeText(received)} · ↑ ${sizeText(uploaded)}`;
-  status.textContent = [notice, peers, progress, transfer]
+  const source = [...links.values()].some(
+    ({ full, indices }) => full || indices.size,
+  );
+  const waiting =
+    !source && copies < total ? 'Waiting for a peer with this video…' : '';
+  status.textContent = [notice || waiting, peers, progress, transfer]
     .filter(Boolean)
     .join(' · ');
   keep.hidden = false;
   keep.disabled = saving || copies === total;
   keep.textContent = copies === total ? 'copy saved' : 'keep a copy';
+  tools.hidden = false;
+  paintLater();
   if (!controlled || video.getAttribute('src')) return;
+  if (manifest.details && tracksId !== pieces.id) {
+    tracksId = pieces.id;
+    if (manifest.details.poster) video.poster = manifest.details.poster;
+    releaseTracks = renderTracks(
+      video,
+      byId('watch-details'),
+      manifest.details,
+    );
+  }
   video.hidden = false;
   video.src = videoPath(pieces.id);
 };
@@ -165,6 +215,7 @@ retry.onclick = () => {
   notice = '';
   retry.hidden = true;
   if (video.getAttribute('src')) {
+    if (video.currentTime) initialTime = video.currentTime;
     video.load();
     video.play().catch(() => {});
   } else {
@@ -173,5 +224,90 @@ retry.onclick = () => {
   }
 };
 
-window.addEventListener('pagehide', () => swarm?.close());
+const currentTime = () =>
+  Math.max(0, Math.round(video.currentTime * 1000) / 1000);
+
+const paintDiscuss = () => {
+  if (!chat || !message) return;
+  const reply = new URLSearchParams({
+    chat,
+    message,
+    at: String(currentTime()),
+  });
+  discuss.href = `/?${reply}`;
+  discuss.hidden = false;
+};
+
+const savePosition = () => {
+  if (!watched || !swarm?.pieces.manifest) return;
+  const { name } = swarm.pieces.manifest;
+  try {
+    rememberPosition(share, name, video.currentTime, video.duration);
+  } catch {
+    return;
+  }
+};
+
+video.addEventListener('loadedmetadata', () => {
+  const target = initialTime ?? historyOf(share)?.time ?? 0;
+  initialTime = null;
+  if (target > 0) {
+    video.currentTime = Number.isFinite(video.duration)
+      ? Math.min(target, video.duration)
+      : target;
+  }
+  atButton.disabled = false;
+  paintDiscuss();
+});
+video.addEventListener('playing', () => {
+  watched = true;
+});
+video.addEventListener('timeupdate', () => {
+  paintDiscuss();
+  if (Date.now() - lastSaved < 3000) return;
+  lastSaved = Date.now();
+  savePosition();
+});
+video.addEventListener('pause', savePosition);
+video.addEventListener('ended', savePosition);
+atButton.disabled = true;
+atButton.onclick = async () => {
+  try {
+    const url = shareUrlOf(share.room, share.id, { time: currentTime() });
+    await navigator.clipboard.writeText(url);
+    notice = 'Timestamp link copied.';
+  } catch {
+    notice = 'Could not copy the timestamp link.';
+  }
+  paint(swarm);
+};
+later.onclick = () => {
+  try {
+    const { name } = swarm.pieces.manifest;
+    toggleVideo(LATER, videoOf(share, name));
+    paintLater();
+  } catch (error) {
+    notice = error.message;
+    paint(swarm);
+  }
+};
+playlist.onclick = () => {
+  addToPlaylist(share, swarm.pieces.manifest.name, (label) => {
+    notice = `Saved to ${label}`;
+    paint(swarm);
+  });
+};
+byId('watch-lists').onclick = () => openWatchLibrary();
+byId('watch-continue').onclick = () => {
+  savePosition();
+  openWatchLibrary('Continue Watching');
+};
+window.addEventListener('storage', () => {
+  if (share) paintLater();
+});
+window.addEventListener('pagehide', () => {
+  savePosition();
+  releaseTracks?.();
+  swarm?.close();
+});
 start().catch(failed);
