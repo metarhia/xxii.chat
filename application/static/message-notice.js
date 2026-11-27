@@ -12,24 +12,47 @@ const bodyOf = (content, withText) => {
   return text === '' ? NO_TEXT : text;
 };
 
-const kindOf = ({ isDirect, isReply, settings }) => {
+const kindOf = ({ isDirect, isReply, isMention, settings }) => {
+  if (isMention && settings.notifyReplies) return 'mention';
   if (isDirect && settings.notifyDirect) return 'direct';
   if (isReply && settings.notifyReplies) return isDirect ? 'direct' : 'reply';
   return '';
 };
 
-const noticeOf = ({ id, record, parent, me, settings, names, isHidden }) => {
+const noticeOf = ({
+  id,
+  record,
+  parent,
+  me,
+  settings,
+  names,
+  isHidden,
+  isMention,
+  isFollowed,
+  canDirect,
+}) => {
   const chat = containerOf(record);
   const isOwn = record.author === me;
   if (chat === undefined || isOwn || isDeleted(record)) return null;
   if (isHidden?.(chat, record)) return null;
   const isDirect = isPair(chat);
-  const isReply = parent?.author === me;
-  const kind = kindOf({ isDirect, isReply, settings });
+  if (isDirect && canDirect?.(chat) === false) return null;
+  const isReply =
+    parent?.author === me ||
+    Boolean(parent && isFollowed?.(chat, record.replyTo));
+  const kind = kindOf({
+    isDirect,
+    isReply,
+    isMention: isMention?.(record),
+    settings,
+  });
   if (kind === '') return null;
   const nick = record.nick || names.nick(record.author);
   const place = kind === 'reply' ? ` replied in ${names.chat(chat)}` : '';
-  const title = `${nick}${place}`;
+  const title =
+    kind === 'mention'
+      ? `${nick} mentioned you in ${names.chat(chat)}`
+      : `${nick}${place}`;
   const body = bodyOf(record.content, settings.notifyText);
   const tag = `message:${id}`;
   return { type: 'xxii:notify', title, body, tag, chat, message: id };
@@ -89,6 +112,9 @@ class MessageNotices {
       settings,
       names,
       isHidden: hooks.isHidden,
+      isMention: hooks.isMention,
+      isFollowed: hooks.isFollowed,
+      canDirect: hooks.canDirect,
     });
     if (notice) postNotice(notice).catch(() => undefined);
   }

@@ -142,6 +142,22 @@ sync. Terminal-like UI follows the
   each file is stored once by its SHA-256 checksum, the download button saves
   it from OPFS, the server, or a linked peer; images show previews sized
   before loading and open in a viewer with arrows and swipe
+- **Shared media** in the chat's top-bar menu lists media, files and links
+  from that conversation. Use **Save message** in a message's menu to
+  bookmark it, or open **Collections > Saved Messages** to write a private
+  note. Bookmarks and notes are kept in this browser.
+- Use the microphone or circle in the composer to record a voice or video
+  message up to 60 seconds. Stop to preview it, then use the recording and
+  send it from the composer. Voice messages play inline with a waveform and
+  playback speed. Video messages appear in a circular player.
+- Use **Follow thread** in a message's menu to track replies in
+  **Collections > Followed threads**. Choose a contact with **@** in the
+  composer to mention them. The reply notification setting also covers
+  followed threads and mentions.
+- **Invite contact** copies a profile link. Opening it lets the other person
+  send a message request. Accept or decline in the direct chat. Blocking
+  hides the direct conversation, unread counts and call rings in this browser.
+  Existing direct conversations continue to open normally.
 - Composer grows with the text, keeps a draft per chat, typing anywhere
   focuses it
 - Direct messages go only over WebRTC between the two browsers and are
@@ -479,6 +495,24 @@ can reopen the link and share the video after the publisher leaves. Playback
 requires an online peer with the requested pieces. Select **Stop seeding
 here** to disconnect your own publishing tab. Each link supports up to 12
 peers and one video of up to 1 GB.
+
+**Publish to chat or feed** in a recording's menu, or **Save and publish**
+in the editor, creates a video card with a title, poster and duration.
+Publishing uses the same unlisted watch links. The chat post carries the
+link and the video streams from peers. Reopen Recordings and choose
+**Resume seeding published video** to put the published link back online
+from its source. Viewers can copy a link at the current time or open a
+timestamped reply in the original conversation.
+
+Add chapters by timestamp when publishing or add them at the editor
+playhead. The editor adjusts chapter times for edits to the video.
+Import WebVTT or SRT captions when publishing to enable closed captions and
+a searchable transcript that seeks to each matching line.
+
+**Watch Later** and named playlists save video links. **Continue Watching**
+restores playback progress. These collections stay in the browser. Use
+**Keep a copy** on the player when you also want to download the video pieces
+to browser storage and seed them.
 
 In Chromium with a folder picker, **Save recordings to** in Settings > Recordings
 (and in the call's Record tab) can send recordings straight to a chosen folder. Choose

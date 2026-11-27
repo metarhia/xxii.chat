@@ -42,7 +42,13 @@
         </header>
 
         <section class="section">
+          <button id="collections-btn" class="link-btn" type="button">
+            Collections
+          </button>
           <h3>CONTACTS</h3>
+          <button id="contact-invite" class="link-btn" type="button">
+            Invite contact
+          </button>
           <ul id="contact-list" class="list"></ul>
           <p id="contacts-empty" class="hint">
             Peers appear here when they come online
@@ -324,6 +330,11 @@
             ✕
           </button>
         </div>
+        <section
+          id="contact-request"
+          class="contact-request hidden"
+          aria-label="Message request"
+        ></section>
         <form id="composer" class="composer">
           <div id="reply-bar" class="reply-bar hidden">
             <button
@@ -363,6 +374,33 @@
                 attach
               </button>
               <input id="file-input" type="file" multiple hidden />
+              <button
+                id="voice-note"
+                class="link-btn"
+                type="button"
+                title="Record voice message"
+                aria-label="Record voice message"
+              >
+                🎙
+              </button>
+              <button
+                id="video-note"
+                class="link-btn"
+                type="button"
+                title="Record video message"
+                aria-label="Record video message"
+              >
+                ◉
+              </button>
+              <button
+                id="mention-btn"
+                class="link-btn"
+                type="button"
+                title="Mention someone"
+                aria-label="Mention someone"
+              >
+                @
+              </button>
               <button id="emoji-btn" class="link-btn" type="button">
                 emoji
               </button>
@@ -908,14 +946,22 @@
       <dialog class="recording-editor" aria-label="Edit recording">
         <header class="settings-header">
           <h2 class="settings-title" data-edit="title"></h2>
-          <button
-            class="link-btn"
-            type="button"
-            data-edit="close"
-            aria-label="Close recording editor"
-          >
-            ×
-          </button>
+          <div class="recording-edit-header-actions">
+            <button class="link-btn" type="button" data-edit="chapters">
+              Chapters
+            </button>
+            <button class="link-btn" type="button" data-edit="publish">
+              Save and publish…
+            </button>
+            <button
+              class="link-btn"
+              type="button"
+              data-edit="close"
+              aria-label="Close recording editor"
+            >
+              ×
+            </button>
+          </div>
         </header>
         <div class="recording-edit-content">
           <p data-edit="status" role="status"></p>

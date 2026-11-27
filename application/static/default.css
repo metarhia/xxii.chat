@@ -5596,3 +5596,209 @@ select:not([multiple], [size]):dir(rtl) {
 .video-share .watch-actions {
   margin: 8px 0;
 }
+
+.collection-dialog {
+  width: min(650px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  margin: auto;
+  padding: 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--light);
+  box-shadow: var(--shadow);
+}
+
+.collection-dialog::backdrop {
+  background: var(--backdrop);
+}
+
+.collection-dialog header,
+.collection-toolbar,
+.watch-actions,
+.contact-request {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.collection-dialog header {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.collection-dialog h2 {
+  font-size: 15px;
+}
+
+.collection-body {
+  display: grid;
+  gap: 8px;
+}
+
+.collection-field {
+  display: grid;
+  gap: 4px;
+}
+
+.collection-dialog input:not([type='file']),
+.collection-dialog textarea,
+.collection-dialog select,
+.watch-content input[type='search'] {
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--light);
+  font: inherit;
+}
+
+.collection-dialog select,
+.chat-note select {
+  padding-right: 16px;
+}
+
+.collection-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  background: var(--surface);
+  border-radius: 5px;
+}
+
+.collection-row > :first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.contact-request {
+  padding: 8px 12px;
+  background: var(--panel);
+}
+
+#contact-invite {
+  margin-bottom: 4px;
+}
+
+.message.mentioned .content a[href^='/?mention='] {
+  font-weight: 700;
+}
+
+.chat-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+  margin: 4px 0;
+}
+
+.chat-note audio {
+  max-width: 100%;
+  height: 34px;
+}
+
+.circle-preview,
+.circle-note video {
+  width: min(220px, 100%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #000;
+}
+
+.circle-note > .link-btn {
+  border-radius: 100px;
+}
+
+.note-wave {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+  gap: 2px;
+  color: var(--muted);
+}
+
+.note-wave i {
+  width: 2px;
+  height: calc(2px + var(--peak) * 1px);
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.note-wave i.played {
+  color: var(--text);
+}
+
+.recording-edit-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.recording-edit-header-actions .link-btn {
+  white-space: nowrap;
+}
+
+.video-post {
+  display: grid;
+  gap: 4px;
+  width: min(100%, 320px);
+  margin: 5px 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--light);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.video-post img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.watch-actions[hidden],
+.collection-dialog [hidden],
+.chat-note [hidden] {
+  display: none;
+}
+
+#watch-details,
+.video-chapters,
+.video-transcript,
+.video-transcript-list {
+  display: grid;
+  gap: 6px;
+}
+
+#watch-details[hidden] {
+  display: none;
+}
+
+.video-description {
+  white-space: pre-wrap;
+}
+
+.video-chapters .link-btn,
+.video-transcript-list .link-btn {
+  justify-self: start;
+  max-width: 100%;
+  text-align: left;
+  white-space: normal;
+}

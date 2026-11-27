@@ -30,22 +30,76 @@ class VideoShares {
   constructor(layers) {
     this.layers = layers;
     this.seeds = new Map();
+    this.published = new Map();
     this.dialog = null;
     window.addEventListener('pagehide', () => {
       for (const seed of this.seeds.values()) seed.close();
       this.seeds.clear();
+      for (const { seed } of this.published.values()) seed.close();
+      this.published.clear();
     });
   }
 
   get active() {
-    return this.seeds.size > 0 || Boolean(this.dialog);
+    return (
+      this.seeds.size > 0 || this.published.size > 0 || Boolean(this.dialog)
+    );
   }
 
   closeDialog() {
     this.dialog?.close();
   }
 
-  async open({ key, name, mime, source }) {
+  isPublished(url) {
+    const token = new URL(url).hash.slice(1);
+    return this.published.has(token);
+  }
+
+  stopPublished(url) {
+    const token = new URL(url).hash.slice(1);
+    this.published.get(token)?.seed.close();
+    this.published.delete(token);
+  }
+
+  async publish({ key, name, mime, source, details, url }) {
+    const signal = new AbortController().signal;
+    const file = await source(signal);
+    const { id, manifest } = await describeVideo(
+      file,
+      name,
+      mime,
+      () => {},
+      signal,
+      details,
+    );
+    const expected = url ? readShare(new URL(url).hash) : null;
+    if (expected && expected.id !== id) {
+      throw new Error(
+        'The source changed. Publish it again to create a new link.',
+      );
+    }
+    const room = expected?.room ?? savedRoom(`published:${key}/${id}`, id);
+    const token = `${room}.${id}`;
+    const active = this.published.get(token);
+    if (active) {
+      await active.ready;
+      return shareUrlOf(room, id);
+    }
+    const seed = new VideoSwarm({ id, room, manifest, source: file });
+    const ready = seed.start();
+    const session = { seed, ready };
+    this.published.set(token, session);
+    try {
+      await ready;
+      return shareUrlOf(room, id);
+    } catch (error) {
+      if (this.published.get(token) === session) this.published.delete(token);
+      seed.close();
+      throw error;
+    }
+  }
+
+  async open({ key, name, mime, source, details: metadata }) {
     if (this.dialog) return;
     const template = document.getElementById('video-share-template');
     const dialog = cloneTemplate(template, 'dialog');
@@ -109,6 +163,7 @@ class VideoShares {
           progress.value = value;
         },
         signal,
+        metadata,
       );
       const room = savedRoom(key, id);
       seed = new VideoSwarm({ id, room, manifest, source: file });

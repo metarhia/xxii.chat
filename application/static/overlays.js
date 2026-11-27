@@ -956,7 +956,7 @@ class Switcher {
     const matches = [];
     for (const entry of this.#entries) {
       const label = entry.label.toLowerCase();
-      if (!label.includes(query)) continue;
+      if ((!query && entry.searchOnly) || !label.includes(query)) continue;
       const isPrefix = label.slice(1).startsWith(query);
       const base = query && !isPrefix ? 1 : 0;
       const rank = entry.hidden ? base + HIDDEN_RANK : base;

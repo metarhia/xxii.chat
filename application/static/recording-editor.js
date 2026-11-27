@@ -31,6 +31,7 @@ import { isVideoFile } from './video-library.js';
 import { pickExportFile, mediaNameOf } from './recording-export.js';
 import { sizeText } from './recording-files.js';
 import { RecordingTimeline } from './recording-timeline.js';
+import { editChapters, remapTracks, detailsOf } from './video-metadata.js';
 
 const TIME_KEYS = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 };
 const HANDLES = ['start', 'end', 'cut-start', 'cut-end'];
@@ -114,6 +115,7 @@ class RecordingEditor {
     this.saving = null;
     this.finalizing = false;
     this.asking = false;
+    this.chapterMarks = null;
     this.timelineView = new RecordingTimeline(
       this.nodes,
       {
@@ -189,7 +191,7 @@ class RecordingEditor {
       end !== this.duration ||
       this.clipsChanged ||
       changedOptions(editOptionsOf(this.draft)) ||
-      Boolean(cuts.length || this.pendingCut)
+      Boolean(cuts.length || this.pendingCut || this.chapterMarks)
     );
   }
 
@@ -214,6 +216,8 @@ class RecordingEditor {
       redo: () => this.restore('redo'),
       discard: () => this.discard(),
       save: () => this.save(),
+      publish: () => this.save(false, true),
+      chapters: () => this.openChapters(),
       'save-as': () => this.save(true),
       'add-videos': () => nodes['video-files'].click(),
       'add-recording': () => this.addRecording(),
@@ -565,6 +569,7 @@ class RecordingEditor {
     const confirmed = await this.confirmDiscard(false);
     if (!confirmed) return;
     this.time = 0;
+    this.chapterMarks = null;
     this.invalid.clear();
     this.parts = this.original;
     this.duration = this.parts.at(-1).end;
@@ -907,16 +912,69 @@ class RecordingEditor {
     nodes.save.disabled = Boolean(
       error ||
       this.invalid.size ||
-      !timeline.changed ||
+      !(timeline.changed || this.chapterMarks) ||
       this.pendingCut ||
       !nodes['copy-title'].value.trim() ||
       this.saving ||
       this.tool,
     );
     nodes['save-as'].disabled = nodes.save.disabled;
+    nodes.publish.disabled =
+      nodes.save.disabled || audioOnly || !this.hooks.publish;
+    nodes.chapters.disabled =
+      !this.duration || Boolean(this.saving || this.tool);
   }
 
-  async save(toFile = false) {
+  sourceTracks() {
+    const initial = this.entry.videoDetails ?? {};
+    const position = new Map(this.parts.map((part) => [part.key, part.start]));
+    const cues = this.original.flatMap((part) => {
+      const at = position.get(part.key);
+      if (at === undefined) return [];
+      const span = [{ start: part.start, end: part.end }];
+      return remapTracks({ cues: initial.cues }, span).cues.map(
+        ({ start, end, text }) => ({ start: at + start, end: at + end, text }),
+      );
+    });
+    const chapters =
+      this.chapterMarks ??
+      (initial.chapters ?? []).flatMap((chapter) => {
+        const part = this.original.find(
+          ({ start, end }) => chapter.at >= start && chapter.at < end,
+        );
+        return part
+          ? [{ ...chapter, key: part.key, at: chapter.at - part.start }]
+          : [];
+      });
+    return {
+      cues,
+      chapters: chapters.flatMap(({ at, key, title }) =>
+        position.has(key) ? [{ at: position.get(key) + at, title }] : [],
+      ),
+    };
+  }
+
+  openChapters() {
+    if (!this.parts) return;
+    this.playback?.abort();
+    this.setPlaying(false);
+    editChapters(
+      this.sourceTracks().chapters,
+      this.time,
+      this.duration,
+      (chapters) => {
+        this.chapterMarks = chapters.map(({ at, title }) => {
+          const part = this.parts.find(
+            ({ start, end }) => at >= start && at < end,
+          );
+          return { at: at - part.start, key: part.key, title };
+        });
+        this.paintSave();
+      },
+    );
+  }
+
+  async save(toFile = false, publish = false) {
     const { nodes, timeline, format } = this;
     if (this.saving || nodes.save.disabled) return;
     const title = nodes['copy-title'].value.trim();
@@ -943,6 +1001,18 @@ class RecordingEditor {
         this.setStatus('');
         return;
       }
+      const tracks = remapTracks(
+        this.sourceTracks(),
+        timeline.kept,
+        this.options.speed,
+      );
+      const videoDetails = detailsOf({
+        description: this.entry.videoDetails?.description,
+        ...tracks,
+      });
+      if (!videoDetails) {
+        throw new Error('The edited video details exceed the 64 KB limit.');
+      }
       const id = await this.hooks.withSource(this.parts, () =>
         saveEdit({
           signal: AbortSignal.any([control.signal, this.lifetime.signal]),
@@ -952,6 +1022,7 @@ class RecordingEditor {
           timeline,
           options: this.options,
           format,
+          videoDetails,
           source: this.hooks.source,
           progress: (time) => {
             nodes.progress.value = time;
@@ -971,7 +1042,8 @@ class RecordingEditor {
             'The copy is in Recordings. Save as could not write the file.';
         }
       }
-      this.hooks.saved(id, status);
+      await this.hooks.saved(id, status);
+      if (publish) this.hooks.publish(id);
     } catch (error) {
       if (this.lifetime.signal.aborted) return;
       this.setStatus(

@@ -59,6 +59,7 @@ const saveEdit = async (options) => {
     started: Date.now(),
     mime: format.mime,
     extension: format.extension,
+    videoDetails: options.videoDetails,
   });
   const writer = new RecordingWriter();
   let saved = false;

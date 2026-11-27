@@ -16,11 +16,16 @@ import { RecordingWriter } from './recorder.js';
 import { RecordingEditor } from './recording-editor.js';
 import { importVideo, videoProperties } from './video-library.js';
 import { VideoShares } from './video-share.js';
+import { publishDetails } from './video-metadata.js';
+import { readMap, writeMap } from './view.js';
 
 const CARD_ACTIONS = {
   play: (list, card) => list.playCard(card),
   edit: (list, card) => list.openEditor(card),
   share: (list, card) => list.shareVideo(card),
+  publish: (list, card) => list.publishVideo(card),
+  seed: (list, card) => list.resumeVideo(card),
+  'stop-seed': (list, card) => list.stopVideo(card),
   properties: (list, card) => list.showProperties(card.entry),
   attach: (list, card) => list.attachToChat(card),
   download: (list, card) => {
@@ -43,6 +48,30 @@ const ICON_ACTIONS = ['play', 'edit', 'download', 'delete'];
 const STORAGE_UNAVAILABLE = 'Storage usage is unavailable.';
 const REPAIR_CHANNEL = 'xxii-recording-repair';
 const DOWNLOAD_URL_MS = 30000;
+const PUBLICATIONS = 'xxii:published-recordings';
+
+const posterData = async (dir, id) => {
+  try {
+    const entry = await dir.getDirectoryHandle(id);
+    const handle = await entry.getFileHandle(POSTER_FILE);
+    const bitmap = await createImageBitmap(await handle.getFile());
+    try {
+      const canvas = document.createElement('canvas');
+      const factor = Math.min(1, 224 / Math.max(bitmap.width, bitmap.height));
+      canvas.width = Math.max(1, Math.round(bitmap.width * factor));
+      canvas.height = Math.max(1, Math.round(bitmap.height * factor));
+      canvas
+        .getContext('2d')
+        .drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const image = canvas.toDataURL('image/jpeg', 0.65);
+      return image.length <= 24000 ? image : '';
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    return '';
+  }
+};
 
 const startedOf = ({ started }) => (Number.isFinite(started) ? started : 0);
 
@@ -231,10 +260,12 @@ const createCardMenu = (overlay) => {
 };
 
 class Recordings {
-  constructor(root, onRepair, overlay = {}, onList = null, attach = null) {
+  constructor(root, onRepair, overlay = {}, onList = null, hooks = {}) {
     this.root = root;
     this.onList = onList;
-    this.attach = attach;
+    this.attach = hooks.attach;
+    this.publish = hooks.publish;
+    this.publishing = new Set();
     this.linked = null;
     this.list = root.querySelector('.recordings-list');
     this.storage = root.querySelector('.recordings-storage');
@@ -544,7 +575,15 @@ class Recordings {
   openEditor({ entry, labels }) {
     if (this.editor) return;
     this.stopPlayback();
-    this.editor = new RecordingEditor(entry, {
+    const details = readMap(PUBLICATIONS).get(entry.id)?.details;
+    const initial = details ? { ...entry, videoDetails: details } : entry;
+    this.editor = new RecordingEditor(initial, {
+      publish: this.publish
+        ? (id) =>
+            this.publishEdited(id).catch((error) =>
+              this.setStatus(error.message),
+            )
+        : null,
       name: textOf(entry.title) || labels.name,
       library: () => this.editableSources(),
       source: (part, signal, bytes) => this.editSource(part, signal, bytes),
@@ -670,14 +709,89 @@ class Recordings {
     });
   }
 
-  shareVideo({ entry, labels }) {
+  videoSource({ entry, labels }) {
     const part = this.partOf(entry);
     const key = part ? `${entry.id}/${part.name}` : entry.id;
     const name = part?.name ?? labels.name;
     const mime = typeOf(entry.mime) || TYPES[entry.extension];
     const source = (signal) =>
       this.editSource({ ...part, entry }, signal, true);
-    this.shares.open({ key, name, mime, source });
+    const duration = part?.duration ?? entry.duration;
+    return { key, name, mime, source, duration };
+  }
+
+  shareVideo(card) {
+    const video = this.videoSource(card);
+    const saved = readMap(PUBLICATIONS).get(video.key);
+    const details = saved?.details ?? card.entry.videoDetails;
+    this.shares.open({ ...video, details });
+  }
+
+  async publishEdited(id) {
+    const directory = await this.recordings.getDirectoryHandle(id);
+    const entry = await readEntry(directory);
+    if (entry) this.publishVideo({ entry, labels: labelsOf(entry) });
+  }
+
+  async publishVideo(card) {
+    const video = this.videoSource(card);
+    if (this.publishing.has(video.key)) return;
+    let scope = this.publish.destinations();
+    if (!scope) return;
+    const saved = readMap(PUBLICATIONS).get(video.key);
+    const media = saved?.details ?? card.entry.videoDetails ?? {};
+    let poster = media.poster;
+    if (!poster) poster = await posterData(this.recordings, card.entry.id);
+    scope = this.publish.destinations();
+    if (!scope) return;
+    publishDetails(
+      {
+        ...scope,
+        name: saved?.name ?? video.name,
+        media: { ...media, duration: video.duration ?? 0, poster },
+      },
+      async ({ target, name, details }) => {
+        if (this.publishing.has(video.key)) return;
+        this.publishing.add(video.key);
+        this.setStatus('Preparing video for peer-to-peer sharing…');
+        try {
+          const url = await this.shares.publish({ ...video, name, details });
+          const published = readMap(PUBLICATIONS);
+          published.set(video.key, { name, details, url });
+          writeMap(PUBLICATIONS, published);
+          this.publish.send(target, url, name, details);
+          this.setStatus('Video published. This tab is seeding it.');
+        } catch (error) {
+          this.setStatus(error.message);
+        } finally {
+          this.publishing.delete(video.key);
+        }
+      },
+    );
+  }
+
+  async resumeVideo(card) {
+    const video = this.videoSource(card);
+    const saved = readMap(PUBLICATIONS).get(video.key);
+    if (!saved || this.publishing.has(video.key)) return;
+    this.publishing.add(video.key);
+    this.setStatus('Preparing video for peer-to-peer sharing…');
+    try {
+      await this.shares.publish({ ...video, ...saved });
+      this.setStatus('This tab is seeding the published video.');
+    } catch (error) {
+      this.setStatus(error.message);
+    } finally {
+      this.publishing.delete(video.key);
+    }
+  }
+
+  stopVideo(card) {
+    const { key } = this.videoSource(card);
+    const saved = readMap(PUBLICATIONS).get(key);
+    if (!saved) return;
+    this.shares.stopPublished(saved.url);
+    this.setStatus('Stopped seeding the published video from this tab.');
   }
 
   async showProperties(entry) {
@@ -822,6 +936,19 @@ class Recordings {
     if (card.canEdit) {
       items.push({ action: 'edit', label: 'Edit' });
       items.push({ action: 'share', label: 'Share video' });
+      if (this.publish) {
+        items.push({ action: 'publish', label: 'Publish to chat or feed…' });
+      }
+      const { key } = this.videoSource(card);
+      const saved = readMap(PUBLICATIONS).get(key);
+      if (saved && this.shares.isPublished(saved.url)) {
+        items.push({
+          action: 'stop-seed',
+          label: 'Stop seeding published video',
+        });
+      } else if (saved) {
+        items.push({ action: 'seed', label: 'Resume seeding published video' });
+      }
     }
     if (card.canPlay) {
       items.push({ action: 'properties', label: 'Properties' });

@@ -288,7 +288,7 @@ test('sidebar actions', { timeout: 290000 }, async (t) => {
       app.toggleNavMenu(app.chatMenuBtn);
       return true;`,
     );
-    assert.deepEqual(await labels(ada), ['Add to folder…']);
+    assert.deepEqual(await labels(ada), ['Add to folder…', 'Shared media']);
     await run(ada, `app.navMenu.close(); return true;`);
   });
 
@@ -296,7 +296,11 @@ test('sidebar actions', { timeout: 290000 }, async (t) => {
     await run(ada, `app.selectChat('${designId}'); return true;`);
     await click(ada, '#chat-menu-btn');
     await wait(ada, `return app.navMenu.isOpen;`);
-    assert.deepEqual(await labels(ada), ['Add to folder…', 'Leave chat']);
+    assert.deepEqual(await labels(ada), [
+      'Add to folder…',
+      'Shared media',
+      'Leave chat',
+    ]);
     await choose(ada, 'leave');
     await wait(ada, `app.render(); return app.chat === 'general';`);
     await click(ada, '#undo-btn');
@@ -325,7 +329,12 @@ test('sidebar actions', { timeout: 290000 }, async (t) => {
       return true;`,
     );
     await openRowMenu(ada, contactRow(bobId));
-    assert.deepEqual(await labels(ada), ['Add to folder…', 'Remove contact']);
+    assert.deepEqual(await labels(ada), [
+      'Add to folder…',
+      'Request contact',
+      'Block contact',
+      'Remove contact',
+    ]);
     await choose(ada, 'leave');
     await wait(ada, `app.render(); return ${contactRow(bobId)} === null;`);
     assert.match(await toast(ada), /^Removed @/);

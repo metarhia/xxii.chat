@@ -38,8 +38,13 @@ const TYPES = {
   quote: (value) => typeof value === 'string' && value.length <= QUOTE_LENGTH,
   number: (value) => typeof value === 'number',
   boolean: (value) => typeof value === 'boolean',
+  video: (value) =>
+    typeof value === 'string' && /^[0-9a-f]{64}\.[0-9a-f]{64}$/.test(value),
+  videoDuration: (value) => Number.isSafeInteger(value) && value >= 0,
   checksum: (value) => typeof value === 'string' && CHECKSUM.test(value),
   avatar: isAvatar,
+  waveform: (value) =>
+    typeof value === 'string' && /^[0-9a-f]{0,48}$/.test(value),
   size: (value) =>
     Number.isSafeInteger(value) && value > 0 && value <= MAX_FILE_SIZE,
 };
@@ -52,6 +57,13 @@ const CHANNEL = {
   created: 'number',
 };
 
+const VIDEO_POST = {
+  video: 'video',
+  videoTitle: 'string',
+  videoPoster: 'avatar',
+  videoDuration: 'videoDuration',
+};
+
 const FIELDS = {
   author: { nick: 'string', avatar: 'avatar', created: 'number' },
   chat: CHANNEL,
@@ -59,6 +71,7 @@ const FIELDS = {
   folder: { ...CHANNEL, parent: 'string', visibility: VISIBILITY },
   entry: { folder: 'string', item: 'string', active: 'boolean' },
   message: {
+    ...VIDEO_POST,
     chat: 'string',
     author: 'string',
     nick: 'string',
@@ -73,6 +86,7 @@ const FIELDS = {
     pinned: 'boolean',
   },
   post: {
+    ...VIDEO_POST,
     feed: 'string',
     author: 'string',
     nick: 'string',
@@ -99,6 +113,12 @@ const FIELDS = {
     timestamp: 'number',
     stopped: 'number',
   },
+  contactRequest: {
+    chat: 'string',
+    author: 'string',
+    nick: 'string',
+    state: ['requested', 'accepted', 'declined'],
+  },
   file: {
     chat: 'string',
     message: 'string',
@@ -107,6 +127,8 @@ const FIELDS = {
     mime: 'string',
     size: 'size',
     checksum: 'checksum',
+    presentation: ['voice', 'circle'],
+    waveform: 'waveform',
     width: 'number',
     height: 'number',
     created: 'number',
@@ -213,6 +235,17 @@ const createChannel = (replica, entity, channel) => {
 const describe = (replica, entity, id, description) =>
   replica.assign(entity, id, { description });
 
+const attachVideoPost = (replica, entity, record) => {
+  const { id, video, videoTitle, videoPoster, videoDuration } = record;
+  if (!video) return null;
+  return replica.assign(entity, id, {
+    video,
+    videoTitle,
+    videoPoster,
+    videoDuration,
+  });
+};
+
 const createMessage = (replica, message) => {
   const { id, chat, author, nick, content, timestamp } = message;
   const fields = { chat, author, nick, content, timestamp };
@@ -222,7 +255,8 @@ const createMessage = (replica, message) => {
     fields.forwarded = message.forwarded;
     fields.origin = message.origin ?? '';
   }
-  return replica.assign('message', id, fields);
+  const change = replica.assign('message', id, fields);
+  return attachVideoPost(replica, 'message', message) ?? change;
 };
 
 const editMessage = (replica, id, { content, edited }) =>
@@ -237,7 +271,8 @@ const deleteMessage = (replica, record, deleted) => {
 const createPost = (replica, post) => {
   const { id, feed, author, nick, title, content, timestamp } = post;
   const fields = { feed, author, nick, title, content, timestamp };
-  return replica.assign('post', id, fields);
+  const change = replica.assign('post', id, fields);
+  return attachVideoPost(replica, 'post', post) ?? change;
 };
 
 const startCall = (replica, record) => {
@@ -268,7 +303,12 @@ const attachFile = (replica, file) => {
   const fields = { chat, message, author, name, mime, size, checksum, created };
   const isSized = Number.isFinite(width) && Number.isFinite(height);
   const sized = isSized ? { ...fields, width, height } : fields;
-  return replica.assign('file', id, sized);
+  const change = replica.assign('file', id, sized);
+  if (!file.presentation) return change;
+  return replica.assign('file', id, {
+    presentation: file.presentation,
+    waveform: file.waveform ?? '',
+  });
 };
 
 const setReaction = (replica, fields) => {

@@ -52,6 +52,23 @@ import { linkOf, summaryOf } from './settings-about.js';
 import { Folders, FOLDERS_KEY } from './folders.js';
 import { Hidden, HIDDEN_KEY, isReturning } from './hidden.js';
 import { askConfirm } from './confirm-dialog.js';
+import { createIcon } from './icons.js';
+import { ChatCollections, isSaved, saveRecord } from './chat-collections.js';
+import { isBlocked, setBlocked } from './chat-collections.js';
+import { ChatMedia, captureNote, isNote } from './chat-media.js';
+import {
+  isContactPeer,
+  inviteUrl,
+  contactLink,
+  mentions,
+  chooseMention,
+  setRequest,
+  requestState,
+} from './chat-contacts.js';
+import { button, element, openCollection } from './collection-dialog.js';
+import { readShare, videoUrlOf } from './video-pieces.js';
+import { openWatchLibrary } from './watch-library.js';
+import { timeText } from './recording-files.js';
 
 const PANELS = {
   pins: 'Pinned',
@@ -68,7 +85,40 @@ const SHORTCUTS = {
 
 const SCREEN_SHORTCUTS = { k: SHORTCUTS.k };
 
+const COLLECTION_COMMANDS = [
+  'saved',
+  'followed',
+  'playlists',
+  'later',
+  'continueWatching',
+];
+
 const COMMANDS = {
+  playlists: {
+    icon: '▶',
+    label: 'Playlists',
+    run: () => openWatchLibrary(),
+  },
+  later: {
+    icon: '◷',
+    label: 'Watch Later',
+    run: () => openWatchLibrary('Watch Later'),
+  },
+  continueWatching: {
+    icon: '▶',
+    label: 'Continue Watching',
+    run: () => openWatchLibrary('Continue Watching'),
+  },
+  saved: {
+    icon: '★',
+    label: 'Saved Messages',
+    run: (app) => app.collections.openSaved(),
+  },
+  followed: {
+    icon: '↩',
+    label: 'Followed threads',
+    run: (app) => app.collections.openFollowed(),
+  },
   settings: {
     icon: '⚙',
     label: 'Settings',
@@ -111,6 +161,9 @@ const LEAVE_LABELS = {
 };
 
 const NAV_MENU_ACTIONS = {
+  media: (app) => app.collections.openMedia(),
+  'contact-request': (app, entry, { id }) => app.offerContact(id),
+  'contact-block': (app, entry, { id }) => app.toggleBlock(id),
   leave: (app, entry, target) => app.hideTarget(target),
   'toggle-folder': (app, entry, target) => {
     app.placeTarget(entry.folder, target, entry.checked);
@@ -119,6 +172,37 @@ const NAV_MENU_ACTIONS = {
   'folder-new': (app, entry, target) => app.startNaming('', target.id),
   'folder-rename': (app, entry, target) => app.startNaming(target.id, ''),
   'folder-delete': (app, entry, target) => app.deleteFolder(target.id),
+};
+
+const videoContent = (record) => {
+  if (!record.video || isDeleted(record)) return record.content;
+  return (
+    record.content?.replace(/\n?\n?\[Watch video\]\(https?:[^\s]+\)$/, '') ?? ''
+  );
+};
+
+const addVideoCard = (container, record) => {
+  if (!record.video || isDeleted(record)) return;
+  const chat = record.chat ?? record.feed;
+  const url = videoUrlOf(record.video, { chat, message: record.id });
+  if (!url) return;
+  const card = element('a', 'video-post');
+  card.href = url;
+  card.target = '_blank';
+  card.rel = 'noreferrer';
+  if (record.videoPoster && isAvatar(record.videoPoster)) {
+    const image = element('img');
+    image.src = record.videoPoster;
+    image.alt = '';
+    image.loading = 'lazy';
+    card.append(image);
+  }
+  const title = record.videoTitle || record.title || 'Shared video';
+  card.append(element('strong', '', title));
+  const parts = ['▶ Watch'];
+  if (record.videoDuration > 0) parts.push(timeText(record.videoDuration));
+  card.append(element('span', 'muted', parts.join(' · ')));
+  container.append(card);
 };
 
 const readAvatar = () => {
@@ -155,7 +239,12 @@ const readMessageLink = () => {
   const chat = params.get('chat') ?? '';
   const message = params.get('message') ?? '';
   if (chat === '' || message === '') return null;
-  return { chat, message };
+  const seconds = params.get('at');
+  const at =
+    seconds !== null && /^\d+(?:\.\d{1,3})?$/.test(seconds)
+      ? Number(seconds)
+      : null;
+  return { chat, message, at };
 };
 
 const commandEntries = () => {
@@ -166,7 +255,17 @@ const commandEntries = () => {
     const { icon, label } = COMMANDS[command];
     const kind = 'command';
     const id = command;
-    entries.push({ id, command, kind, icon, label, unread: 0, time: 0 });
+    const searchOnly = COLLECTION_COMMANDS.includes(command);
+    entries.push({
+      id,
+      command,
+      kind,
+      icon,
+      label,
+      unread: 0,
+      time: 0,
+      searchOnly,
+    });
   }
   return entries;
 };
@@ -198,6 +297,8 @@ const MESSAGE_ACTIONS = {
   quote: (app, id, { dataset }) => app.jumpToQuoted(dataset.target, id),
   menu: (app, id, button) => app.toggleMenuAt(id, button),
   pin: (app, id) => app.togglePin(id),
+  save: (app, id) => app.saveMessage(id),
+  follow: (app, id) => app.followMessage(id),
   copy: (app, id) => app.copyText(id),
   'screen-comment': (app, id) => app.toggleStudioComment(id),
   share: (app, id) => app.shareMessage(id),
@@ -658,10 +759,16 @@ class ChatApplication extends Application {
     this.editing = '';
     this.forwarding = [];
     this.linked = '';
+    this.linkTime = null;
     this.view = null;
     this.readAt = readMap(READ_KEY);
     this.drafts = readDrafts();
     this.pending = new Map();
+    this.noteInfo = new WeakMap();
+    this.media = new ChatMedia();
+    this.collections = new ChatCollections(this);
+    this.noteDialog = null;
+    this.requestPaint = '';
     this.quotes = new Map();
     this.fragments = new Map();
     this.menuFragment = '';
@@ -727,6 +834,9 @@ class ChatApplication extends Application {
         chat: (chat) => this.chatName(chat),
       },
       isHidden: (chat, record) => this.isHiddenFor(chat, record),
+      isMention: (record) => mentions(record.content).has(this.peerId),
+      isFollowed: (chat, id) => this.collections.isFollowing(chat, id),
+      canDirect: (chat) => !this.contactState(chat),
     });
     this.notices.watch(this.replica);
     this.uplink = null;
@@ -774,7 +884,14 @@ class ChatApplication extends Application {
       () => this.refreshRecordings(),
       overlay,
       (ids) => this.setLocalRecordings(new Set(ids)),
-      (read) => this.attachRecording(read),
+      {
+        attach: (read) => this.attachRecording(read),
+        publish: {
+          destinations: () => this.videoDestinations(),
+          send: (target, url, title, details) =>
+            this.postVideo(target, url, title, details),
+        },
+      },
     );
     this.recordings.repair().then(() => this.refreshRecordings());
     this.renderIce();
@@ -837,6 +954,12 @@ class ChatApplication extends Application {
     this.jumpCount = byId('jump-count');
     this.backPill = byId('back-pill');
     this.composer = byId('composer');
+    this.requestBar = byId('contact-request');
+    this.inviteBtn = byId('contact-invite');
+    this.collectionsBtn = byId('collections-btn');
+    this.voiceBtn = byId('voice-note');
+    this.videoNoteBtn = byId('video-note');
+    this.mentionBtn = byId('mention-btn');
     this.messageInput = byId('message-input');
     this.composerInfo = byId('composer-info');
     this.pendingList = byId('pending-files');
@@ -997,6 +1120,13 @@ class ChatApplication extends Application {
     this.backPill.onclick = () => this.goBack();
     this.emojiBtn.onclick = () => this.openPalette(this.emojiBtn);
     this.attachBtn.onclick = () => this.fileInput.click();
+    this.inviteBtn.onclick = () => this.openInvite();
+    this.collectionsBtn.onclick = () => this.openCollections();
+    this.voiceBtn.onclick = () => this.openNote('voice');
+    this.videoNoteBtn.onclick = () => this.openNote('circle');
+    this.mentionBtn.onclick = () => this.pickMention();
+    const canRecord = typeof MediaRecorder === 'function';
+    this.voiceBtn.hidden = this.videoNoteBtn.hidden = !canRecord;
     this.backdrop.onclick = () => this.closeTop();
 
     this.fileInput.addEventListener('change', () => {
@@ -1122,6 +1252,11 @@ class ChatApplication extends Application {
     this.on('ready', () => {
       const link = readCallLink();
       if (link) this.presentCallLink(link);
+      const peer = contactLink();
+      if (peer && peer !== this.peerId) {
+        history.replaceState(history.state, '', location.pathname);
+        this.offerContact(peer);
+      }
       const message = readMessageLink();
       if (message) {
         history.replaceState(history.state, '', location.pathname);
@@ -1298,7 +1433,10 @@ class ChatApplication extends Application {
   }
 
   isHiddenChat(chat) {
-    if (isPair(chat)) return this.hidden.has('contacts', this.peerOf(chat));
+    if (isPair(chat)) {
+      const peer = this.peerOf(chat);
+      return isBlocked(peer) || this.hidden.has('contacts', peer);
+    }
     return this.hidden.has('chats', chat) || this.hidden.has('feeds', chat);
   }
 
@@ -1399,6 +1537,7 @@ class ChatApplication extends Application {
       this.hidden.reload();
       this.scheduleRender();
     }
+    if (key === 'xxii:blocked-contacts') this.scheduleRender();
     if (key !== READ_KEY) return;
     this.readAt = readMap(READ_KEY);
     this.scheduleRender();
@@ -1525,7 +1664,9 @@ class ChatApplication extends Application {
     item.querySelector('.dot').title = STATES[contact.status];
     showPhoto(item.querySelector('.icon'), contact.avatar);
     item.querySelector('.name').textContent = contact.nick;
-    item.querySelector('.time').textContent = dayOf(contact.time);
+    const state = this.contactState(pair);
+    item.querySelector('.time').textContent =
+      state === 'incoming' ? 'request' : dayOf(contact.time);
     setBadge(item.querySelector('.badge'), this.unreadOf(pair));
     this.setMine(item.querySelector('.mine'), pair);
     this.setCallMark(item, pair);
@@ -1623,6 +1764,15 @@ class ChatApplication extends Application {
     const { chat } = this;
     const replica = this.replicaOf(chat);
     const attachments = attachmentsOf(replica, chat);
+    if (this.contactState(chat)) {
+      return {
+        replica,
+        attachments: new Map(),
+        reactions: new Map(),
+        nicks: new Map(),
+        ...threadsOf(replica, ''),
+      };
+    }
     const reactions = reactionsOf(replica, chat);
     const nicks = this.nickMap();
     const threads = threadsOf(replica, chat);
@@ -1806,7 +1956,8 @@ class ChatApplication extends Application {
     const names = message.names ?? '';
     const files = view.attachments.get(message.id) ?? [];
     const fileNames = files.map((file) => file.name).join(' ');
-    const text = `${nick} ${title} ${content} ${names} ${fileNames}`;
+    const parts = [nick, title, content, names, fileNames, message.videoTitle];
+    const text = parts.join(' ');
     return text.toLowerCase().includes(this.filter);
   }
 
@@ -1866,7 +2017,10 @@ class ChatApplication extends Application {
     const live = isFeedOpen ? null : this.liveOf(this.chat);
     const label = live ? `join · ${live.count}` : 'call';
     this.callBtn.textContent = label;
-    this.callBtn.classList.toggle('hidden', isFeedOpen);
+    this.callBtn.classList.toggle(
+      'hidden',
+      isFeedOpen || Boolean(this.contactState(this.chat)),
+    );
     this.callBtn.classList.toggle('active', live !== null);
   }
 
@@ -1917,6 +2071,7 @@ class ChatApplication extends Application {
   }
 
   renderComposer() {
+    this.paintContactRequest();
     const isPostMode = this.isPostMode();
     const quote = this.currentQuote();
     const root = this.view?.records.get(this.article);
@@ -1959,7 +2114,13 @@ class ChatApplication extends Application {
     element.classList.toggle('thread-continued', isThreadContinued);
     fillTime(element, message);
     element.querySelector('.author').textContent = message.nick;
-    renderMarkdown(element.querySelector('.content'), message.content);
+    const content = element.querySelector('.content');
+    renderMarkdown(content, videoContent(message));
+    addVideoCard(content, message);
+    element.classList.toggle(
+      'mentioned',
+      mentions(message.content).has(this.peerId),
+    );
     element.querySelector('.note').textContent = noteOf(message);
     const origin = originOf(message);
     const forwarded = element.querySelector('.forwarded');
@@ -1980,8 +2141,11 @@ class ChatApplication extends Application {
   createPostCard(post, details) {
     const element = cloneTemplate(this.postTemplate, '.post');
     fillPostHeader(element, post);
-    element.querySelector('.excerpt').textContent = plainOf(post.content);
-    this.fillFiles(element.querySelector('.attachments'), details.files);
+    const excerpt = element.querySelector('.excerpt');
+    excerpt.textContent = plainOf(videoContent(post));
+    const attachments = element.querySelector('.attachments');
+    this.fillFiles(attachments, details.files);
+    addVideoCard(attachments, post);
     const count = plural(details.replyCount, 'reply', 'replies');
     element.querySelector('.replies .count').textContent = count;
     this.fillReactions(element.querySelector('.reactions'), details.reactions);
@@ -1991,7 +2155,7 @@ class ChatApplication extends Application {
   createArticle(post, details) {
     const element = cloneTemplate(this.articleTemplate, '.post-article');
     fillPostHeader(element, post);
-    const blocks = parseMarkdown(post.content);
+    const blocks = parseMarkdown(videoContent(post));
     const nodes = blocks.map(renderBlock);
     const links = [];
     for (let i = 0; i < blocks.length; i++) {
@@ -2003,6 +2167,7 @@ class ChatApplication extends Application {
     const text = element.querySelector('.post-text');
     text.classList.add('md');
     text.replaceChildren(...nodes);
+    addVideoCard(text, post);
     const outline = element.querySelector('.outline');
     outline.replaceChildren(...links);
     outline.classList.toggle('hidden', links.length < 2);
@@ -2025,6 +2190,9 @@ class ChatApplication extends Application {
   }
 
   createFile(file) {
+    if (isNote(file)) {
+      return this.media.create(file, (note) => this.loadFile(note));
+    }
     const element = cloneTemplate(this.fileTemplate, '.file');
     element.title = file.name;
     element.querySelector('.file-name').textContent = file.name;
@@ -2158,6 +2326,13 @@ class ChatApplication extends Application {
 
   handleMessageClick(event) {
     const { target } = event;
+    const mention = target.closest('a[href^="/?mention="]');
+    if (mention && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      const peer = new URL(mention.href).searchParams.get('mention');
+      if (isContactPeer(peer) && peer !== this.peerId) this.selectDirect(peer);
+      return;
+    }
     const button = target.closest('button');
     const action = MESSAGE_ACTIONS[button?.dataset.action];
     const actionItem = action ? target.closest('[data-id]') : null;
@@ -2294,6 +2469,16 @@ class ChatApplication extends Application {
     }
     const pinLabel = record?.pinned ? 'Unpin' : 'Pin';
     items.push({ action: 'pin', label: pinLabel });
+    const saved = isSaved(this.chat, id);
+    const followed = this.collections.isFollowing(this.chat, id);
+    items.push({
+      action: 'save',
+      label: saved ? 'Remove from Saved Messages' : 'Save message',
+    });
+    items.push({
+      action: 'follow',
+      label: followed ? 'Unfollow thread' : 'Follow thread',
+    });
     const hasText = Boolean(record?.content || record?.title);
     if (hasText) items.push({ action: 'copy', label: 'Copy text' });
     for (const file of this.view.attachments.get(id) ?? []) {
@@ -2313,6 +2498,8 @@ class ChatApplication extends Application {
           `.message-tools ${selector} svg`,
         );
       entry.glyph = icon?.cloneNode(true);
+      if (action === 'save') entry.glyph = createIcon('save');
+      if (action === 'follow') entry.glyph = createIcon('chat');
     }
     return items;
   }
@@ -3376,6 +3563,7 @@ class ChatApplication extends Application {
   }
 
   selectChat(id) {
+    if (this.chat !== id) this.media.close();
     this.revealChat(id);
     this.closeSearch();
     this.clearFound();
@@ -3719,7 +3907,7 @@ class ChatApplication extends Application {
     const anchor = place.anchor ?? null;
     this.navMenu.open({
       id: keyOf(target),
-      items: this.navMenuItems(target),
+      items: this.navMenuItems(target, !item),
       anchor,
       point: anchor ? null : place.point,
       label: 'Actions',
@@ -3727,9 +3915,22 @@ class ChatApplication extends Application {
     });
   }
 
-  navMenuItems(target) {
+  navMenuItems(target, isHeader) {
     if (target.kind === 'folder') return this.folderMenuItems(target.id);
     const items = [this.folderChoices(target)];
+    if (target.kind === 'contact') {
+      const blocked = isBlocked(target.id);
+      if (!blocked) {
+        items.push({ action: 'contact-request', label: 'Request contact' });
+      }
+      items.push({
+        action: 'contact-block',
+        label: blocked ? 'Unblock contact' : 'Block contact',
+      });
+    }
+    if (isHeader) {
+      items.push({ action: 'media', label: 'Shared media' });
+    }
     const label = LEAVE_LABELS[target.kind];
     if (label && target.id !== GENERAL) items.push({ action: 'leave', label });
     return items;
@@ -3788,7 +3989,9 @@ class ChatApplication extends Application {
     const run = NAV_MENU_ACTIONS[entry.action];
     if (!run) return;
     if (entry.kind === 'checkbox') return void run(this, entry, target);
-    queueMicrotask(() => run(this, entry, target));
+    const modal = ['media', 'contact-request'].includes(entry.action);
+    const perform = () => run(this, entry, target);
+    queueMicrotask(() => (modal ? this.afterPop(perform) : perform()));
   }
 
   handleNavContext(event) {
@@ -4039,7 +4242,7 @@ class ChatApplication extends Application {
     const { chat, selection } = this;
     const pending = this.pendingOf(chat);
     const isEmpty = content === '' && pending.length === 0;
-    if (isEmpty || !this.hasNick()) return;
+    if (isEmpty || !this.hasNick() || this.contactState(chat)) return;
     const isPostMode = this.isPostMode();
     const replyTo = this.targetId() || this.article;
     const quote = this.fragments.get(chat) ?? '';
@@ -4053,7 +4256,12 @@ class ChatApplication extends Application {
     this.saveDraft();
     this.renderPending();
     this.renderComposer();
-    const files = await Promise.all(pending.map(storeFile));
+    const files = await Promise.all(
+      pending.map(async (file) => {
+        const attachment = await storeFile(file);
+        return { ...attachment, ...this.noteInfo.get(file) };
+      }),
+    );
     const id = isPostMode
       ? this.writePost(chat, content, files)
       : this.writeMessage(chat, content, replyTo, files, quote);
@@ -4192,6 +4400,223 @@ class ChatApplication extends Application {
     return blob;
   }
 
+  videoDestinations() {
+    if (!this.hasNick()) return null;
+    const destinations = this.switchEntries()
+      .filter(
+        ({ hidden, peer }) =>
+          !hidden && (!peer || !this.contactState(pairOf(this.peerId, peer))),
+      )
+      .map((entry) => ({
+        id: entry.peer ? pairOf(this.peerId, entry.peer) : entry.id,
+        label: entry.label,
+      }));
+    return { destinations, current: this.chat };
+  }
+
+  postVideo(chat, url, title, details) {
+    if (this.contactState(chat) || (isPair(chat) && !this.peerOf(chat))) {
+      throw new Error('This contact cannot receive video posts.');
+    }
+    const video = new URL(url).hash.slice(1);
+    if (!readShare(`#${video}`)) throw new Error('The video link is invalid.');
+    const content = [details.description, `[Watch video](${url})`]
+      .filter(Boolean)
+      .join('\n\n');
+    const record = {
+      id: generateUUID(),
+      author: this.peerId,
+      nick: this.username,
+      title,
+      content,
+      timestamp: Date.now(),
+      video,
+      videoTitle: title,
+      videoPoster: details.poster,
+      videoDuration: details.duration,
+    };
+    if (this.channelEntity(chat) === 'feed') {
+      createPost(this.replica, { ...record, feed: chat });
+    } else {
+      createMessage(this.replicaOf(chat), { ...record, chat });
+    }
+    this.uplinkOf(chat)
+      ?.flush()
+      .catch((error) => this.report(error));
+    this.scheduleRender();
+  }
+
+  replyAtTime(id, at) {
+    const record = this.recordOf(id);
+    if (!record?.video || isDeleted(record) || !Number.isFinite(at) || at < 0) {
+      return;
+    }
+    const url = videoUrlOf(record.video, {
+      time: at,
+      chat: this.chat,
+      message: id,
+    });
+    if (!url) return;
+    if (isPost(record) && this.article !== id) this.openArticle(id);
+    if (!isPost(record)) this.startReply(id);
+    const stamp = `[${timeText(at * 1000)}](${url})`;
+    const input = this.messageInput;
+    input.value = input.value ? `${input.value} ${stamp} ` : `${stamp} `;
+    this.saveDraft();
+    input.focus();
+  }
+
+  openCollections() {
+    openCollection('Collections', (body, close) => {
+      for (const key of COLLECTION_COMMANDS) {
+        const command = COMMANDS[key];
+        body.append(
+          button(command.label, () => {
+            close();
+            command.run(this);
+          }),
+        );
+      }
+    });
+  }
+
+  openInvite() {
+    const url = inviteUrl(this.peerId);
+    openCollection('Invite contact', (body, close) => {
+      const input = element('input');
+      input.value = url;
+      input.readOnly = true;
+      input.setAttribute('aria-label', 'Contact link');
+      body.append(
+        input,
+        button('Copy link', () => {
+          this.writeClipboard(url, 'Contact link copied');
+          close();
+        }),
+      );
+    });
+  }
+
+  offerContact(peer) {
+    if (!isContactPeer(peer) || peer === this.peerId) return;
+    const chat = pairOf(this.peerId, peer);
+    this.selectDirect(peer);
+    if (this.contactState(chat)) return;
+    const nick = this.nickMap().get(peer) ?? shortId(peer);
+    openCollection('Request contact', (body, close) => {
+      const alias = element('input');
+      alias.setAttribute('aria-label', 'Your nickname');
+      alias.placeholder = 'Your nickname';
+      alias.maxLength = 32;
+      body.append(element('p', '', `Send a contact request to ${nick}?`));
+      if (!this.username) body.append(alias);
+      body.append(
+        button('Send request', () => {
+          if (!this.username) {
+            if (!alias.value.trim()) return void alias.focus();
+            this.usernameInput.value = alias.value;
+            this.syncUsername();
+          }
+          this.updateContactRequest('requested');
+          close();
+        }),
+      );
+    });
+  }
+
+  contactState(chat) {
+    const peer = this.peerOf(chat);
+    if (!peer) return '';
+    if (isBlocked(peer)) return 'blocked';
+    const replica = this.directs.get(chat)?.replica;
+    return replica ? requestState(replica, chat, this.peerId, peer) : '';
+  }
+
+  updateContactRequest(state) {
+    const { chat, peerId, username } = this;
+    if (!this.peerOf(chat) || !this.hasNick()) return;
+    setRequest(this.replicaOf(chat), chat, peerId, state, username);
+    this.uplinkOf(chat)
+      ?.flush()
+      .catch((error) => this.report(error));
+    this.render();
+  }
+
+  toggleBlock(peer) {
+    const blocked = !isBlocked(peer);
+    setBlocked(peer, blocked);
+    if (blocked && this.peerOf(this.chat) === peer) this.media.close();
+    this.scheduleRender();
+  }
+
+  paintContactRequest() {
+    const state = this.contactState(this.chat);
+    this.composer.classList.toggle('hidden', Boolean(state));
+    this.requestBar.classList.toggle('hidden', !state);
+    const key = `${this.chat}/${state}`;
+    if (key === this.requestPaint) return;
+    this.requestPaint = key;
+    const peer = this.peerOf(this.chat);
+    const text = {
+      incoming: 'This contact wants to start a conversation.',
+      outgoing: 'Waiting for this contact to accept your request.',
+      declined: 'The contact request was declined.',
+      blocked: 'You blocked this contact.',
+    };
+    this.requestBar.replaceChildren(element('p', '', text[state]));
+    if (state === 'incoming') {
+      this.requestBar.append(
+        button('Accept', () => this.updateContactRequest('accepted')),
+        button('Decline', () => this.updateContactRequest('declined')),
+        button('Block', () => {
+          this.updateContactRequest('declined');
+          this.toggleBlock(peer);
+        }),
+      );
+    }
+    if (state === 'blocked') {
+      this.requestBar.append(button('Unblock', () => this.toggleBlock(peer)));
+    }
+  }
+
+  pickMention() {
+    const input = this.messageInput;
+    const { selectionStart, selectionEnd } = input;
+    chooseMention(this.listContacts(), (mention) => {
+      input.setRangeText(`${mention} `, selectionStart, selectionEnd, 'end');
+      this.saveDraft();
+      input.focus();
+    });
+  }
+
+  openNote(kind) {
+    if (this.noteDialog || this.contactState(this.chat)) return;
+    const { chat } = this;
+    this.noteDialog = captureNote(kind, (file, data) => {
+      this.noteInfo.set(file, data);
+      this.addFiles([file], chat);
+    });
+    this.noteDialog.addEventListener('close', () => {
+      this.noteDialog = null;
+      this.messageInput.focus();
+    });
+  }
+
+  saveMessage(id) {
+    const record = this.recordOf(id);
+    if (!record || isDeleted(record)) return;
+    const files = this.view.attachments.get(id);
+    const saved = saveRecord(this.chat, record, files);
+    this.showNotification(
+      saved ? 'Saved to Saved Messages' : 'Removed from Saved Messages',
+    );
+  }
+
+  followMessage(id) {
+    const follow = this.collections.follow(this.chat, id);
+    this.showNotification(follow ? 'Following thread' : 'Unfollowed thread');
+  }
+
   togglePin(id) {
     const record = this.recordOf(id);
     if (!record) return;
@@ -4242,7 +4667,7 @@ class ChatApplication extends Application {
     this.openLink({ chat, message });
   }
 
-  openLink({ chat, message }) {
+  openLink({ chat, message, at = null }) {
     const peer = this.peerOf(chat);
     if (isPair(chat) && !peer) {
       const text = 'This link points to a direct chat of other people';
@@ -4251,14 +4676,20 @@ class ChatApplication extends Application {
     if (peer && chat !== this.chat) this.selectDirect(peer);
     else if (chat !== this.chat) this.selectChat(chat);
     this.linked = message;
+    this.linkTime = at;
     this.revealLinked();
   }
 
   revealLinked() {
     const id = this.linked;
     if (!id || !this.view?.records.has(id)) return;
+    const at = this.linkTime;
     this.linked = '';
-    queueMicrotask(() => this.revealMessage(id));
+    this.linkTime = null;
+    queueMicrotask(() => {
+      this.revealMessage(id);
+      if (at !== null) this.replyAtTime(id, at);
+    });
   }
 
   ownRecords(ids) {
@@ -4359,7 +4790,10 @@ class ChatApplication extends Application {
 
   forwardEntries() {
     const isTarget = (entry) =>
-      entry.kind !== 'feed' && entry.id !== this.chat && !entry.hidden;
+      entry.kind !== 'feed' &&
+      entry.id !== this.chat &&
+      !entry.hidden &&
+      (!entry.peer || !this.contactState(pairOf(this.peerId, entry.peer)));
     return this.switchEntries().filter(isTarget);
   }
 
@@ -4393,6 +4827,10 @@ class ChatApplication extends Application {
       author: this.peerId,
       nick: this.username,
       content: record.content,
+      video: record.video,
+      videoTitle: record.videoTitle,
+      videoPoster: record.videoPoster,
+      videoDuration: record.videoDuration,
       timestamp: Date.now(),
       forwarded,
       origin,
@@ -4976,7 +5414,7 @@ class ChatApplication extends Application {
     const nick = typeof from.nick === 'string' ? from.nick : '';
     const peer = typeof from.peer === 'string' ? from.peer : '';
     const chat = typeof data.chat === 'string' ? data.chat : '';
-    if (this.isHiddenChat(chat)) return;
+    if (this.isHiddenChat(chat) || this.contactState(chat)) return;
     const tab = tabId();
     this.ring.show({ call: data.call, chat, nick, peer, tab });
   }
