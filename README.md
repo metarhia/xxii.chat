@@ -469,9 +469,9 @@ duplicate names.
 
 Open the **Edit** icon beside **Play** for the full-screen editor. Drag an
 empty range on the timeline, adjust either edge, and choose **Apply cut**.
-**New cut** starts a fresh range at the playhead, replacing the draft while
-keeping applied cuts. **Play** skips the marked ranges, including the cut
-you are adjusting.
+**New cut** applies the current range and starts a fresh one at the
+playhead. If a cut time is invalid, correct it before starting the next cut.
+**Play** skips the marked ranges, including the cut you are adjusting.
 Select any marked range to move its edges or remove the cut. Drag the ruler
 to seek. Use **+**, **−**, and **Fit timeline** to change zoom, and scroll
 horizontally to reach later sections. Trim and cut times also accept

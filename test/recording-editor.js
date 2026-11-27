@@ -289,37 +289,61 @@ test(
       },
     );
     await t.test(
-      'New cut replaces the draft and keeps applied cuts',
+      'New cut applies the current range and starts another',
       async () => {
         await cut(tab, '00:00:01.000', '00:00:01.500');
         await click(tab, `${control('cuts')} li:first-child button`);
         await time(tab, 'cut-end', '00:00:01.700');
         await time(tab, 'cut-start', 'invalid');
+        await clickEdit(tab, 'new-cut');
         await waitStatus(tab, 'start before end');
+        assert.deepEqual(
+          await tab.run(`
+            const editor = app.recordings.editor;
+            return {
+              enabled: !editor.nodes['new-cut'].disabled,
+              pending: editor.pendingCut,
+              applied: editor.draft.cuts,
+            };
+          `),
+          {
+            enabled: true,
+            pending: { start: 1000, end: 1700 },
+            applied: [{ start: 1000, end: 1500 }],
+          },
+        );
+        await time(tab, 'cut-start', '00:00:01.000');
         const state = await tab.run(`
-        const editor = app.recordings.editor;
-        const button = editor.nodes['new-cut'];
-        const enabled = !button.disabled;
-        button.click();
-        const fromApplied = editor.pendingCut;
-        editor.seek(2400);
-        button.click();
-        return {
-          enabled, enabledAgain: !button.disabled, fromApplied,
-          fresh: editor.pendingCut, index: editor.cutIndex,
-          applied: editor.draft.cuts, invalid: editor.invalid.size,
-        };
-      `);
+          const editor = app.recordings.editor;
+          const button = editor.nodes['new-cut'];
+          editor.seek(1700);
+          button.click();
+          const fromApplied = editor.pendingCut;
+          editor.seek(2400);
+          button.click();
+          return {
+            enabled: !button.disabled, fromApplied,
+            fresh: editor.pendingCut, index: editor.cutIndex,
+            applied: editor.draft.cuts,
+          };
+        `);
         assert.deepEqual(state, {
           enabled: true,
-          enabledAgain: true,
           fromApplied: { start: 1700, end: 2700 },
           fresh: { start: 2400, end: 3400 },
-          index: 1,
-          applied: [{ start: 1000, end: 1500 }],
-          invalid: 0,
+          index: 2,
+          applied: [
+            { start: 1000, end: 1700 },
+            { start: 1700, end: 2700 },
+          ],
         });
         await clickEdit(tab, 'cancel-cut');
+        await clickEdit(tab, 'undo');
+        assert.deepEqual(
+          await tab.run('return app.recordings.editor.draft.cuts;'),
+          [{ start: 1000, end: 1700 }],
+        );
+        await clickEdit(tab, 'undo');
         await clickEdit(tab, 'undo');
       },
     );

@@ -496,6 +496,7 @@ class RecordingEditor {
   }
 
   newCut(range) {
+    if (this.pendingCut && !this.commitCut()) return;
     this.resetCutInputs();
     const start = range?.start ?? Math.min(this.time, this.duration - 1);
     const end = range?.end ?? Math.min(this.duration, start + DEFAULT_CUT_MS);
@@ -546,11 +547,27 @@ class RecordingEditor {
     this.setStatus('');
   }
 
-  applyCut() {
+  get canApplyCut() {
+    return (
+      Boolean(this.pendingCut) &&
+      !this.invalid.has('cut-start') &&
+      !this.invalid.has('cut-end')
+    );
+  }
+
+  commitCut() {
+    if (!this.canApplyCut) {
+      this.setStatus(RANGE_ERROR);
+      return false;
+    }
     this.history.apply(
       selectedCutOf(this.draft, this.cutIndex, this.pendingCut),
     );
-    this.selectCut(-1);
+    return true;
+  }
+
+  applyCut() {
+    if (this.commitCut()) this.selectCut(-1);
   }
 
   removeCut() {
@@ -901,8 +918,7 @@ class RecordingEditor {
       (audioOnly && !audio && 'There is no audio in the kept clips.') ||
       (!canRender && 'This browser cannot render an edited recording.');
     nodes.play.disabled = Boolean(this.playTimeline.error || this.invalid.size);
-    nodes['apply-cut'].disabled =
-      this.invalid.has('cut-start') || this.invalid.has('cut-end');
+    nodes['apply-cut'].disabled = !this.canApplyCut;
     nodes.validation.textContent = error || '';
     nodes.validation.hidden = !error;
     const properties = canRender ? [this.format.extension.toUpperCase()] : [];
