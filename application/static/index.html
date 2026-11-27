@@ -157,6 +157,12 @@
           >
             <span id="settings-dot" class="update-dot" hidden>•</span>
           </button>
+          <button
+            id="profile-version"
+            class="link-btn profile-version"
+            type="button"
+            hidden
+          ></button>
         </footer>
       </aside>
 
@@ -409,8 +415,32 @@
                   >?</span
                 >
                 <span class="row-text">
-                  <span class="row-label">Avatar</span>
-                  <span class="row-note">Color comes from your peer id</span>
+                  <span class="row-label">Profile photo</span>
+                  <span
+                    id="profile-photo-status"
+                    class="row-note"
+                    role="status"
+                  ></span>
+                </span>
+                <span class="row-field profile-photo-actions">
+                  <input
+                    id="profile-photo-input"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                    hidden
+                  />
+                  <button id="profile-photo-choose" class="link-btn" type="button">
+                    choose photo
+                  </button>
+                  <button
+                    id="profile-photo-remove"
+                    class="link-btn"
+                    type="button"
+                    aria-label="Remove profile photo"
+                    hidden
+                  >
+                    remove
+                  </button>
                 </span>
               </div>
               <label class="row">
@@ -835,6 +865,45 @@
       </dialog>
     </template>
 
+    <template id="video-share-template">
+      <dialog class="confirm video-share" aria-label="Share video">
+        <header>
+          <h2>Share video</h2>
+          <button
+            class="link-btn"
+            type="button"
+            data-share="close"
+            aria-label="Close video sharing"
+          >
+            ×
+          </button>
+        </header>
+        <p data-share="status" role="status">Checking video pieces…</p>
+        <progress
+          max="1"
+          value="0"
+          aria-label="Preparing video link"
+        ></progress>
+        <div data-share="details" hidden>
+          <label>
+            Video link
+            <input type="url" readonly />
+          </label>
+          <div class="watch-actions">
+            <button type="button" class="link-btn" data-share="copy">
+              copy link
+            </button>
+            <a class="link-btn" target="_blank" rel="noopener noreferrer">
+              open player
+            </a>
+            <button type="button" class="link-btn" data-share="stop">
+              stop seeding here
+            </button>
+          </div>
+        </div>
+      </dialog>
+    </template>
+
     <template id="recording-editor-template">
       <dialog class="recording-editor" aria-label="Edit recording">
         <header class="settings-header">
@@ -855,274 +924,500 @@
           </button>
           <fieldset class="recording-edit-body" data-edit="body" hidden>
             <legend class="visually-hidden">Recording edit</legend>
-            <div class="recording-edit-visual">
-              <video
-                playsinline
-                preload="auto"
-                aria-label="Recording preview"
-              ></video>
-              <canvas data-edit="frame" aria-label="Edited picture" hidden></canvas>
-            </div>
-            <div class="recording-edit-row">
-              <button class="link-btn" type="button" data-edit="play">play</button>
-              <span data-edit="time"></span>
-            </div>
-            <input
-              class="recording-edit-scrub"
-              type="range"
-              min="0"
-              step="1"
-              value="0"
-              aria-label="Source playhead"
-              data-edit="scrub"
-            />
-            <div data-edit="source-controls">
-              <details class="recording-edit-tools">
-                <summary>Clips</summary>
-                <ol data-edit="clips" class="recording-edit-clips"></ol>
-                <div class="recording-edit-row">
-                  <label class="recording-edit-library"
-                    >Recording
-                    <select data-edit="library-source"></select>
-                  </label>
-                  <button class="link-btn" type="button" data-edit="add-recording">
-                    add recording
-                  </button>
-                  <button class="link-btn" type="button" data-edit="add-videos">
-                    add video files
-                  </button>
-                  <input
-                    type="file"
-                    data-edit="video-files"
-                    accept="video/*,.m4v"
-                    multiple
+            <div class="recording-edit-workspace">
+              <div class="recording-edit-player">
+                <div class="recording-edit-visual">
+                  <video
+                    playsinline
+                    preload="auto"
+                    aria-label="Recording preview"
+                  ></video>
+                  <canvas
+                    data-edit="frame"
+                    aria-label="Edited picture"
                     hidden
-                  />
+                  ></canvas>
                 </div>
-              </details>
-              <div class="recording-edit-track" data-edit="track">
-                <div
-                  class="recording-edit-removals"
-                  data-edit="removals"
-                  aria-hidden="true"
-                ></div>
-                <div class="recording-edit-boundaries" data-edit="boundaries"></div>
-                <button
-                  class="recording-edit-handle"
-                  type="button"
-                  data-handle="start"
-                  aria-label="Trim start handle"
-                ></button>
-                <button
-                  class="recording-edit-handle"
-                  type="button"
-                  data-handle="end"
-                  aria-label="Trim end handle"
-                ></button>
-                <button
-                  class="recording-edit-handle"
-                  type="button"
-                  data-handle="cut-start"
-                  aria-label="Cut start handle"
-                  hidden
-                ></button>
-                <button
-                  class="recording-edit-handle"
-                  type="button"
-                  data-handle="cut-end"
-                  aria-label="Cut end handle"
-                  hidden
-                ></button>
+                <div class="recording-edit-row">
+                  <button
+                    class="link-btn recording-edit-icon"
+                    type="button"
+                    data-edit="play"
+                    aria-label="Play"
+                    title="Play"
+                  ></button>
+                  <span data-edit="time"></span>
+                </div>
+                <input
+                  class="recording-edit-scrub"
+                  type="range"
+                  min="0"
+                  step="1"
+                  value="0"
+                  aria-label="Source playhead"
+                  data-edit="scrub"
+                />
               </div>
-              <div class="recording-edit-row">
-                <label>Trim start <input type="text" data-time="start" /></label>
-                <label>Trim end <input type="text" data-time="end" /></label>
+              <aside
+                class="recording-edit-inspector"
+                aria-label="Editing tools"
+              >
+                <div
+                  class="call-tablist"
+                  role="tablist"
+                  aria-label="Video editing"
+                >
+                  <button
+                    id="recording-tab-cuts"
+                    class="call-tab open"
+                    type="button"
+                    role="tab"
+                    data-editor-tab="cuts"
+                    aria-controls="recording-panel-cuts"
+                    aria-selected="true"
+                  >
+                    Trim &amp; cut
+                  </button>
+                  <button
+                    id="recording-tab-clips"
+                    class="call-tab"
+                    type="button"
+                    role="tab"
+                    data-editor-tab="clips"
+                    aria-controls="recording-panel-clips"
+                    aria-selected="false"
+                    tabindex="-1"
+                  >
+                    Clips
+                  </button>
+                  <button
+                    id="recording-tab-picture"
+                    class="call-tab"
+                    type="button"
+                    role="tab"
+                    data-editor-tab="picture"
+                    aria-controls="recording-panel-picture"
+                    aria-selected="false"
+                    tabindex="-1"
+                  >
+                    Picture
+                  </button>
+                  <button
+                    id="recording-tab-output"
+                    class="call-tab"
+                    type="button"
+                    role="tab"
+                    data-editor-tab="output"
+                    aria-controls="recording-panel-output"
+                    aria-selected="false"
+                    tabindex="-1"
+                  >
+                    Output
+                  </button>
+                </div>
+                <div
+                  id="recording-panel-cuts"
+                  class="recording-edit-panel"
+                  role="tabpanel"
+                  aria-labelledby="recording-tab-cuts"
+                >
+                  <div class="recording-edit-times">
+                    <label>
+                      Trim start
+                      <input type="text" data-time="start" />
+                    </label>
+                    <label>
+                      Trim end
+                      <input type="text" data-time="end" />
+                    </label>
+                  </div>
+                  <ul class="recording-edit-cuts" data-edit="cuts"></ul>
+                  <div data-edit="cut-fields" hidden>
+                    <div class="recording-edit-times">
+                      <label>
+                        Cut start
+                        <input type="text" data-time="cut-start" />
+                      </label>
+                      <label>
+                        Cut end
+                        <input type="text" data-time="cut-end" />
+                      </label>
+                    </div>
+                    <div class="recording-edit-row">
+                      <button
+                        class="link-btn"
+                        type="button"
+                        data-edit="apply-cut"
+                      >
+                        apply cut
+                      </button>
+                      <button
+                        class="link-btn"
+                        type="button"
+                        data-edit="cancel-cut"
+                      >
+                        cancel
+                      </button>
+                      <button
+                        class="link-btn"
+                        type="button"
+                        data-edit="remove-cut"
+                      >
+                        remove cut
+                      </button>
+                    </div>
+                  </div>
+                  <div class="recording-edit-row">
+                    <label class="call-field">
+                      Minimum pause
+                      <select data-edit="pause-minimum">
+                        <option value="500">0.5 s</option>
+                        <option value="1000" selected>1 s</option>
+                        <option value="2000">2 s</option>
+                        <option value="4000">4 s</option>
+                      </select>
+                    </label>
+                    <button class="link-btn" type="button" data-edit="silence">
+                      cut silent pauses
+                    </button>
+                  </div>
+                </div>
+                <div
+                  id="recording-panel-clips"
+                  class="recording-edit-panel"
+                  role="tabpanel"
+                  aria-labelledby="recording-tab-clips"
+                  hidden
+                >
+                  <ol data-edit="clips" class="recording-edit-clips"></ol>
+                  <div class="recording-edit-row">
+                    <label class="recording-edit-library call-field">
+                      Recording
+                      <select data-edit="library-source"></select>
+                    </label>
+                    <button
+                      class="link-btn"
+                      type="button"
+                      data-edit="add-recording"
+                    >
+                      add recording
+                    </button>
+                    <button
+                      class="link-btn"
+                      type="button"
+                      data-edit="add-videos"
+                    >
+                      add video files
+                    </button>
+                    <input
+                      type="file"
+                      data-edit="video-files"
+                      accept="video/*,.m4v"
+                      multiple
+                      hidden
+                    />
+                  </div>
+                </div>
+                <div
+                  id="recording-panel-picture"
+                  class="recording-edit-panel"
+                  role="tabpanel"
+                  aria-labelledby="recording-tab-picture"
+                  hidden
+                >
+                  <div class="recording-edit-parameters">
+                    <label>
+                      Aspect ratio
+                      <select data-option="aspect">
+                        <option value="">Original</option>
+                        <option value="1:1">1:1 square</option>
+                        <option value="1:2">1:2</option>
+                        <option value="9:16">9:16 shorts</option>
+                        <option value="2:3">2:3</option>
+                        <option value="3:4">3:4</option>
+                        <option value="4:5">4:5</option>
+                        <option value="16:9">16:9</option>
+                        <option value="4:3">4:3</option>
+                        <option value="3:2">3:2</option>
+                        <option value="2:1">2:1</option>
+                        <option value="21:9">21:9</option>
+                      </select>
+                    </label>
+                    <label>
+                      Framing
+                      <select data-option="framing">
+                        <option value="fit">Fit inside</option>
+                        <option value="fill">Fill and crop</option>
+                      </select>
+                    </label>
+                    <label>
+                      Rotation
+                      <select data-option="rotation">
+                        <option value="0">0°</option>
+                        <option value="90">90°</option>
+                        <option value="180">180°</option>
+                        <option value="270">270°</option>
+                      </select>
+                    </label>
+                    <label>
+                      Mirror
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        data-option="mirror"
+                        aria-label="Mirror horizontally"
+                      />
+                    </label>
+                    <label>
+                      Crop left %
+                      <input
+                        type="number"
+                        data-option="cropLeft"
+                        min="0"
+                        max="95"
+                        step="0.1"
+                      />
+                    </label>
+                    <label>
+                      Crop right %
+                      <input
+                        type="number"
+                        data-option="cropRight"
+                        min="0"
+                        max="95"
+                        step="0.1"
+                      />
+                    </label>
+                    <label>
+                      Crop top %
+                      <input
+                        type="number"
+                        data-option="cropTop"
+                        min="0"
+                        max="95"
+                        step="0.1"
+                      />
+                    </label>
+                    <label>
+                      Crop bottom %
+                      <input
+                        type="number"
+                        data-option="cropBottom"
+                        min="0"
+                        max="95"
+                        step="0.1"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div
+                  id="recording-panel-output"
+                  class="recording-edit-panel"
+                  role="tabpanel"
+                  aria-labelledby="recording-tab-output"
+                  hidden
+                >
+                  <div class="recording-edit-parameters">
+                    <label class="recording-edit-speed">
+                      <span>
+                        Speed <output data-edit="speed-value">1×</output>
+                      </span>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="2"
+                        step="0.05"
+                        value="1"
+                        data-edit="speed"
+                        data-option="speed"
+                        aria-label="Playback speed"
+                      />
+                    </label>
+                    <label>
+                      Short edge limit
+                      <select data-option="resolution">
+                        <option value="0">Original</option>
+                        <option value="240">240 px</option>
+                        <option value="360">360 px</option>
+                        <option value="480">480 px</option>
+                        <option value="720">720 px</option>
+                        <option value="1080">1080 px</option>
+                        <option value="1440">1440 px</option>
+                        <option value="2160">2160 px</option>
+                      </select>
+                    </label>
+                    <label>
+                      Quality
+                      <select data-option="quality">
+                        <option value="small">Smaller file</option>
+                        <option value="standard" selected>Standard</option>
+                        <option value="high">High</option>
+                      </select>
+                    </label>
+                    <label>
+                      Size limit (MB)
+                      <input
+                        type="number"
+                        data-option="target"
+                        min="0"
+                        step="0.1"
+                        placeholder="No limit"
+                      />
+                    </label>
+                    <label>
+                      Export
+                      <select data-option="output">
+                        <option value="video">Video with sound</option>
+                        <option value="mute">Silent video</option>
+                        <option value="audio">Audio only</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p class="muted" data-edit="format"></p>
+                </div>
+              </aside>
+            </div>
+            <section class="recording-edit-timeline" aria-label="Timeline">
+              <div class="recording-timeline-toolbar">
                 <button class="link-btn" type="button" data-edit="new-cut">
                   new cut
                 </button>
-                <button class="link-btn" type="button" data-edit="undo">
-                  undo
-                </button>
-                <button class="link-btn" type="button" data-edit="redo">
-                  redo
-                </button>
-              </div>
-              <ul class="recording-edit-cuts" data-edit="cuts"></ul>
-              <div data-edit="cut-fields" hidden>
-                <div class="recording-edit-row">
-                  <label
-                    >Cut start <input type="text" data-time="cut-start"
-                  /></label>
-                  <label>Cut end <input type="text" data-time="cut-end" /></label>
-                  <button class="link-btn" type="button" data-edit="apply-cut">
-                    apply cut
+                <button
+                  class="link-btn recording-edit-icon"
+                  type="button"
+                  data-edit="undo"
+                  aria-label="Undo"
+                  title="Undo"
+                ></button>
+                <button
+                  class="link-btn recording-edit-icon"
+                  type="button"
+                  data-edit="redo"
+                  aria-label="Redo"
+                  title="Redo"
+                ></button>
+                <div
+                  class="recording-timeline-zoom"
+                  role="group"
+                  aria-label="Timeline zoom"
+                >
+                  <button
+                    class="link-btn"
+                    type="button"
+                    data-edit="zoom-out"
+                    aria-label="Zoom out"
+                    title="Zoom out"
+                  >
+                    −
                   </button>
-                  <button class="link-btn" type="button" data-edit="cancel-cut">
-                    cancel
+                  <output data-edit="zoom-level">1×</output>
+                  <button
+                    class="link-btn"
+                    type="button"
+                    data-edit="zoom-in"
+                    aria-label="Zoom in"
+                    title="Zoom in"
+                  >
+                    +
                   </button>
-                  <button class="link-btn" type="button" data-edit="remove-cut">
-                    remove cut
-                  </button>
+                  <button
+                    class="link-btn recording-edit-icon"
+                    type="button"
+                    data-edit="zoom-fit"
+                    aria-label="Fit timeline"
+                    title="Fit timeline"
+                  ></button>
                 </div>
               </div>
-              <div class="recording-edit-row">
-                <label
-                  >Minimum pause
-                  <select data-edit="pause-minimum">
-                    <option value="500">0.5 s</option>
-                    <option value="1000" selected>1 s</option>
-                    <option value="2000">2 s</option>
-                    <option value="4000">4 s</option>
-                  </select>
-                </label>
-                <button class="link-btn" type="button" data-edit="silence">
-                  cut silent pauses
-                </button>
+              <div
+                class="recording-timeline-viewport"
+                data-edit="viewport"
+                tabindex="0"
+                role="region"
+                aria-label="Scrollable timeline"
+              >
+                <div class="recording-timeline-strip" data-edit="strip">
+                  <div class="recording-timeline-lanes">
+                    <div
+                      class="recording-timeline-ruler"
+                      data-edit="ruler"
+                      aria-hidden="true"
+                    ></div>
+                    <div class="recording-edit-track" data-edit="track">
+                      <div
+                        class="recording-edit-removals"
+                        data-edit="removals"
+                        aria-hidden="true"
+                      ></div>
+                      <div
+                        class="recording-edit-cut-lane"
+                        data-edit="cut-lane"
+                      ></div>
+                      <div
+                        class="recording-edit-boundaries"
+                        data-edit="boundaries"
+                      ></div>
+                      <button
+                        class="recording-edit-handle"
+                        type="button"
+                        data-handle="start"
+                        aria-label="Trim start handle"
+                      ></button>
+                      <button
+                        class="recording-edit-handle"
+                        type="button"
+                        data-handle="end"
+                        aria-label="Trim end handle"
+                      ></button>
+                      <button
+                        class="recording-edit-handle"
+                        type="button"
+                        data-handle="cut-start"
+                        aria-label="Cut start handle"
+                        hidden
+                      ></button>
+                      <button
+                        class="recording-edit-handle"
+                        type="button"
+                        data-handle="cut-end"
+                        aria-label="Cut end handle"
+                        hidden
+                      ></button>
+                    </div>
+                    <div
+                      class="recording-timeline-playhead"
+                      data-edit="playhead"
+                      aria-hidden="true"
+                    ></div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <details class="recording-edit-tools">
-              <summary>Picture, speed, and output</summary>
-              <div class="recording-edit-parameters">
-                <label
-                  >Speed
-                  <select data-option="speed">
-                    <option value="0.5">0.5×</option>
-                    <option value="0.75">0.75×</option>
-                    <option value="1" selected>1×</option>
-                    <option value="1.25">1.25×</option>
-                    <option value="1.5">1.5×</option>
-                    <option value="2">2×</option>
-                  </select>
-                </label>
-                <label
-                  >Aspect ratio
-                  <select data-option="aspect">
-                    <option value="">Original</option>
-                    <option value="1:1">1:1 square</option>
-                    <option value="1:2">1:2</option>
-                    <option value="9:16">9:16 shorts</option>
-                    <option value="2:3">2:3</option>
-                    <option value="3:4">3:4</option>
-                    <option value="4:5">4:5</option>
-                    <option value="16:9">16:9</option>
-                    <option value="4:3">4:3</option>
-                    <option value="3:2">3:2</option>
-                    <option value="2:1">2:1</option>
-                    <option value="21:9">21:9</option>
-                  </select>
-                </label>
-                <label
-                  >Framing
-                  <select data-option="framing">
-                    <option value="fit">Fit inside</option>
-                    <option value="fill">Fill and crop</option>
-                  </select>
-                </label>
-                <label
-                  >Rotation
-                  <select data-option="rotation">
-                    <option value="0">0°</option>
-                    <option value="90">90°</option>
-                    <option value="180">180°</option>
-                    <option value="270">270°</option>
-                  </select>
-                </label>
-                <label class="recording-edit-check">
-                  <input type="checkbox" data-option="mirror" /> Mirror horizontally
-                </label>
-                <label
-                  >Crop left %
-                  <input
-                    type="number"
-                    data-option="cropLeft"
-                    min="0"
-                    max="95"
-                    step="0.1"
-                  />
-                </label>
-                <label
-                  >Crop right %
-                  <input
-                    type="number"
-                    data-option="cropRight"
-                    min="0"
-                    max="95"
-                    step="0.1"
-                  />
-                </label>
-                <label
-                  >Crop top %
-                  <input
-                    type="number"
-                    data-option="cropTop"
-                    min="0"
-                    max="95"
-                    step="0.1"
-                  />
-                </label>
-                <label
-                  >Crop bottom %
-                  <input
-                    type="number"
-                    data-option="cropBottom"
-                    min="0"
-                    max="95"
-                    step="0.1"
-                  />
-                </label>
-                <label
-                  >Short edge limit
-                  <select data-option="resolution">
-                    <option value="0">Original</option>
-                    <option value="240">240 px</option>
-                    <option value="360">360 px</option>
-                    <option value="480">480 px</option>
-                    <option value="720">720 px</option>
-                    <option value="1080">1080 px</option>
-                    <option value="1440">1440 px</option>
-                    <option value="2160">2160 px</option>
-                  </select>
-                </label>
-                <label
-                  >Quality
-                  <select data-option="quality">
-                    <option value="small">Smaller file</option>
-                    <option value="standard" selected>Standard</option>
-                    <option value="high">High</option>
-                  </select>
-                </label>
-                <label
-                  >Size limit (MB)
-                  <input
-                    type="number"
-                    data-option="target"
-                    min="0"
-                    step="0.1"
-                    placeholder="No limit"
-                  />
-                </label>
-                <label
-                  >Export
-                  <select data-option="output">
-                    <option value="video">Video with sound</option>
-                    <option value="mute">Silent video</option>
-                    <option value="audio">Audio only</option>
-                  </select>
-                </label>
-              </div>
-            </details>
+              <label class="recording-timeline-pan" data-edit="pan-row" hidden>
+                Scroll timeline
+                <input
+                  data-edit="pan"
+                  type="range"
+                  min="0"
+                  max="1000"
+                  value="0"
+                />
+              </label>
+              <p
+                class="muted recording-timeline-hint"
+                data-edit="timeline-hint"
+              >
+                Drag a range to cut. Drag the ruler to seek.
+              </p>
+            </section>
             <p data-edit="validation" role="status" hidden></p>
-            <div class="recording-edit-row">
-              <button class="link-btn" type="button" data-edit="preview">
-                preview edit
-              </button>
+            <div class="recording-edit-row recording-edit-save">
+              <label>
+                Copy title
+                <input type="text" data-edit="copy-title" />
+              </label>
               <button class="link-btn" type="button" data-edit="discard">
                 discard changes
               </button>
-            </div>
-            <div class="recording-edit-row recording-edit-save">
-              <label>Copy title <input type="text" data-edit="copy-title" /></label>
-              <span data-edit="format"></span>
               <button class="link-btn" type="button" data-edit="save">
                 save edited copy
               </button>
@@ -1174,19 +1469,19 @@
               aria-label="Play"
               title="Play"
             ></button>
+            <button
+              class="recording-edit icon-btn"
+              type="button"
+              aria-label="Edit"
+              title="Edit"
+              hidden
+            ></button>
             <a
               class="recording-download icon-btn"
               aria-label="Download"
               title="Download"
               hidden
             ></a>
-            <button
-              class="recording-save icon-btn"
-              type="button"
-              aria-label="Save as"
-              title="Save as"
-              hidden
-            ></button>
             <button
               class="recording-delete icon-btn"
               type="button"
@@ -1562,6 +1857,7 @@
 
     <template id="member-item-template">
       <li class="member">
+        <span class="member-photo" aria-hidden="true" hidden></span>
         <span class="dot"></span>
         <span class="name"></span>
         <span class="state"></span>

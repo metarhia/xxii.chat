@@ -150,8 +150,8 @@ test(
     assert.equal(listed.onPoster, true);
     assert.deepEqual(listed.names, [
       'Play|Play',
+      'Edit|Edit',
       'Download|Download',
-      'Save as…|Save as…',
       'Delete|Delete',
       'More actions|More actions',
     ]);
@@ -205,6 +205,7 @@ test(
     assert.deepEqual(await run('return menuLabels;'), [
       'Play',
       'Edit',
+      'Share video',
       'Properties',
       'Attach to chat',
       'Download',

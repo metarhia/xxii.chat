@@ -151,9 +151,9 @@ sync. Terminal-like UI follows the
   and a dropped link is renegotiated through another linked peer
 - Offline-first: service worker caches the app and keeps all replicas in
   OPFS, messages written offline reach the server after reconnect
-- Automatic updates: the version is shown in Settings > About, the settings
-  button gets a dot when an update is ready, and updates install without
-  user action, see [Releases](#releases)
+- The version button below Settings checks for updates or restarts into an
+  available release. Settings > About also shows the version and update
+  status. See [Releases](#releases)
 - One WebSocket connection for all tabs through `MetacomProxy`, one tab per
   browser (Web Locks) runs the WebRTC mesh for all of them
 - Keyboard: `Ctrl+K` jumps to a chat, feed, contact, or command (Settings,
@@ -169,14 +169,14 @@ sync. Terminal-like UI follows the
   selection, or post. The layout respects safe areas and the on-screen
   keyboard and offers bigger touch targets
 - Nick shared between tabs, members list, and activity log
-- Profile row at the bottom of the sidebar, two lines: your avatar, then
-  the nick with a recordings button (it turns red while a capture or call
-  recording runs) and a gear settings button on the first line, and the
-  connection on the second (`online · 3 peers`, `peers only`, `via leader
-tab`, or `offline`, with a status dot; display only, hover for the mesh
-  role and peers). The peer count no longer sits in the sidebar header, and
-  the installed desktop app (standalone or window controls overlay) hides
-  the header with the logo, since the window title shows it
+- The profile row at the bottom of the sidebar shows the avatar, nick, and
+  connection status. The Recordings button turns red during a recording.
+  Set or remove a profile photo in Settings > Profile. Once you set a nick,
+  other peers see the photo in their contacts and members lists.
+  The version appears below the Settings gear. Hover over the connection
+  status for the mesh role and peer count. The installed desktop app
+  (standalone or window controls overlay) hides the header with the logo,
+  since the window title shows it
 - At most three zones on screen: the sidebar, the center, and one right
   panel (pins, members, capture, or the call tabs) that replaces the open
   one. The pins, members, and capture panels close with `×` at the right of
@@ -437,34 +437,48 @@ renamed), the date (`today 14:05`, `yesterday 14:05`, `Nov 20`, or `Nov 20
 folder. The duration sits on the poster at the bottom right, and a recording
 that is open or ended unexpectedly shows a badge at the top left. Click the
 poster, press `Enter` on it, or use the play button to play. Icon buttons play,
-download, save (to the remembered folder, else **Save as**), and delete; the
-`⋯` button, a right click, or a long press on a card opens a menu with Play, Edit,
-Download, Save as, Save to folder, Rename, Delete, and the parts of a
-multi-part recording. Rename edits the title in place. In browsers that offer
-file and folder pickers, **Save as** lets you pick a file and **Save to
-folder** copies to the folder remembered in Settings > Recordings. Both show
-progress, and saving to a folder adds ` (2)`, ` (3)`, and so on to duplicate
-names.
+edit, download, and delete. The `⋯` button, a right click, or a long press on
+a card opens the actions menu with **Save as**, **Save to folder**, and the
+parts of a multi-part recording. Rename edits the title in place. In
+browsers with file and folder pickers, **Save as** lets you pick a file and
+**Save to folder** copies to the folder remembered in Settings > Recordings.
+Both show progress. Saving to a folder adds ` (2)`, ` (3)`, and so on to
+duplicate names.
 
-Open **Edit** on a saved recording to trim the ends, apply cuts, and preview
-the parts you kept. Use **Clips** to append recordings or video files and
+Open the **Edit** icon beside **Play** for the full-screen editor. Drag an
+empty range on the timeline, adjust either edge, and choose **Apply cut**.
+**Play** skips the marked ranges, including the cut you are adjusting.
+Select any marked range to move its edges or remove the cut. Drag the ruler
+to seek. Use **+**, **−**, and **Fit timeline** to change zoom, and scroll
+horizontally to reach later sections. Trim and cut times also accept
+millisecond input. Use **Clips** to append recordings or video files and
 change their order. Folder recordings show their playable parts on the same
-timeline. Use the handles or enter times down to milliseconds. **Cut silent
-pauses** marks quiet ranges for removal with a little sound padding and
-supports undo.
+timeline. **Cut silent pauses** marks quiet ranges for removal with a little
+sound padding and supports undo.
 
-**Picture, speed, and output** lets you crop the edges, rotate, mirror, fit
-or fill a new aspect ratio (including square, 1:2 and 9:16), and change
-speed. Set a resolution, quality, or maximum size for a smaller file. Choose
-video with sound, silent video, or audio only. **Save edited copy** renders a
-separate file to the browser library, and **Save as** also saves it to a file
-or downloads it. Keep the tab visible while rendering.
+Use **Picture** to crop, rotate, mirror, or fit or fill a new aspect ratio
+(including square, 1:2 and 9:16). The **Output** tab has a speed slider from
+0.5× to 2× in 0.05× steps, plus resolution, quality, and file size controls.
+Choose video with sound, silent video, or
+audio only. **Save edited copy** renders a separate file to the browser
+library. **Save as** also saves it to a file or downloads it. Keep the tab
+visible while rendering.
 
 Use **Import videos** to bring videos into Recordings. A card's menu shows
 **Properties** for the format, dimensions, duration, size, bitrate, and audio
 track. **Attach to chat** adds the file to the current chat's composer for
 review and sending. Attachments use the existing 10 MB limit. A video in a
 chat can be downloaded or saved to the browser library with **save video**.
+
+Choose **Share video** from a recording's menu to copy an unlisted watch
+link. Anyone with the link can open the player without a chat account.
+Viewers request and verify pieces over WebRTC and can upload pieces they
+already have. **Keep a copy** saves the remaining pieces in browser storage.
+Keep a sharing or watch tab open to serve pieces. A viewer with a saved copy
+can reopen the link and share the video after the publisher leaves. Playback
+requires an online peer with the requested pieces. Select **Stop seeding
+here** to disconnect your own publishing tab. Each link supports up to 12
+peers and one video of up to 1 GB.
 
 In Chromium with a folder picker, **Save recordings to** in Settings > Recordings
 (and in the call's Record tab) can send recordings straight to a chosen folder. Choose
@@ -561,10 +575,11 @@ needed:
 - A new version is downloaded into a new cache in one `addAll`, becomes
   active, old caches are removed, and every tab is told over
   `BroadcastChannel`
-- A tab restarts itself when hidden, or after a minute without input when no
-  unsent files, viewer, or menu are open; drafts survive the restart; the
-  version label shows `v0.1.0 → v0.1.1` meanwhile, a click restarts at once
-  or checks for updates when there is none
+- A tab restarts itself when hidden or after a minute without input, once
+  unsent attachments and open editors allow it. Chat drafts survive the
+  restart. The version button below Settings shows the new version with an
+  up arrow when an update is ready. A click applies that update or checks
+  for updates.
 
 ## Sync
 
@@ -619,6 +634,8 @@ server) with `files/have`, `get`, and `put`.
 | `sync/subscribe`, `pull`, `push` | server      | Worker replica syncs with server                                   |
 | `presence/announce`, `list`      | server      | Peer coordinates and presence                                      |
 | `signal/send`                    | server      | WebRTC signaling to a peer by id                                   |
+| `video/announce`, `leave`        | server      | Unlisted video swarm membership                                    |
+| `video/signal`                   | server      | WebRTC signaling between members of the same video swarm           |
 | `files/missing`, `upload`        | server      | Worker uploads attached files                                      |
 | `files/download`                 | server      | Tab downloads a group chat file                                    |
 | `chat/subscribe`, `pull`, `push` | worker      | Tab replica syncs with worker                                      |

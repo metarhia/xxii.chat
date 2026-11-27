@@ -21,9 +21,16 @@ const MAX_LENGTH = 4096;
 const TEXT_LENGTH = 65536;
 const QUOTE_LENGTH = 300;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_AVATAR = 24 * 1024;
+const PHOTO = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
 const CHECKSUM = /^[0-9a-f]{64}$/;
 const PAIR = /^[\w-]{1,64}_[\w-]{1,64}$/;
 const ICON_PREFIX = /^(\p{Extended_Pictographic}\S*)\s+(.+)$/u;
+
+const isAvatar = (value) =>
+  typeof value === 'string' &&
+  value.length <= MAX_AVATAR &&
+  (value === '' || PHOTO.test(value));
 
 const TYPES = {
   string: (value) => typeof value === 'string' && value.length <= MAX_LENGTH,
@@ -32,6 +39,7 @@ const TYPES = {
   number: (value) => typeof value === 'number',
   boolean: (value) => typeof value === 'boolean',
   checksum: (value) => typeof value === 'string' && CHECKSUM.test(value),
+  avatar: isAvatar,
   size: (value) =>
     Number.isSafeInteger(value) && value > 0 && value <= MAX_FILE_SIZE,
 };
@@ -45,7 +53,7 @@ const CHANNEL = {
 };
 
 const FIELDS = {
-  author: { nick: 'string', created: 'number' },
+  author: { nick: 'string', avatar: 'avatar', created: 'number' },
   chat: CHANNEL,
   feed: CHANNEL,
   folder: { ...CHANNEL, parent: 'string', visibility: VISIBILITY },
@@ -184,10 +192,17 @@ const parseTitle = (text, entity) => {
   return { icon: match[1], name: match[2] };
 };
 
-const saveAuthor = (replica, peer, nick) => {
-  const fields = { nick };
-  if (!replica.get(peer)) fields.created = Date.now();
-  return replica.assign('author', peer, fields);
+const saveAuthor = (replica, peer, nick, avatar = '') => {
+  const author = replica.get(peer);
+  const fields = {};
+  if (!author) fields.created = Date.now();
+  if (author?.nick !== nick) fields.nick = nick;
+  const change = Object.keys(fields).length
+    ? replica.assign('author', peer, fields)
+    : null;
+  return (author?.avatar ?? '') === avatar
+    ? change
+    : replica.assign('author', peer, { avatar });
 };
 
 const createChannel = (replica, entity, channel) => {
@@ -474,6 +489,7 @@ export { MAX_LENGTH, TEXT_LENGTH, QUOTE_LENGTH, MAX_FILE_SIZE, validate, seed };
 export { pairOf, isPair, directUnit };
 export { isFeed, isPost, containerOf, labelOf, parseTitle };
 export { saveAuthor, createChannel, describe };
+export { isAvatar };
 export { createMessage, editMessage, deleteMessage, isDeleted };
 export { createPost, startCall, endCall };
 export { startRecording, stopRecording };

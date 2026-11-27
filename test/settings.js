@@ -60,9 +60,10 @@ test('settings screen', { timeout: 240000 }, async (t) => {
   await startCallServer(t);
   const browser = await launch(t, MEDIA_FLAGS);
 
-  const open = async (url = `${ORIGIN}/`, phone = false) => {
+  const open = async (url = `${ORIGIN}/`, phone = false, browserContextId) => {
     const created = await browser.request('Target.createTarget', {
       url: 'about:blank',
+      browserContextId,
     });
     const attach = { targetId: created.targetId, flatten: true };
     const { sessionId } = await browser.request(
@@ -179,6 +180,72 @@ test('settings screen', { timeout: 240000 }, async (t) => {
       20000,
     );
     await run(first, 'app.closeSettings(); return true;');
+  });
+
+  await step('profile photos persist and sync to contacts', async () => {
+    const { browserContextId } = await browser.request(
+      'Target.createBrowserContext',
+    );
+    const peer = await open(ORIGIN, false, browserContextId);
+    const peerId = await run(first, 'return app.peerId;');
+    const selector = `.contact-item[data-peer="${peerId}"] img`;
+    await run(first, `app.openSettings('profile');`);
+    await run(
+      first,
+      `
+      const canvas = document.createElement('canvas');
+      canvas.width = 240;
+      canvas.height = 160;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#369';
+      ctx.fillRect(0, 0, 240, 160);
+      const photo = await new Promise((resolve) => canvas.toBlob(resolve));
+      const data = new DataTransfer();
+      data.items.add(new File([photo], 'photo.png', { type: 'image/png' }));
+      const input = document.getElementById('profile-photo-input');
+      input.files = data.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    `,
+    );
+    await wait(
+      first,
+      `
+      const photo = document.querySelector('#profile-preview img');
+      return photo?.naturalWidth === 128 && photo.naturalHeight === 128 &&
+        photo.src === document.querySelector('#profile-avatar img')?.src;
+    `,
+    );
+    const otherTab = await open();
+    await wait(
+      otherTab,
+      `
+      const photo = document.querySelector('#profile-avatar img');
+      return photo?.naturalWidth === 128;
+    `,
+    );
+    await wait(
+      peer,
+      `
+      return document.querySelector(${JSON.stringify(selector)})?.naturalWidth
+        === 128;
+    `,
+    );
+    await click(first, '#profile-photo-remove');
+    for (const session of [first, otherTab]) {
+      await wait(
+        session,
+        `
+        return document.getElementById('profile-avatar').textContent === 'AL';
+      `,
+      );
+    }
+    await wait(
+      peer,
+      `return !document.querySelector(${JSON.stringify(selector)});`,
+    );
+    await browser.request('Target.disposeBrowserContext', { browserContextId });
+    await browser.request('Page.close', {}, otherTab);
+    await run(first, 'app.closeSettings();');
   });
 
   await step('every section opens from the list', async () => {
@@ -557,6 +624,45 @@ test('settings screen', { timeout: 240000 }, async (t) => {
   });
 
   await step('About shows the version and the update dot', async () => {
+    await wait(
+      first,
+      `
+      const button = document.getElementById('profile-version');
+      const version = 'v' + app.version;
+      return button.checkVisibility() && button.textContent === version;
+    `,
+    );
+    assert.equal(
+      await run(
+        first,
+        `
+      const request = app.checkNow;
+      let checked = false;
+      app.checkNow = async () => { checked = true; };
+      document.getElementById('profile-version').click();
+      app.checkNow = request;
+      return checked;
+    `,
+      ),
+      true,
+    );
+    assert.equal(
+      await run(
+        first,
+        `
+        const get = (id) => document.getElementById(id);
+        const rect = (id) => get(id).getBoundingClientRect();
+        const version = rect('profile-version');
+        const gear = rect('settings-btn');
+        const recordings = rect('recordings-btn');
+        return recordings.top === gear.top && recordings.right < gear.left &&
+          version.top >= gear.bottom &&
+          Math.abs(version.left + version.width / 2 -
+            gear.left - gear.width / 2) < 1;
+      `,
+      ),
+      true,
+    );
     await run(first, `app.openSettings('about'); return true;`);
     const { version } = await run(first, 'return { version: app.version };');
     await wait(
@@ -590,6 +696,22 @@ test('settings screen', { timeout: 240000 }, async (t) => {
       ),
       'false|Version 9.9.9 is ready|restart now|Settings, update ready|' +
         'Version 9.9.9 is ready · restart',
+    );
+    assert.equal(
+      await run(
+        first,
+        `
+      const restart = app.restart;
+      let started = false;
+      app.restart = async () => { started = true; };
+      const button = document.getElementById('profile-version');
+      button.click();
+      app.restart = restart;
+      return started && button.textContent === 'v9.9.9 ↑' &&
+        button.previousElementSibling.id === 'settings-btn';
+    `,
+      ),
+      true,
     );
     await run(
       first,

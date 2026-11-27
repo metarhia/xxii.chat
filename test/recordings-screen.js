@@ -246,13 +246,7 @@ test('recordings screen', { timeout: 240000 }, async (t) => {
         (control) => [control.tagName, control.getAttribute('aria-label'),
           control.title, control.hidden]);`,
       );
-      const expected = [
-        'Play',
-        'Download',
-        'Save as…',
-        'Delete',
-        'More actions',
-      ];
+      const expected = ['Play', 'Edit', 'Download', 'Delete', 'More actions'];
       assert.deepEqual(
         names.map(([, label]) => label),
         expected,
@@ -263,7 +257,7 @@ test('recordings screen', { timeout: 240000 }, async (t) => {
       }
       assert.deepEqual(
         names.map(([tag]) => tag),
-        ['BUTTON', 'A', 'BUTTON', 'BUTTON', 'BUTTON'],
+        ['BUTTON', 'BUTTON', 'A', 'BUTTON', 'BUTTON'],
       );
       await click(first, `${ROW}[data-id=first] .recording-more`);
       await wait(
@@ -273,6 +267,7 @@ test('recordings screen', { timeout: 240000 }, async (t) => {
       assert.deepEqual(await run(first, MENU_LABELS), [
         'Play',
         'Edit',
+        'Share video',
         'Properties',
         'Attach to chat',
         'Download',
@@ -310,6 +305,7 @@ test('recordings screen', { timeout: 240000 }, async (t) => {
       assert.deepEqual(await run(first, MENU_LABELS), [
         'Play',
         'Edit',
+        'Share video',
         'Properties',
         'Attach to chat',
         'Download',

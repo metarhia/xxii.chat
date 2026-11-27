@@ -82,6 +82,38 @@ const click = (tab, selector) =>
 
 const clickEdit = (tab, name) => click(tab, control(name));
 
+const drag = async (browser, tab, start, end) => {
+  const send = (type, point, buttons) =>
+    browser.request(
+      'Input.dispatchMouseEvent',
+      {
+        type,
+        ...point,
+        buttons,
+        button: 'left',
+        clickCount: 1,
+      },
+      tab.sessionId,
+    );
+  await send('mousePressed', start, 1);
+  await send('mouseMoved', end, 1);
+  await send('mouseReleased', end, 0);
+};
+
+const trackDrag = async (browser, tab, from, to) => {
+  const area = await tab.run(`
+    const track = document.querySelector(${q(control('track'))});
+    track.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const box = track.getBoundingClientRect();
+    return { left: box.left, width: box.width, y: box.top + box.height / 2 };
+  `);
+  const point = (fraction) => ({
+    x: area.left + area.width * fraction,
+    y: area.y,
+  });
+  await drag(browser, tab, point(from), point(to));
+};
+
 const input = (tab, selector, value, type) =>
   tab.run(`
   const input = document.querySelector(${q(selector)});
@@ -178,7 +210,86 @@ test(
     await tab.wait(`return !!document.querySelector(${q(row('original'))});`);
     await edit(tab, 'original');
     await t.test(
-      'trim and two cuts, undo and preview seam seeking',
+      'full-screen editor cuts, zooms and scrolls by mouse',
+      async () => {
+        assert.equal(
+          await tab.run(`
+        const dialog = document.querySelector('.recording-editor');
+        const { top, left, width, height } = dialog.getBoundingClientRect();
+        return top === 0 && left === 0 && width === innerWidth &&
+          height === innerHeight && !app.canRestart();
+      `),
+          true,
+        );
+        await trackDrag(browser, tab, 0.16, 0.29);
+        const first = await tab.run('return app.recordings.editor.pendingCut;');
+        assert.ok(first.end > first.start);
+        await clickEdit(tab, 'apply-cut');
+        await trackDrag(browser, tab, 0.7, 0.55);
+        await clickEdit(tab, 'apply-cut');
+        assert.equal(
+          await tab.run(`
+        return document.querySelectorAll('.recording-edit-cut-range').length;
+      `),
+          2,
+        );
+        await click(tab, `${control('cut-lane')} button:first-child`);
+        const edge = await tab.run(`
+        const handle = document.querySelector('[data-handle="cut-end"]');
+        const box = handle.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height * .7 };
+      `);
+        await drag(browser, tab, edge, { x: edge.x + 28, y: edge.y });
+        assert.ok(
+          await tab.run(`
+        return app.recordings.editor.pendingCut.end > ${first.end};
+      `),
+        );
+        await clickEdit(tab, 'apply-cut');
+        await clickEdit(tab, 'zoom-in');
+        await clickEdit(tab, 'zoom-in');
+        await tab.wait(`
+        return document.querySelector(${q(control('zoom-level'))})
+          .textContent === '4×';
+      `);
+        await input(tab, control('pan'), 650, 'input');
+        const ruler = await tab.run(`
+        const viewport = document.querySelector(${q(control('viewport'))});
+        const ruler = document.querySelector(${q(control('ruler'))});
+        const box = viewport.getBoundingClientRect();
+        const rail = ruler.getBoundingClientRect();
+        const x = box.left + box.width * .5;
+        const expected = (x - rail.left) / rail.width *
+          app.recordings.editor.duration;
+        return { x, y: rail.y + rail.height / 2, expected,
+          scroll: viewport.scrollLeft, width: viewport.scrollWidth };
+      `);
+        assert.ok(ruler.scroll > 0);
+        assert.ok(ruler.width > 3 * ruler.x);
+        const point = { x: ruler.x, y: ruler.y };
+        await drag(browser, tab, point, point);
+        assert.ok(
+          await tab.run(`
+        return Math.abs(app.recordings.editor.time - ${ruler.expected}) < 5;
+      `),
+        );
+        await clickEdit(tab, 'zoom-out');
+        await clickEdit(tab, 'zoom-fit');
+        assert.equal(
+          await tab.run(`
+        return document.querySelector(${q(control('viewport'))}).scrollLeft;
+      `),
+          0,
+        );
+        for (let i = 0; i < 3; i++) await clickEdit(tab, 'undo');
+        assert.equal(
+          await tab.run('return app.recordings.editor.dirty;'),
+          false,
+        );
+      },
+    );
+    await t.test(
+      'play skips applied cuts and the selected cut being adjusted',
       async () => {
         assert.equal(
           await tab.run(`
@@ -203,19 +314,36 @@ test(
           1,
         );
         await clickEdit(tab, 'redo');
-        await clickEdit(tab, 'preview');
-        await input(tab, control('scrub'), 810, 'input');
+        await click(tab, `${control('cuts')} li:nth-child(2) button`);
+        await time(tab, 'cut-end', '00:00:03.410');
+        await tab.run(`
+          const { video } = app.recordings.editor;
+          const play = video.play.bind(video);
+          window.playStarts = [];
+          video.play = () => {
+            playStarts.push(Math.round(video.currentTime * 1000));
+            return play();
+          };
+        `);
+        await input(tab, control('scrub'), 1000, 'input');
+        await clickEdit(tab, 'play');
         await tab.wait(`
-      const video = document.querySelector('.recording-editor video');
-      return !video.seeking && Math.abs(video.currentTime - 1.91) < .01;
-    `);
+          const { nodes, video } = app.recordings.editor;
+          const label = nodes.play.getAttribute('aria-label');
+          return label === 'Play' && video.paused && playStarts.length === 3;
+        `);
+        assert.deepEqual(
+          await tab.run('return playStarts;'),
+          [1000, 1910, 3410],
+        );
         assert.equal(
           await tab.run(`
-      return Number(document.querySelector(${q(control('scrub'))}).max);
-    `),
-          2120,
+          const editor = app.recordings.editor;
+          return Number(editor.nodes.scrub.max) === editor.duration;
+        `),
+          true,
         );
-        await clickEdit(tab, 'preview');
+        await clickEdit(tab, 'cancel-cut');
         await tab.run('history.back();');
         await tab.wait(
           'return Boolean(document.querySelector(".confirm[open]"));',
@@ -231,6 +359,15 @@ test(
       'another tab cannot repair or publish an active save',
       async () => {
         await clickEdit(tab, 'save');
+        assert.equal(
+          await tab.run(`
+            const progress = document.querySelector('[data-edit=progress]');
+            const style = getComputedStyle(progress);
+            return progress.checkVisibility() && style.height === '10px' &&
+              style.borderTopWidth === '0px' && style.borderRadius === '8px';
+          `),
+          true,
+        );
         await tab.wait(`
       const root = await navigator.storage.getDirectory();
       const recordings = await root.getDirectoryHandle('recordings');
@@ -422,12 +559,12 @@ test(
     await time(tab, 'start', text(boundary - 700));
     await time(tab, 'end', text(boundary + 700));
     await cut(tab, text(boundary - 200), text(boundary + 200));
-    await clickEdit(tab, 'preview');
-    await input(tab, control('scrub'), 500, 'input');
+    await input(tab, control('scrub'), boundary - 300, 'input');
+    await clickEdit(tab, 'play');
     await tab.wait(`
     const editor = app.recordings.editor;
     return editor.player.part?.index === 1 && !editor.video.seeking &&
-      Math.abs(editor.video.currentTime - .2) < .01;
+      editor.video.currentTime >= .199 && editor.video.currentTime <= .7;
   `);
     await clickEdit(tab, 'save');
     const id = await waitForCopy(tab);

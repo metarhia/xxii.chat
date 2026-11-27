@@ -6,6 +6,7 @@ import { sendBlob, SerialTask } from './files.js';
 import { VERSION_URL, UPDATE_CHANNEL } from './application.js';
 import { onNotificationMessage, onNotificationClick } from './notifications.js';
 import { isRecordingUrl, serveRecording } from './recording-route.js';
+import { isSharedVideo, sendRange } from './video-range.js';
 
 const CACHE_PREFIX = 'xxii-';
 const META_CACHE = 'xxii-meta';
@@ -76,9 +77,16 @@ const ASSETS = [
   '/recording-edit-render.js',
   '/recording-edit-save.js',
   '/recording-editor.js',
+  '/recording-timeline.js',
   '/video-edit-options.js',
   '/video-edit-silence.js',
   '/video-library.js',
+  '/video-pieces.js',
+  '/video-swarm.js',
+  '/video-range.js',
+  '/video-share.js',
+  '/watch.js',
+  '/watch.html',
   '/recording-mp4.js',
   '/recording-webm.js',
   '/recording-worker.js',
@@ -243,6 +251,9 @@ class CacheManager {
     const url = new URL(request.url);
     if (isRecordingUrl(url)) {
       return void event.respondWith(serveRecording(request, url));
+    }
+    if (isSharedVideo(url)) {
+      return void event.respondWith(sendRange(event, url));
     }
     const respond = async () => {
       try {
